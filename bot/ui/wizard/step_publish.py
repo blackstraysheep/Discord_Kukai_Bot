@@ -129,13 +129,13 @@ class StepPublishView(discord.ui.View):
         cancel_btn.callback = self._cancel
         self.add_item(cancel_btn)
 
-    async def _back(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+    async def _back(self, interaction: discord.Interaction) -> None:
         self.state.step = 4
         await goto_step(interaction, self.state)
 
-    async def _next(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+    async def _next(self, interaction: discord.Interaction) -> None:
         self.state.step = 6
         await goto_step(interaction, self.state)
 
-    async def _cancel(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+    async def _cancel(self, interaction: discord.Interaction) -> None:
         await cancel_wizard(interaction, self.state)
