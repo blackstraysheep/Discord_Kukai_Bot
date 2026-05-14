@@ -25,7 +25,8 @@ def build(state: WizardState) -> tuple[discord.Embed, discord.ui.View]:
     embed.add_field(name="エントリー締切", value=entry_str, inline=False)
     embed.add_field(name="投句締切", value=sub_str, inline=False)
     embed.add_field(name="選句締切", value=selecting_str, inline=False)
-    embed.set_footer(text="書式: YYYY-MM-DD HH:MM（JST）／エントリー有効時はエントリー締切必須")
+    entry_note = "  ⚠️ エントリー有効のため締切必須" if state.entry_enabled and not state.entry_close_at else ""
+    embed.set_footer(text=f"書式: YYYY-MM-DD HH:MM（JST）／投句締切・選句締切は必須{entry_note}")
     return embed, StepScheduleView(state, filled=filled)
 
 

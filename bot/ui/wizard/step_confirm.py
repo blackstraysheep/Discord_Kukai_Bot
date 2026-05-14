@@ -135,6 +135,7 @@ class StepConfirmView(discord.ui.View):
         ch_name = _sanitize_channel_name(state.title)
         channel: discord.abc.GuildChannel | None = None
         created_new_channel = False
+        name_collision_warning: str | None = None
         if state.use_existing_channel:
             if state.existing_channel_id is None:
                 await interaction.edit_original_response(
@@ -151,8 +152,21 @@ class StepConfirmView(discord.ui.View):
                 return
             channel = candidate
         else:
+            existing_same_name = [
+                ch for ch in guild.text_channels if ch.name == ch_name
+            ]
+            if existing_same_name:
+                name_collision_warning = (
+                    f"⚠️ 同名のチャンネル「{ch_name}」が既に存在します（{len(existing_same_name)}件）。"
+                    " 新しいチャンネルを別途作成しました。"
+                )
+            category: discord.CategoryChannel | None = None
+            if state.category_id:
+                cat = guild.get_channel(state.category_id)
+                if isinstance(cat, discord.CategoryChannel):
+                    category = cat
             try:
-                channel = await guild.create_text_channel(ch_name)
+                channel = await guild.create_text_channel(ch_name, category=category)
                 created_new_channel = True
             except discord.Forbidden:
                 await interaction.edit_original_response(
@@ -234,6 +248,8 @@ class StepConfirmView(discord.ui.View):
             f"`/kukai proceed kukai_id:{kukai_id}` で受付を開始できます。\n"
             "このウィザードは完了しました（再操作不可）。"
         )
+        if name_collision_warning:
+            success_description += f"\n\n{name_collision_warning}"
         if schedule_warning:
             success_description += f"\n\n⚠️ {schedule_warning}"
 

@@ -381,6 +381,123 @@ async def delete_template(session: AsyncSession, guild_id: int, template_id: int
     await session.delete(template)
 
 
+async def rename_template(
+    session: AsyncSession,
+    guild_id: int,
+    template_id: int,
+    new_name: str,
+) -> SelectRuleTemplate:
+    new_name = new_name.strip()
+    if not new_name:
+        raise ValidationError("プリセット名は空にできません。")
+    if len(new_name) > 100:
+        raise ValidationError("プリセット名は100文字以内にしてください。")
+    conflict = await session.execute(
+        select(SelectRuleTemplate).where(
+            SelectRuleTemplate.guild_id == guild_id,
+            SelectRuleTemplate.name == new_name,
+        )
+    )
+    if conflict.scalar_one_or_none() is not None:
+        raise ValidationError(f"「{new_name}」という名前のプリセットが既に存在します。")
+    template = await get_template(session, guild_id, template_id)
+    template.name = new_name
+    await session.flush()
+    return template
+
+
+async def set_template_points(
+    session: AsyncSession,
+    guild_id: int,
+    template_id: int,
+    points_enabled: bool,
+) -> SelectRuleTemplate:
+    template = await get_template(session, guild_id, template_id)
+    _, specs = deserialize_template_payload(template.definition_json)
+    if not points_enabled:
+        for spec in specs:
+            spec["point"] = 0
+    template.definition_json = serialize_template_specs(specs, points_enabled=points_enabled)
+    await session.flush()
+    return template
+
+
+async def add_or_update_label(
+    session: AsyncSession,
+    *,
+    guild_id: int,
+    template_id: int,
+    label: str,
+    point: int,
+) -> SelectRuleTemplate:
+    """Add or update a label in a preset with only name + point (no count/comment)."""
+    label = label.strip()
+    if not label:
+        raise ValidationError("ラベル名は必須です。")
+    if len(label) > 50:
+        raise ValidationError("ラベル名は50文字以内にしてください。")
+    if label == AUTHOR_COMMENT_LABEL:
+        raise ValidationError("「作者コメント」は予約済みのためプリセット登録できません。")
+
+    template = await get_template(session, guild_id, template_id)
+    points_enabled, specs = deserialize_template_payload(template.definition_json)
+
+    if not points_enabled:
+        point = 0
+
+    updated = False
+    for spec in specs:
+        if spec["label"] == label:
+            spec["point"] = point
+            updated = True
+            break
+    if not updated:
+        specs.append({"label": label, "point": point, "min_count": 0, "max_count": None, "comment_mode": "none"})
+
+    template.definition_json = serialize_template_specs(specs, points_enabled=points_enabled)
+    await session.flush()
+    return template
+
+
+async def rename_label(
+    session: AsyncSession,
+    *,
+    guild_id: int,
+    template_id: int,
+    old_label: str,
+    new_label: str,
+    point: int | None = None,
+) -> SelectRuleTemplate:
+    old_label = old_label.strip()
+    new_label = new_label.strip()
+    if not new_label:
+        raise ValidationError("新しいラベル名は必須です。")
+    if len(new_label) > 50:
+        raise ValidationError("ラベル名は50文字以内にしてください。")
+    if new_label == AUTHOR_COMMENT_LABEL:
+        raise ValidationError("「作者コメント」は予約済みのため使用できません。")
+
+    template = await get_template(session, guild_id, template_id)
+    points_enabled, specs = deserialize_template_payload(template.definition_json)
+
+    found = False
+    for spec in specs:
+        if spec["label"] == old_label:
+            if new_label != old_label and any(s["label"] == new_label for s in specs):
+                raise ValidationError(f"「{new_label}」というラベルが既に存在します。")
+            spec["label"] = new_label
+            if point is not None:
+                spec["point"] = 0 if not points_enabled else point
+            found = True
+            break
+    if not found:
+        raise ValidationError(f"ラベル「{old_label}」が見つかりません。")
+
+    template.definition_json = serialize_template_specs(specs, points_enabled=points_enabled)
+    await session.flush()
+    return template
+
+
 async def remove_template_label(
     session: AsyncSession,
     *,

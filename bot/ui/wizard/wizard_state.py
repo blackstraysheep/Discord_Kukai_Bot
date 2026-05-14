@@ -34,8 +34,6 @@ class WizardState:
     # Step 4: Submission
     submission_min: int = 1
     submission_max: Optional[int] = 3
-    submission_mode: str = "manual"
-    selecting_mode: str = "manual"
     submission_overflow: bool = False
 
     # Step 5: Select rule
@@ -47,10 +45,15 @@ class WizardState:
     selected_select_label: str = ""
 
     # Step 6: Publish / Result
+    submission_mode: str = "manual"
+    selecting_mode: str = "manual"
     publish_mode: str = "manual"
     result_mode: str = "manual"
     author_reveal: bool = True
     author_reveal_zero: bool = True
+
+    # Step 1 extras
+    category_id: Optional[int] = None
 
     @property
     def is_expired(self) -> bool:

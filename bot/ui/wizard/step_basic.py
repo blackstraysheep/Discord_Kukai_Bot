@@ -20,14 +20,18 @@ def build(state: WizardState) -> tuple[discord.Embed, discord.ui.View]:
         embed.add_field(name="題（お題）", value=state.theme, inline=True)
     if state.description:
         embed.add_field(name="説明", value=state.description[:200], inline=False)
-    channel_mode = "既存チャンネルを使う" if state.use_existing_channel else "新規チャンネルを作成"
-    channel_value = channel_mode
     if state.use_existing_channel:
-        channel_value += (
-            f"\n選択: <#{state.existing_channel_id}>"
+        channel_value = (
+            f"既存チャンネル: <#{state.existing_channel_id}>"
             if state.existing_channel_id
-            else "\n選択: （未選択）"
+            else "既存チャンネル: （未選択）"
         )
+    else:
+        channel_value = "新規チャンネルを作成"
+        if state.category_id:
+            channel_value += f"\nカテゴリ: <#{state.category_id}>"
+        else:
+            channel_value += "\nカテゴリ: サーバーのルート"
     embed.add_field(name="句会チャンネル", value=channel_value, inline=False)
     embed.set_footer(text="✅ 題名とチャンネル設定がそろうと次へ進めます。")
     return embed, StepBasicView(state, filled=filled)
@@ -47,13 +51,16 @@ class StepBasicView(discord.ui.View):
         self.add_item(fill_btn)
 
         self.add_item(_ChannelModeSelect(state))
-        self.add_item(_ExistingChannelSelect(state))
+        if state.use_existing_channel:
+            self.add_item(_ExistingChannelSelect(state))
+        else:
+            self.add_item(_CategorySelect(state))
 
         next_btn = discord.ui.Button(
             label="次へ ➜",
             style=discord.ButtonStyle.success,
             disabled=not filled,
-            row=1,
+            row=3,
         )
         next_btn.callback = self._next
         self.add_item(next_btn)
@@ -61,7 +68,7 @@ class StepBasicView(discord.ui.View):
         cancel_btn = discord.ui.Button(
             label="❌ キャンセル",
             style=discord.ButtonStyle.danger,
-            row=1,
+            row=3,
         )
         cancel_btn.callback = self._cancel
         self.add_item(cancel_btn)
@@ -101,6 +108,8 @@ class _ChannelModeSelect(discord.ui.Select):
         self.state.use_existing_channel = self.values[0] == "existing"
         if not self.state.use_existing_channel:
             self.state.existing_channel_id = None
+        else:
+            self.state.category_id = None
         set_wizard(self.state)
         embed, view = build(self.state)
         await interaction.response.edit_message(embed=embed, view=view)
@@ -114,13 +123,30 @@ class _ExistingChannelSelect(discord.ui.ChannelSelect):
             channel_types=[discord.ChannelType.text],
             min_values=1,
             max_values=1,
-            disabled=not state.use_existing_channel,
             row=2,
         )
 
     async def callback(self, interaction: discord.Interaction) -> None:
         channel = self.values[0]
         self.state.existing_channel_id = int(channel.id)
+        set_wizard(self.state)
+        embed, view = build(self.state)
+        await interaction.response.edit_message(embed=embed, view=view)
+
+
+class _CategorySelect(discord.ui.ChannelSelect):
+    def __init__(self, state: WizardState) -> None:
+        self.state = state
+        super().__init__(
+            placeholder="カテゴリを選択（省略可: ルートに作成）",
+            channel_types=[discord.ChannelType.category],
+            min_values=0,
+            max_values=1,
+            row=2,
+        )
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        self.state.category_id = int(self.values[0].id) if self.values else None
         set_wizard(self.state)
         embed, view = build(self.state)
         await interaction.response.edit_message(embed=embed, view=view)
