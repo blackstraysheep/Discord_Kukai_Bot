@@ -27,6 +27,7 @@ class KukaiBot(commands.Bot):
         intents.members = True
         super().__init__(command_prefix="!", intents=intents)
         self.settings = get_settings()
+        self._guild_sync_done = False
 
     async def setup_hook(self) -> None:
         init_db(self.settings.database_url)
@@ -59,6 +60,22 @@ class KukaiBot(commands.Bot):
     async def on_ready(self) -> None:
         assert self.user is not None
         logger.info("Logged in as %s (ID: %d)", self.user, self.user.id)
+        if self.settings.dev_guild_id_list or self._guild_sync_done:
+            return
+
+        synced = 0
+        failed = 0
+        for guild in self.guilds:
+            try:
+                self.tree.copy_global_to(guild=guild)
+                await self.tree.sync(guild=guild)
+                synced += 1
+            except Exception:
+                failed += 1
+                logger.exception("Failed to sync commands to guild %d", guild.id)
+
+        self._guild_sync_done = True
+        logger.info("Synced commands to connected guilds: success=%d failed=%d", synced, failed)
 
     async def on_app_command_error(
         self, interaction: discord.Interaction, error: Exception

@@ -201,25 +201,51 @@ class StepPublishView(discord.ui.View):
         self.add_item(_SelectingModeSelect(state))
         self.add_item(_ResultModeSelect(state))
         self.add_item(_AuthorRevealSelect(state))
-        self.add_item(_AuthorRevealZeroSelect(state))
+
+        zero_label = (
+            "0点以下作者: 公開"
+            if state.author_reveal and state.author_reveal_zero
+            else "0点以下作者: 非公開"
+        )
+        if not state.author_reveal:
+            zero_label = "0点以下作者: 適用外"
+        zero_btn = discord.ui.Button(
+            label=zero_label,
+            style=discord.ButtonStyle.primary,
+            row=4,
+            disabled=not state.author_reveal,
+        )
+        zero_btn.callback = self._toggle_author_reveal_zero
+        self.add_item(zero_btn)
 
         back_btn = discord.ui.Button(
-            label="← 戻る", style=discord.ButtonStyle.secondary, row=5
+            label="← 戻る", style=discord.ButtonStyle.secondary, row=4
         )
         back_btn.callback = self._back
         self.add_item(back_btn)
 
         next_btn = discord.ui.Button(
-            label="次へ ➜", style=discord.ButtonStyle.success, row=5
+            label="次へ ➜", style=discord.ButtonStyle.success, row=4
         )
         next_btn.callback = self._next
         self.add_item(next_btn)
 
         cancel_btn = discord.ui.Button(
-            label="❌ キャンセル", style=discord.ButtonStyle.danger, row=5
+            label="❌ キャンセル", style=discord.ButtonStyle.danger, row=4
         )
         cancel_btn.callback = self._cancel
         self.add_item(cancel_btn)
+
+    async def _toggle_author_reveal_zero(self, interaction: discord.Interaction) -> None:
+        if not self.state.author_reveal:
+            await interaction.response.send_message(
+                "作者非公開時は0点以下作者の設定は変更できません。", ephemeral=True
+            )
+            return
+        self.state.author_reveal_zero = not self.state.author_reveal_zero
+        set_wizard(self.state)
+        embed, view = build(self.state)
+        await interaction.response.edit_message(embed=embed, view=view)
 
     async def _back(self, interaction: discord.Interaction) -> None:
         self.state.step = 5
