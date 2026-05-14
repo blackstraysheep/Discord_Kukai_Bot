@@ -256,11 +256,17 @@ class KukaiCog(commands.Cog):
             pub_embed.set_footer(text=f"全 {len(published)} 句　|　句会 ID: {kukai.id}")
 
             msg_id: int | None = None
+            publish_warning: str | None = None
             if kukai.channel_id:
                 channel = interaction.guild.get_channel(kukai.channel_id)
                 if isinstance(channel, discord.TextChannel):
-                    msg = await channel.send(embed=pub_embed)
-                    msg_id = msg.id
+                    try:
+                        msg = await channel.send(embed=pub_embed)
+                        msg_id = msg.id
+                    except discord.Forbidden:
+                        publish_warning = (
+                            "公開チャンネルへの送信権限がないため、句会チャンネルへの投稿に失敗しました。"
+                        )
 
             if msg_id:
                 async with get_session() as session2:
@@ -268,9 +274,12 @@ class KukaiCog(commands.Cog):
                     kukai2.submission_message_id = msg_id
 
             state_ja = STATE_LABEL.get(str(new_state), str(new_state))
+            description = f"{len(published)}句を公開しました。\n状態: **{state_ja}**"
+            if publish_warning:
+                description += f"\n⚠️ {publish_warning}"
             await interaction.response.send_message(
                 embed=discord.Embed(
-                    description=f"{len(published)}句を公開しました。\n状態: **{state_ja}**",
+                    description=description,
                     color=COLOR_SUCCESS,
                 ),
                 ephemeral=True,

@@ -8,7 +8,7 @@
 
 Discord完結型句会管理Bot。Python 3.13 / discord.py 2.x / SQLAlchemy 2.x async / aiosqlite / APScheduler 3.x。
 
-**現在の状態**: Phase 1〜9(コア) 完了。テスト 56件すべてパス。
+**現在の状態**: Phase 1〜10(品質強化の一部) 完了。テスト 60件すべてパス。
 
 ---
 
@@ -121,8 +121,9 @@ tests/test_submission_service.py 15件  ✅
 tests/test_vote_service.py       11件  ✅
 tests/test_result_service.py      6件  ✅
 tests/test_phase9_services.py     4件  ✅
+tests/test_notification_phase10.py 4件 ✅
                               -------
-合計                            56件  全パス
+合計                            60件  全パス
 ```
 
 実行: `py -m pytest tests/ -v`
@@ -228,12 +229,12 @@ kukai_bot/
 
 **統合テスト・品質**
 - Discord UIのE2Eテストは手動確認（pytest-asyncioの範囲外）
-- サービス層のテストカバレッジ補強
-  - notification_service のジョブ登録テスト（APSchedulerをモック）
-  - deadline_job の自動進行ロジックテスト
+- サービス層のテストカバレッジ補強 ✅（一部完了）
+  - notification_service のジョブ登録/解除テスト（APSchedulerモック）を追加
+  - deadline_job の自動進行ロジック（full_auto / semi_auto不足時通知）テストを追加
 - エラーハンドリングの網羅確認
   - ServiceErrorのすべてのサブクラスがCogでキャッチされているか
-  - Discordの権限不足（Forbidden）エラーのフォールバック
+  - Discordの権限不足（Forbidden）エラーのフォールバック ✅（`/kukai publish` の公開投稿失敗時）
 
 **未実装のスタブ**
 - `bot/ui/wizard/step_vote_rule.py` — ウィザード内での投票ラベルカスタマイズ
