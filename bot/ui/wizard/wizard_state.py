@@ -21,15 +21,15 @@ class WizardState:
     use_existing_channel: bool = False
     existing_channel_id: Optional[int] = None
 
-    # Step 2: Schedule
-    entry_close_at: Optional[datetime] = None
-    submission_close_at: Optional[datetime] = None
-    selecting_close_at: Optional[datetime] = None
-
-    # Step 3: Entry
+    # Step 2: Entry
     entry_enabled: bool = True
     entry_approval: bool = False
     min_participants: int = 0
+
+    # Step 3: Schedule
+    entry_close_at: Optional[datetime] = None
+    submission_close_at: Optional[datetime] = None
+    selecting_close_at: Optional[datetime] = None
 
     # Step 4: Submission
     submission_min: int = 1
@@ -54,6 +54,7 @@ class WizardState:
 
     # Step 1 extras
     category_id: Optional[int] = None
+    channel_name: str = ""
 
     @property
     def is_expired(self) -> bool:

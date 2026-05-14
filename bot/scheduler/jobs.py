@@ -191,12 +191,19 @@ async def deadline_job(kukai_id: int, event_type: str) -> None:
 
                 if should_advance:
                     await kukai_service.proceed(session, kukai)
+                    await kukai_service.proceed(session, kukai)
                     logger.info(
-                        "deadline_job: auto-advanced kukai %d (selecting_close)", kukai_id
+                        "deadline_job: auto-advanced kukai %d to RESULTS (selecting_close)", kukai_id
                     )
+                    result_count, result_warning = await _auto_publish_result_list(session, kukai)
+                    message = "選句期間が終了したため、結果を公開しました。"
+                    if result_count is not None:
+                        message += f"\n公開結果数: {result_count}句"
+                    if result_warning:
+                        message += f"\n⚠️ {result_warning}"
                     await _notify_channel(
                         _bot, kukai,
-                        "選句期間が終了しました。次のステップに進んでください。",
+                        message,
                     )
                 else:
                     await _notify_admins(
@@ -372,3 +379,68 @@ async def _auto_publish_submission_list(session, kukai) -> None:
 
     if first_message_id is not None:
         kukai.submission_message_id = first_message_id
+
+
+async def _auto_publish_result_list(session, kukai) -> tuple[int | None, str | None]:
+    """Publish result embeds to channel and store the first message ID."""
+    import discord
+
+    from bot.repositories import select_repo
+    from bot.services import result_service
+    from bot.state_machine.states import KukaiState
+    from bot.utils.discord_retry import send_with_retry
+    from bot.utils.result_publish import build_result_publish_embeds
+
+    if KukaiState.from_value(kukai.state) != KukaiState.RESULTS:
+        return None, "句会状態が結果公開中ではないため、結果投稿をスキップしました。"
+
+    results = await result_service.compute_results(session, kukai)
+    if not results:
+        return 0, "集計対象の投句がありません。"
+    overall_comments = await select_repo.list_overall_comments(session, kukai.id)
+
+    if not kukai.channel_id:
+        logger.warning(
+            "_auto_publish_result_list: no channel set (kukai_id=%d)",
+            kukai.id,
+        )
+        return len(results), "公開先チャンネルが未設定です。"
+
+    guild = _bot.get_guild(kukai.guild_id) if _bot else None
+    if not guild:
+        logger.warning(
+            "_auto_publish_result_list: guild not found (kukai_id=%d, guild_id=%d)",
+            kukai.id,
+            kukai.guild_id,
+        )
+        return len(results), "サーバーが見つかりません。"
+
+    channel = guild.get_channel(kukai.channel_id)
+    if not isinstance(channel, discord.TextChannel):
+        logger.warning(
+            "_auto_publish_result_list: text channel not found (kukai_id=%d, channel_id=%d)",
+            kukai.id,
+            kukai.channel_id,
+        )
+        return len(results), "公開先テキストチャンネルが見つかりません。"
+
+    embeds = build_result_publish_embeds(kukai, results, overall_comments, guild)
+    first_message_id: int | None = None
+    try:
+        for index, embed in enumerate(embeds):
+            sent = await send_with_retry(lambda e=embed: channel.send(embed=e))
+            if index == 0:
+                first_message_id = sent.id
+            if index < len(embeds) - 1:
+                await asyncio.sleep(0.35)
+    except Exception as error:
+        logger.warning(
+            "_auto_publish_result_list: failed to post result (kukai_id=%d): %s",
+            kukai.id,
+            error,
+        )
+        return len(results), "結果メッセージ送信に失敗しました。"
+
+    if first_message_id is not None:
+        kukai.result_message_id = first_message_id
+    return len(results), None

@@ -25,7 +25,6 @@ _state_machine = StateMachine()
 _SUBMISSION_LOCKED_STATES = {
     KukaiState.SELECTING_OPEN,
     KukaiState.SELECTING_CLOSED,
-    KukaiState.WAITING_RESULTS,
     KukaiState.RESULTS,
     KukaiState.ENDED,
     KukaiState.CANCELLED,

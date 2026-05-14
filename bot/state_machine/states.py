@@ -35,7 +35,6 @@ class KukaiState(StrEnum):
             cls.WAITING_PUBLISH,
             cls.SELECTING_OPEN,
             cls.SELECTING_CLOSED,
-            cls.WAITING_RESULTS,
             cls.RESULTS,
         }
 

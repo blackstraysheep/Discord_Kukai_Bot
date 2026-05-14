@@ -15,7 +15,6 @@ def build(state: WizardState) -> tuple[discord.Embed, discord.ui.View]:
     max_label = "∞" if state.submission_max is None else str(state.submission_max)
     embed.add_field(name="最低投句数", value=str(state.submission_min), inline=True)
     embed.add_field(name="最大投句数", value=max_label, inline=True)
-    embed.set_footer(text="進行モードは次ステップで設定します。")
     return embed, StepSubmissionView(state)
 
 

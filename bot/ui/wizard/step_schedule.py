@@ -1,4 +1,4 @@
-"""Wizard step 2: Schedule (entry_close, submission_close, selecting_close)."""
+"""Wizard step 3: Schedule (entry_close, submission_close, selecting_close)."""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ from bot.utils.datetime_utils import format_jst, parse_datetime
 def build(state: WizardState) -> tuple[discord.Embed, discord.ui.View]:
     filled = bool(state.submission_close_at and state.selecting_close_at)
     embed = discord.Embed(
-        title=f"ステップ 2/{STEP_COUNT}: 日程",
+        title=f"ステップ 3/{STEP_COUNT}: 締切設定",
         color=discord.Color.blurple(),
     )
     entry_str = format_jst(state.entry_close_at) if state.entry_close_at else "（未入力）"
@@ -72,11 +72,11 @@ class StepScheduleView(discord.ui.View):
         await interaction.response.send_modal(StepScheduleModal(self.state))
 
     async def _back(self, interaction: discord.Interaction) -> None:
-        self.state.step = 1
+        self.state.step = 2
         await goto_step(interaction, self.state)
 
     async def _next(self, interaction: discord.Interaction) -> None:
-        self.state.step = 3
+        self.state.step = 4
         await goto_step(interaction, self.state)
 
     async def _cancel(self, interaction: discord.Interaction) -> None:

@@ -3,12 +3,12 @@
 The standard forward path:
   draft → entry_open → entry_closed → submission_open → submission_closed
         → waiting_publish → selecting_open → selecting_closed
-        → waiting_results → results → ended
+        → results → ended
 
 Shortcuts driven by kukai settings:
   - entry_enabled=False  : draft → submission_open (skip entry states)
   - publish_mode='auto'  : submission_closed → selecting_open (skip waiting_publish)
-  - result_mode='auto'   : selecting_closed → results (skip waiting_results)
+  - selecting_* 完了後    : selecting_closed → results（waiting_results は廃止）
 
 Admins can also jump to any non-paused state via /kukai proceed.
 """
@@ -24,8 +24,7 @@ FORWARD: dict[KukaiState, KukaiState] = {
     KukaiState.SUBMISSION_CLOSED: KukaiState.WAITING_PUBLISH,
     KukaiState.WAITING_PUBLISH: KukaiState.SELECTING_OPEN,
     KukaiState.SELECTING_OPEN: KukaiState.SELECTING_CLOSED,
-    KukaiState.SELECTING_CLOSED: KukaiState.WAITING_RESULTS,
-    KukaiState.WAITING_RESULTS: KukaiState.RESULTS,
+    KukaiState.SELECTING_CLOSED: KukaiState.RESULTS,
     KukaiState.RESULTS: KukaiState.ENDED,
 }
 
@@ -53,7 +52,6 @@ def next_state(kukai) -> KukaiState:
         )
 
     if current == KukaiState.SELECTING_CLOSED:
-        # Skip waiting_results if auto-result is configured
-        return KukaiState.RESULTS if kukai.result_mode == "auto" else KukaiState.WAITING_RESULTS
+        return KukaiState.RESULTS
 
     return FORWARD.get(current, current)

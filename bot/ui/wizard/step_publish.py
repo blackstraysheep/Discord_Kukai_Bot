@@ -8,11 +8,16 @@ from bot.ui.wizard.base import STEP_COUNT, cancel_wizard, goto_step
 from bot.ui.wizard.wizard_state import WizardState, set_wizard
 
 
+def _sync_result_mode(state: WizardState) -> None:
+    state.result_mode = "manual" if state.selecting_mode == "manual" else "auto"
+
+
 def build(state: WizardState) -> tuple[discord.Embed, discord.ui.View]:
+    _sync_result_mode(state)
     mode_ja = {"manual": "手動", "semi_auto": "半自動", "full_auto": "全自動"}
     submission_mode = mode_ja.get(state.submission_mode, state.submission_mode)
     selecting_mode = mode_ja.get(state.selecting_mode, state.selecting_mode)
-    result_str = "手動" if state.result_mode == "manual" else "自動（選句締切後に自動集計）"
+    result_str = "手動" if state.result_mode == "manual" else "自動（選句進行に連動）"
     reveal_str = "公開" if state.author_reveal else "非公開"
     if state.author_reveal:
         zero_reveal_str = "公開" if state.author_reveal_zero else "非公開"
@@ -24,7 +29,7 @@ def build(state: WizardState) -> tuple[discord.Embed, discord.ui.View]:
     )
     embed.add_field(name="投句進行モード", value=submission_mode, inline=True)
     embed.add_field(name="選句進行モード", value=selecting_mode, inline=True)
-    embed.add_field(name="結果集計モード", value=result_str, inline=False)
+    embed.add_field(name="結果公開モード", value=result_str, inline=False)
     embed.add_field(name="作者公開", value=reveal_str, inline=True)
     embed.add_field(name="0点以下作者", value=zero_reveal_str, inline=True)
     return embed, StepPublishView(state)
@@ -89,33 +94,7 @@ class _SelectingModeSelect(discord.ui.Select):
 
     async def callback(self, interaction: discord.Interaction) -> None:
         self.state.selecting_mode = self.values[0]
-        set_wizard(self.state)
-        embed, view = build(self.state)
-        await interaction.response.edit_message(embed=embed, view=view)
-
-
-class _ResultModeSelect(discord.ui.Select):
-    def __init__(self, state: WizardState) -> None:
-        self.state = state
-        super().__init__(
-            placeholder="結果集計モード",
-            options=[
-                discord.SelectOption(
-                    label="手動（管理者が手動で結果公開）",
-                    value="manual",
-                    default=state.result_mode == "manual",
-                ),
-                discord.SelectOption(
-                    label="自動（選句締切後に自動で結果公開）",
-                    value="auto",
-                    default=state.result_mode == "auto",
-                ),
-            ],
-            row=2,
-        )
-
-    async def callback(self, interaction: discord.Interaction) -> None:
-        self.state.result_mode = self.values[0]
+        _sync_result_mode(self.state)
         set_wizard(self.state)
         embed, view = build(self.state)
         await interaction.response.edit_message(embed=embed, view=view)
@@ -138,7 +117,7 @@ class _AuthorRevealSelect(discord.ui.Select):
                     default=not state.author_reveal,
                 ),
             ],
-            row=3,
+            row=2,
         )
 
     async def callback(self, interaction: discord.Interaction) -> None:
@@ -178,7 +157,7 @@ class _AuthorRevealZeroSelect(discord.ui.Select):
             placeholder="0点以下作者の公開",
             disabled=not state.author_reveal,
             options=options,
-            row=4,
+            row=3,
         )
 
     async def callback(self, interaction: discord.Interaction) -> None:
@@ -199,7 +178,6 @@ class StepPublishView(discord.ui.View):
         self.state = state
         self.add_item(_SubmissionModeSelect(state))
         self.add_item(_SelectingModeSelect(state))
-        self.add_item(_ResultModeSelect(state))
         self.add_item(_AuthorRevealSelect(state))
 
         zero_label = (
@@ -212,26 +190,26 @@ class StepPublishView(discord.ui.View):
         zero_btn = discord.ui.Button(
             label=zero_label,
             style=discord.ButtonStyle.primary,
-            row=4,
+            row=3,
             disabled=not state.author_reveal,
         )
         zero_btn.callback = self._toggle_author_reveal_zero
         self.add_item(zero_btn)
 
         back_btn = discord.ui.Button(
-            label="← 戻る", style=discord.ButtonStyle.secondary, row=4
+            label="← 戻る", style=discord.ButtonStyle.secondary, row=3
         )
         back_btn.callback = self._back
         self.add_item(back_btn)
 
         next_btn = discord.ui.Button(
-            label="次へ ➜", style=discord.ButtonStyle.success, row=4
+            label="次へ ➜", style=discord.ButtonStyle.success, row=3
         )
         next_btn.callback = self._next
         self.add_item(next_btn)
 
         cancel_btn = discord.ui.Button(
-            label="❌ キャンセル", style=discord.ButtonStyle.danger, row=4
+            label="❌ キャンセル", style=discord.ButtonStyle.danger, row=3
         )
         cancel_btn.callback = self._cancel
         self.add_item(cancel_btn)

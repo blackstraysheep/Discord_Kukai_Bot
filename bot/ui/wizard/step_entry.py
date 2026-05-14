@@ -1,4 +1,4 @@
-"""Wizard step 3: Entry settings."""
+"""Wizard step 2: Entry settings."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from bot.ui.wizard.wizard_state import WizardState, set_wizard
 
 def build(state: WizardState) -> tuple[discord.Embed, discord.ui.View]:
     embed = discord.Embed(
-        title=f"ステップ 3/{STEP_COUNT}: エントリー設定",
+        title=f"ステップ 2/{STEP_COUNT}: エントリー設定",
         color=discord.Color.blurple(),
     )
     enabled_str = "✅ 有効（エントリー制）" if state.entry_enabled else "🚫 無効（全員参加可）"
@@ -20,7 +20,7 @@ def build(state: WizardState) -> tuple[discord.Embed, discord.ui.View]:
         approval_str = "（エントリー無効時は常に不要）"
     embed.add_field(name="エントリー機能", value=enabled_str, inline=False)
     embed.add_field(name="承認制", value=approval_str, inline=True)
-    embed.set_footer(text="選句後「次へ」で進めます。")
+    embed.set_footer(text="設定後「次へ」で締切設定に進みます。")
     return embed, StepEntryView(state)
 
 
@@ -112,17 +112,11 @@ class StepEntryView(discord.ui.View):
         self.add_item(cancel_btn)
 
     async def _back(self, interaction: discord.Interaction) -> None:
-        self.state.step = 2
+        self.state.step = 1
         await goto_step(interaction, self.state)
 
     async def _next(self, interaction: discord.Interaction) -> None:
-        if self.state.entry_enabled and self.state.entry_close_at is None:
-            await interaction.response.send_message(
-                "エントリーを有効にする場合は、先に日程ステップでエントリー締切を設定してください。",
-                ephemeral=True,
-            )
-            return
-        self.state.step = 4
+        self.state.step = 3
         await goto_step(interaction, self.state)
 
     async def _cancel(self, interaction: discord.Interaction) -> None:

@@ -9,8 +9,8 @@ from bot.ui.wizard.wizard_state import WizardState, clear_wizard
 STEP_COUNT = 7
 STEP_NAMES = {
     1: "基本情報",
-    2: "日程",
-    3: "エントリー設定",
+    2: "エントリー設定",
+    3: "締切設定",
     4: "投句設定",
     5: "選句設定",
     6: "公開・結果設定",
@@ -41,9 +41,9 @@ def _make_step(state: WizardState) -> tuple[discord.Embed, discord.ui.View]:
     if state.step == 1:
         from bot.ui.wizard.step_basic import build
     elif state.step == 2:
-        from bot.ui.wizard.step_schedule import build
-    elif state.step == 3:
         from bot.ui.wizard.step_entry import build
+    elif state.step == 3:
+        from bot.ui.wizard.step_schedule import build
     elif state.step == 4:
         from bot.ui.wizard.step_submission import build
     elif state.step == 5:

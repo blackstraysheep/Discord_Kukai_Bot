@@ -80,7 +80,7 @@ class CheckCog(commands.Cog):
         if state in {
             KukaiState.SUBMISSION_OPEN, KukaiState.SUBMISSION_CLOSED,
             KukaiState.WAITING_PUBLISH, KukaiState.SELECTING_OPEN,
-            KukaiState.SELECTING_CLOSED, KukaiState.WAITING_RESULTS,
+            KukaiState.SELECTING_CLOSED,
             KukaiState.RESULTS, KukaiState.ENDED,
         }:
             if subs:
@@ -96,7 +96,7 @@ class CheckCog(commands.Cog):
         # Select field
         if state in {
             KukaiState.SELECTING_OPEN, KukaiState.SELECTING_CLOSED,
-            KukaiState.WAITING_RESULTS, KukaiState.RESULTS, KukaiState.ENDED,
+            KukaiState.RESULTS, KukaiState.ENDED,
         }:
             if selects:
                 lines = []

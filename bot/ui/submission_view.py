@@ -15,6 +15,8 @@ from bot.utils.text import discord_safe
 if TYPE_CHECKING:
     from bot.models.submission import Submission
 
+GUI_BULK_LIMIT = 5
+
 
 def _submissions_embed(kukai, subs: list[Submission]) -> discord.Embed:
     count = len(subs)
@@ -37,97 +39,34 @@ def _submissions_embed(kukai, subs: list[Submission]) -> discord.Embed:
         value=f"**{count}** / {'∞' if limit is None else limit}{'　⚠️ 上限超過' if over else ''}",
         inline=True,
     )
-    embed.set_footer(text=f"句会 ID: {kukai.id}　|　最小: {kukai.submission_min}句")
+    footer = f"句会 ID: {kukai.id}　|　最小: {kukai.submission_min}句"
+    if kukai.submission_max is None or kukai.submission_max > GUI_BULK_LIMIT:
+        footer += f"　|　GUIでは一度に{GUI_BULK_LIMIT}句まで追加できます"
+    embed.set_footer(text=footer)
     return embed
 
 
-# ── Add modal ────────────────────────────────────────────────────────────
-
-class SubmitAddModal(discord.ui.Modal, title="投句（追加）"):
-    def __init__(self, kukai_id: int) -> None:
-        super().__init__()
+class SubmitBulkModal(discord.ui.Modal):
+    def __init__(self, kukai_id: int, slots: int) -> None:
+        super().__init__(title="投句（追加）")
         self.kukai_id = kukai_id
-        self._text = discord.ui.TextInput(
-            label="俳句",
-            placeholder="一句入力してください",
-            style=discord.TextStyle.paragraph,
-            max_length=500,
-        )
-        self.add_item(self._text)
-
-    async def on_submit(self, interaction: discord.Interaction) -> None:
-        await interaction.response.defer(ephemeral=True)
-        assert interaction.guild is not None
-        try:
-            async with get_session() as session:
-                kukai = await kukai_service.get_kukai(session, self.kukai_id, interaction.guild.id)
-                sub, over_limit = await submission_service.submit(
-                    session, kukai, interaction.user.id, self._text.value
-                )
-                subs = await submission_service.list_user_submissions(
-                    session, kukai.id, interaction.user.id
-                )
-            embed = _submissions_embed(kukai, subs)
-            if over_limit:
-                embed.description = (embed.description or "") + (
-                    f"\n⚠️ 上限（{kukai.submission_max}句）を超えています。"
-                )
-            await interaction.edit_original_response(
-                embed=embed,
-                view=SubmissionView(self.kukai_id, subs, kukai),
+        self._inputs: list[discord.ui.TextInput] = []
+        safe_slots = max(1, min(GUI_BULK_LIMIT, slots))
+        for index in range(safe_slots):
+            item = discord.ui.TextInput(
+                label=f"俳句{index + 1}",
+                style=discord.TextStyle.paragraph,
+                max_length=500,
+                required=(index == 0),
             )
-        except ServiceError as e:
-            await interaction.followup.send(embed=error_embed(str(e)), ephemeral=True)
-
-
-class SubmitBulkModal(discord.ui.Modal, title="投句（一括追加）"):
-    text1 = discord.ui.TextInput(
-        label="俳句1",
-        style=discord.TextStyle.paragraph,
-        max_length=500,
-        required=True,
-    )
-    text2 = discord.ui.TextInput(
-        label="俳句2",
-        style=discord.TextStyle.paragraph,
-        max_length=500,
-        required=False,
-    )
-    text3 = discord.ui.TextInput(
-        label="俳句3",
-        style=discord.TextStyle.paragraph,
-        max_length=500,
-        required=False,
-    )
-    text4 = discord.ui.TextInput(
-        label="俳句4",
-        style=discord.TextStyle.paragraph,
-        max_length=500,
-        required=False,
-    )
-    text5 = discord.ui.TextInput(
-        label="俳句5",
-        style=discord.TextStyle.paragraph,
-        max_length=500,
-        required=False,
-    )
-
-    def __init__(self, kukai_id: int) -> None:
-        super().__init__()
-        self.kukai_id = kukai_id
+            self.add_item(item)
+            self._inputs.append(item)
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
         await interaction.response.defer(ephemeral=True)
         assert interaction.guild is not None
 
-        texts = [
-            self.text1.value.strip(),
-            self.text2.value.strip(),
-            self.text3.value.strip(),
-            self.text4.value.strip(),
-            self.text5.value.strip(),
-        ]
-        poems = [text for text in texts if text]
+        poems = [item.value.strip() for item in self._inputs if item.value.strip()]
         if not poems:
             await interaction.followup.send(
                 embed=error_embed("少なくとも1句は入力してください。"),
@@ -277,17 +216,17 @@ class SubmissionView(discord.ui.View):
         self._subs = list(subs)
         self._kukai = kukai
         has_subs = bool(subs)
+        current_count = len(subs)
+        limit = kukai.submission_max if kukai is not None else None
+        remaining = None if limit is None else max(0, limit - current_count)
+        add_slots = GUI_BULK_LIMIT if remaining is None else min(GUI_BULK_LIMIT, remaining)
 
         add_btn = discord.ui.Button(
             label="追加",
             style=discord.ButtonStyle.success,
+            disabled=(add_slots <= 0),
         )
         add_btn.callback = self._on_add
-        bulk_btn = discord.ui.Button(
-            label="一括追加",
-            style=discord.ButtonStyle.success,
-        )
-        bulk_btn.callback = self._on_bulk_add
 
         edit_btn = discord.ui.Button(
             label="編集",
@@ -304,15 +243,18 @@ class SubmissionView(discord.ui.View):
         del_btn.callback = self._on_delete
 
         self.add_item(add_btn)
-        self.add_item(bulk_btn)
         self.add_item(edit_btn)
         self.add_item(del_btn)
+        self._add_slots = add_slots
 
     async def _on_add(self, interaction: discord.Interaction) -> None:
-        await interaction.response.send_modal(SubmitAddModal(self.kukai_id))
-
-    async def _on_bulk_add(self, interaction: discord.Interaction) -> None:
-        await interaction.response.send_modal(SubmitBulkModal(self.kukai_id))
+        if self._add_slots <= 0:
+            await interaction.response.send_message(
+                embed=error_embed("投句上限に達しているため、これ以上追加できません。"),
+                ephemeral=True,
+            )
+            return
+        await interaction.response.send_modal(SubmitBulkModal(self.kukai_id, self._add_slots))
 
     async def _on_edit(self, interaction: discord.Interaction) -> None:
         if not self._subs:

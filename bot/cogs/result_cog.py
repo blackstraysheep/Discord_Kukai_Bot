@@ -19,7 +19,6 @@ logger = logging.getLogger(__name__)
 
 _PREVIEW_ALLOWED = {
     KukaiState.SELECTING_CLOSED,
-    KukaiState.WAITING_RESULTS,
     KukaiState.RESULTS,
     KukaiState.ENDED,
 }

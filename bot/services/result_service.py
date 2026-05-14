@@ -21,7 +21,6 @@ if TYPE_CHECKING:
 
 _RESULT_ALLOWED = {
     KukaiState.SELECTING_CLOSED,
-    KukaiState.WAITING_RESULTS,
     KukaiState.RESULTS,
     KukaiState.ENDED,
 }

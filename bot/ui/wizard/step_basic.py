@@ -28,6 +28,8 @@ def build(state: WizardState) -> tuple[discord.Embed, discord.ui.View]:
         )
     else:
         channel_value = "新規チャンネルを作成"
+        channel_name = state.channel_name.strip() or state.title.strip() or "kukai"
+        channel_value += f"\nチャンネル名: `{channel_name}`"
         if state.category_id:
             channel_value += f"\nカテゴリ: <#{state.category_id}>"
         else:
@@ -118,12 +120,16 @@ class _ChannelModeSelect(discord.ui.Select):
 class _ExistingChannelSelect(discord.ui.ChannelSelect):
     def __init__(self, state: WizardState) -> None:
         self.state = state
+        kwargs: dict[str, object] = {}
+        if state.existing_channel_id:
+            kwargs["default_values"] = [discord.Object(id=state.existing_channel_id)]
         super().__init__(
             placeholder="既存チャンネルを選択",
             channel_types=[discord.ChannelType.text],
             min_values=1,
             max_values=1,
             row=2,
+            **kwargs,
         )
 
     async def callback(self, interaction: discord.Interaction) -> None:
@@ -137,12 +143,16 @@ class _ExistingChannelSelect(discord.ui.ChannelSelect):
 class _CategorySelect(discord.ui.ChannelSelect):
     def __init__(self, state: WizardState) -> None:
         self.state = state
+        kwargs: dict[str, object] = {}
+        if state.category_id:
+            kwargs["default_values"] = [discord.Object(id=state.category_id)]
         super().__init__(
             placeholder="カテゴリを選択（省略可: ルートに作成）",
             channel_types=[discord.ChannelType.category],
             min_values=0,
             max_values=1,
             row=2,
+            **kwargs,
         )
 
     async def callback(self, interaction: discord.Interaction) -> None:
@@ -171,6 +181,12 @@ class StepBasicModal(discord.ui.Modal, title="基本情報の入力"):
         required=False,
         max_length=1000,
     )
+    channel_name = discord.ui.TextInput(
+        label="チャンネル名（新規作成時のみ）",
+        placeholder="未入力なら題名を使用",
+        required=False,
+        max_length=100,
+    )
 
     def __init__(self, state: WizardState) -> None:
         super().__init__()
@@ -181,11 +197,14 @@ class StepBasicModal(discord.ui.Modal, title="基本情報の入力"):
             self.theme.default = state.theme
         if state.description:
             self.description.default = state.description
+        if state.channel_name:
+            self.channel_name.default = state.channel_name
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
         self.state.title = self.kukai_title.value.strip()
         self.state.theme = self.theme.value.strip()
         self.state.description = self.description.value.strip()
+        self.state.channel_name = self.channel_name.value.strip()
         set_wizard(self.state)
         embed, view = build(self.state)
         await interaction.response.edit_message(embed=embed, view=view)

@@ -9,10 +9,12 @@ from discord import app_commands
 from discord.ext import commands
 
 from bot.database import get_session
+from bot.repositories import select_repo
 from bot.services import (
     kukai_service,
     notification_service,
     permission_service,
+    result_service,
     select_rule_service,
     submission_service,
 )
@@ -30,6 +32,7 @@ from bot.utils.embed_builder import (
     error_embed,
     success_embed,
 )
+from bot.utils.result_publish import build_result_publish_embeds
 
 # Japanese labels for each state
 STATE_LABEL: dict[str, str] = {
@@ -41,7 +44,6 @@ STATE_LABEL: dict[str, str] = {
     "waiting_publish": "投句公開待ち",
     "selecting_open": "選句受付中",
     "selecting_closed": "選句締切",
-    "waiting_results": "結果公開待ち",
     "results": "結果公開中",
     "ended": "終了",
     "paused": "一時停止",
@@ -142,7 +144,8 @@ class KukaiCog(commands.Cog):
         try:
             published_count: int | None = None
             publish_warning: str | None = None
-            announced_message: str | None = None
+            result_count: int | None = None
+            result_warning: str | None = None
             async with get_session() as session:
                 kukai = await kukai_service.get_kukai(session, kukai_id, interaction.guild.id)
                 if not await permission_service.is_kukai_admin(session, kukai, interaction.user):  # type: ignore[arg-type]
@@ -161,22 +164,29 @@ class KukaiCog(commands.Cog):
                     if message_id is not None:
                         kukai.submission_message_id = message_id
                     new_state = await kukai_service.proceed(session, kukai)
-                    announced_message = "投句一覧を公開し、選句を開始しました。"
                 else:
                     new_state = await kukai_service.proceed(session, kukai)
-                    announced_message = self._state_announcement_text(new_state)
+                    if new_state == KukaiState.RESULTS:
+                        result_count, result_warning, result_message_id = await self._post_result_list(
+                            session, interaction.guild, kukai
+                        )
+                        if result_message_id is not None:
+                            kukai.result_message_id = result_message_id
             state_ja = STATE_LABEL.get(str(new_state), str(new_state))
             description = f"句会「{kukai.title}」を **{state_ja}** へ進めました。"
             if published_count is not None:
                 description += f"\n{published_count}句を番号付きで公開しました。"
                 if publish_warning:
                     description += f"\n⚠️ {publish_warning}"
+            if result_count is not None:
+                description += f"\n結果 {result_count}句を公開しました。"
+                if result_warning:
+                    description += f"\n⚠️ {result_warning}"
             await interaction.response.send_message(
                 embed=success_embed(description),
                 ephemeral=True,
             )
-            if announced_message:
-                await self._announce_to_kukai_channel(interaction.guild, kukai, announced_message)
+            await self._announce_to_kukai_channel(interaction.guild, kukai, new_state)
         except ServiceError as e:
             await interaction.response.send_message(embed=error_embed(str(e)), ephemeral=True)
 
@@ -297,25 +307,69 @@ class KukaiCog(commands.Cog):
         return None, first_message_id
 
     @staticmethod
-    def _state_announcement_text(state: KukaiState) -> str | None:
+    def _state_stage_label(state: KukaiState) -> str | None:
         mapping = {
-            KukaiState.ENTRY_OPEN: "エントリー受付を開始しました。",
-            KukaiState.SUBMISSION_OPEN: "投句受付を開始しました。",
-            KukaiState.SELECTING_OPEN: "選句受付を開始しました。",
-            KukaiState.RESULTS: "結果を公開しました。",
+            KukaiState.ENTRY_OPEN: "エントリー受付",
+            KukaiState.SUBMISSION_OPEN: "投句受付",
+            KukaiState.SELECTING_OPEN: "選句受付",
+            KukaiState.RESULTS: "結果公開",
         }
         return mapping.get(state)
 
-    async def _announce_to_kukai_channel(self, guild: discord.Guild, kukai, message: str) -> None:
+    async def _announce_to_kukai_channel(self, guild: discord.Guild, kukai, state: KukaiState) -> None:
+        stage = self._state_stage_label(state)
+        if not stage:
+            return
         if not kukai.channel_id:
             return
         channel = guild.get_channel(kukai.channel_id)
         if not isinstance(channel, discord.TextChannel):
             return
+        description = f"句会「**{kukai.title}**」の **{stage}** を開始しました。"
+        embed = discord.Embed(description=description, color=COLOR_INFO)
+        if kukai.entry_close_at:
+            embed.add_field(name="エントリー締切", value=format_jst(kukai.entry_close_at), inline=False)
+        if kukai.submission_close_at:
+            embed.add_field(name="投句締切", value=format_jst(kukai.submission_close_at), inline=False)
+        if kukai.selecting_close_at:
+            embed.add_field(name="選句締切", value=format_jst(kukai.selecting_close_at), inline=False)
+        embed.set_footer(text=f"句会ID: {kukai.id}")
         try:
-            await send_with_retry(lambda: channel.send(embed=discord.Embed(description=message, color=COLOR_INFO)))
+            await send_with_retry(lambda: channel.send(embed=embed))
         except Exception:
             pass
+
+    async def _post_result_list(
+        self,
+        session,
+        guild: discord.Guild,
+        kukai,
+    ) -> tuple[int | None, str | None, int | None]:
+        if not kukai.channel_id:
+            return None, "公開先チャンネルが未設定のため、結果を投稿できません。", None
+
+        channel = guild.get_channel(kukai.channel_id)
+        if not isinstance(channel, discord.TextChannel):
+            return None, "公開先チャンネルが見つからないため、結果を投稿できません。", None
+
+        results = await result_service.compute_results(session, kukai)
+        if not results:
+            return 0, "集計対象の投句がないため、結果投稿をスキップしました。", None
+        overall_comments = await select_repo.list_overall_comments(session, kukai.id)
+        embeds = build_result_publish_embeds(kukai, results, overall_comments, guild)
+
+        first_message_id: int | None = None
+        try:
+            for index, embed in enumerate(embeds):
+                sent = await send_with_retry(lambda e=embed: channel.send(embed=e))
+                if index == 0:
+                    first_message_id = sent.id
+                if index < len(embeds) - 1:
+                    await asyncio.sleep(0.35)
+        except discord.Forbidden:
+            return len(results), "公開チャンネルへの送信権限がないため、結果を投稿できません。", None
+
+        return len(results), None, first_message_id
 
     @kukai.command(name="rollback", description="【管理者】投句公開を取り消し、公開待ちに戻します")
     @app_commands.describe(kukai_id="句会ID")

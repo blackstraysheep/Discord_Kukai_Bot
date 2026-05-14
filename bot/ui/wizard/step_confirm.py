@@ -66,7 +66,7 @@ def build(state: WizardState) -> tuple[discord.Embed, discord.ui.View]:
     channel_target = (
         f"既存チャンネル: <#{state.existing_channel_id}>"
         if state.use_existing_channel and state.existing_channel_id
-        else "新規チャンネルを作成"
+        else f"新規チャンネルを作成（`{_sanitize_channel_name(state.channel_name or state.title)}`）"
     )
     embed.add_field(name="句会チャンネル", value=channel_target, inline=False)
     label_lines = []
@@ -129,10 +129,11 @@ class StepConfirmView(discord.ui.View):
     async def _confirm(self, interaction: discord.Interaction) -> None:
         await interaction.response.defer(ephemeral=True)
         state = self.state
+        state.result_mode = "manual" if state.selecting_mode == "manual" else "auto"
         guild = interaction.guild
         assert guild is not None
 
-        ch_name = _sanitize_channel_name(state.title)
+        ch_name = _sanitize_channel_name(state.channel_name or state.title)
         channel: discord.abc.GuildChannel | None = None
         created_new_channel = False
         name_collision_warning: str | None = None
@@ -271,7 +272,6 @@ class StepConfirmView(discord.ui.View):
         )
         if state.theme:
             info.add_field(name="題", value=state.theme, inline=True)
-        info.add_field(name="状態", value="下書き", inline=True)
         info.add_field(name="エントリー締切", value=entry_deadline, inline=False)
         info.add_field(name="投句締切", value=sub_str, inline=False)
         info.add_field(name="選句締切", value=selecting_str, inline=False)
