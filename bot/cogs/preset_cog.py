@@ -12,8 +12,9 @@ from discord import app_commands
 from discord.ext import commands
 
 from bot.database import get_session
-from bot.services import permission_service, select_rule_service
+from bot.services import permission_service, preset_service
 from bot.services.errors import ServiceError
+from bot.ui.preset_wizard import open_preset_wizard
 from bot.utils.embed_builder import COLOR_INFO, error_embed, success_embed
 
 
@@ -44,7 +45,7 @@ class PresetCog(commands.Cog):
         assert interaction.guild is not None
         try:
             async with get_session() as session:
-                templates = await select_rule_service.list_templates(session, interaction.guild.id)
+                templates = await preset_service.list_presets(session, interaction.guild.id)
         except ServiceError as e:
             await interaction.response.send_message(embed=error_embed(str(e)), ephemeral=True)
             return
@@ -58,18 +59,23 @@ class PresetCog(commands.Cog):
 
         embed = discord.Embed(title="選句プリセット一覧", color=COLOR_INFO)
         for t in templates[:10]:
-            points_enabled, specs = select_rule_service.deserialize_template_payload(t.definition_json)
-            label_strs = [f"{s['label']} ({s['point']:+d}pt)" for s in specs[:5]]
-            default_mark = "（既定）" if bool(t.is_default) else ""
-            pts_str = "点数あり" if points_enabled else "点数なし"
+            label_strs = [f"{s.label} ({s.point:+d}pt)" for s in t.labels[:5]]
+            default_mark = "（既定）" if t.is_default else ""
+            pts_str = "点数あり" if t.points_enabled else "点数なし"
             embed.add_field(
                 name=f"[{t.id}] {t.name}{default_mark}",
-                value=f"{pts_str}  ラベル数: {len(specs)}\n" + (", ".join(label_strs) or "（未設定）"),
+                value=f"{pts_str}  ラベル数: {len(t.labels)}\n" + (", ".join(label_strs) or "（未設定）"),
                 inline=False,
             )
         if len(templates) > 10:
             embed.set_footer(text=f"他 {len(templates) - 10} 件")
         await interaction.response.send_message(embed=embed, ephemeral=True)
+
+    @preset.command(name="gui", description="【管理者】選句プリセットGUIウィザードを開きます")
+    async def preset_gui(self, interaction: discord.Interaction) -> None:
+        if not await _check_admin(interaction):
+            return
+        await open_preset_wizard(interaction)
 
     @preset.command(name="add", description="【管理者】新しいプリセットを追加します")
     @app_commands.describe(
@@ -89,7 +95,7 @@ class PresetCog(commands.Cog):
         assert interaction.guild is not None
         try:
             async with get_session() as session:
-                template = await select_rule_service.create_or_update_template(
+                template = await preset_service.create_preset(
                     session,
                     guild_id=interaction.guild.id,
                     created_by=interaction.user.id,
@@ -123,7 +129,7 @@ class PresetCog(commands.Cog):
         assert interaction.guild is not None
         try:
             async with get_session() as session:
-                template = await select_rule_service.rename_template(
+                template = await preset_service.rename_preset(
                     session, interaction.guild.id, preset_id, new_name
                 )
         except ServiceError as e:
@@ -146,11 +152,8 @@ class PresetCog(commands.Cog):
         assert interaction.guild is not None
         try:
             async with get_session() as session:
-                template = await select_rule_service.get_template(
-                    session, interaction.guild.id, preset_id
-                )
+                template = await preset_service.delete_preset(session, interaction.guild.id, preset_id)
                 name = template.name
-                await select_rule_service.delete_template(session, interaction.guild.id, preset_id)
         except ServiceError as e:
             await interaction.response.send_message(embed=error_embed(str(e)), ephemeral=True)
             return
@@ -175,7 +178,7 @@ class PresetCog(commands.Cog):
         assert interaction.guild is not None
         try:
             async with get_session() as session:
-                template = await select_rule_service.set_template_points(
+                template = await preset_service.set_preset_points(
                     session, interaction.guild.id, preset_id, points_enabled
                 )
         except ServiceError as e:
@@ -201,15 +204,9 @@ class PresetCog(commands.Cog):
         assert interaction.guild is not None
         try:
             async with get_session() as session:
-                templates = await select_rule_service.list_templates(session, interaction.guild.id)
-                target = next((t for t in templates if t.id == preset_id), None)
-                if target is None:
-                    await interaction.response.send_message(
-                        embed=error_embed("指定のプリセットが見つかりません。"), ephemeral=True
-                    )
-                    return
-                for t in templates:
-                    t.is_default = 1 if t.id == preset_id else 0
+                target = await preset_service.set_default_preset(
+                    session, interaction.guild.id, preset_id
+                )
         except ServiceError as e:
             await interaction.response.send_message(embed=error_embed(str(e)), ephemeral=True)
             return
@@ -230,24 +227,21 @@ class PresetCog(commands.Cog):
         assert interaction.guild is not None
         try:
             async with get_session() as session:
-                template = await select_rule_service.get_template(
+                template = await preset_service.get_preset(
                     session, interaction.guild.id, preset_id
                 )
         except ServiceError as e:
             await interaction.response.send_message(embed=error_embed(str(e)), ephemeral=True)
             return
 
-        points_enabled, specs = select_rule_service.deserialize_template_payload(
-            template.definition_json
-        )
-        pts_str = "点数あり" if points_enabled else "点数なし"
+        pts_str = "点数あり" if template.points_enabled else "点数なし"
         embed = discord.Embed(
             title=f"プリセット「{template.name}」のラベル",
             description=f"ID: {template.id}  {pts_str}",
             color=COLOR_INFO,
         )
-        if specs:
-            lines = [f"**{s['label']}** {s['point']:+d}pt" for s in specs]
+        if template.labels:
+            lines = [f"**{s.label}** {s.point:+d}pt" for s in template.labels]
             embed.add_field(name="ラベル", value="\n".join(lines), inline=False)
         else:
             embed.description = (embed.description or "") + "\n（ラベル未設定）"
@@ -271,21 +265,20 @@ class PresetCog(commands.Cog):
         assert interaction.guild is not None
         try:
             async with get_session() as session:
-                template = await select_rule_service.add_or_update_label(
+                template = await preset_service.upsert_label(
                     session,
                     guild_id=interaction.guild.id,
-                    template_id=preset_id,
-                    label=label_name,
+                    preset_id=preset_id,
+                    label_name=label_name,
                     point=point,
                 )
-                _, specs = select_rule_service.deserialize_template_payload(template.definition_json)
         except ServiceError as e:
             await interaction.response.send_message(embed=error_embed(str(e)), ephemeral=True)
             return
         await interaction.response.send_message(
             embed=success_embed(
                 f"プリセット「**{template.name}**」にラベル「**{label_name.strip()}**」を設定しました。\n"
-                f"ラベル数: {len(specs)}"
+                f"ラベル数: {len(template.labels)}"
             ),
             ephemeral=True,
         )
@@ -316,23 +309,14 @@ class PresetCog(commands.Cog):
             return
         try:
             async with get_session() as session:
-                if new_name is not None:
-                    template = await select_rule_service.rename_label(
-                        session,
-                        guild_id=interaction.guild.id,
-                        template_id=preset_id,
-                        old_label=label_name,
-                        new_label=new_name,
-                        point=point,
-                    )
-                else:
-                    template = await select_rule_service.add_or_update_label(
-                        session,
-                        guild_id=interaction.guild.id,
-                        template_id=preset_id,
-                        label=label_name,
-                        point=point,  # type: ignore[arg-type]
-                    )
+                template = await preset_service.edit_label(
+                    session,
+                    guild_id=interaction.guild.id,
+                    preset_id=preset_id,
+                    label_name=label_name,
+                    new_name=new_name,
+                    point=point,
+                )
         except ServiceError as e:
             await interaction.response.send_message(embed=error_embed(str(e)), ephemeral=True)
             return
@@ -357,11 +341,11 @@ class PresetCog(commands.Cog):
         assert interaction.guild is not None
         try:
             async with get_session() as session:
-                template = await select_rule_service.remove_template_label(
+                template = await preset_service.remove_label(
                     session,
                     guild_id=interaction.guild.id,
-                    template_id=preset_id,
-                    label=label_name,
+                    preset_id=preset_id,
+                    label_name=label_name,
                 )
         except ServiceError as e:
             await interaction.response.send_message(embed=error_embed(str(e)), ephemeral=True)

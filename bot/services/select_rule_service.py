@@ -422,6 +422,19 @@ async def set_template_points(
     return template
 
 
+async def set_template_default(
+    session: AsyncSession,
+    guild_id: int,
+    template_id: int,
+) -> SelectRuleTemplate:
+    template = await get_template(session, guild_id, template_id)
+    templates = await list_templates(session, guild_id)
+    for row in templates:
+        row.is_default = 1 if row.id == template.id else 0
+    await session.flush()
+    return template
+
+
 async def add_or_update_label(
     session: AsyncSession,
     *,
@@ -452,7 +465,7 @@ async def add_or_update_label(
             updated = True
             break
     if not updated:
-        specs.append({"label": label, "point": point, "min_count": 0, "max_count": None, "comment_mode": "none"})
+        specs.append({"label": label, "point": point, "min_count": 0, "max_count": None, "comment_mode": "optional"})
 
     template.definition_json = serialize_template_specs(specs, points_enabled=points_enabled)
     await session.flush()
