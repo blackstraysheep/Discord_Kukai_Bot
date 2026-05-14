@@ -18,8 +18,11 @@ class WizardState:
     title: str = ""
     theme: str = ""
     description: str = ""
+    use_existing_channel: bool = False
+    existing_channel_id: Optional[int] = None
 
     # Step 2: Schedule
+    entry_close_at: Optional[datetime] = None
     submission_close_at: Optional[datetime] = None
     selecting_close_at: Optional[datetime] = None
 
@@ -38,6 +41,7 @@ class WizardState:
     # Step 5: Select rule
     select_preset_template_id: Optional[int] = None
     select_preset_name: str = "デフォルト"
+    select_points_enabled: bool = True
     select_preset_options: list[dict[str, Any]] = field(default_factory=list)
     select_label_specs: list[dict[str, Any]] = field(default_factory=list)
     selected_select_label: str = ""
@@ -54,7 +58,13 @@ class WizardState:
 
     @property
     def can_confirm(self) -> bool:
-        return bool(self.title and self.submission_close_at and self.selecting_close_at)
+        if not (self.title and self.submission_close_at and self.selecting_close_at):
+            return False
+        if self.entry_enabled and self.entry_close_at is None:
+            return False
+        if self.use_existing_channel and self.existing_channel_id is None:
+            return False
+        return True
 
 
 _wizards: dict[int, WizardState] = {}

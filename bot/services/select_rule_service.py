@@ -177,7 +177,11 @@ def normalize_template_specs(specs: list[dict[str, Any]]) -> list[dict[str, Any]
     return [s for s in normalized if s["label"] != AUTHOR_COMMENT_LABEL]
 
 
-def serialize_template_specs(specs: list[dict[str, Any]]) -> str:
+def serialize_template_specs(
+    specs: list[dict[str, Any]],
+    *,
+    points_enabled: bool = True,
+) -> str:
     compact = []
     for spec in normalize_template_specs(specs):
         compact.append(
@@ -189,26 +193,50 @@ def serialize_template_specs(specs: list[dict[str, Any]]) -> str:
                 "comment_mode": spec["comment_mode"],
             }
         )
-    return json.dumps(compact, ensure_ascii=False)
+    return json.dumps(
+        {"points_enabled": bool(points_enabled), "labels": compact},
+        ensure_ascii=False,
+    )
 
 
-def deserialize_template_specs(definition_json: str | None) -> list[dict[str, Any]]:
+def deserialize_template_payload(definition_json: str | None) -> tuple[bool, list[dict[str, Any]]]:
     if not definition_json:
-        return []
+        return True, []
     try:
         raw = json.loads(definition_json)
     except json.JSONDecodeError:
-        return []
-    if not isinstance(raw, list):
-        return []
-    specs: list[dict[str, Any]] = [item for item in raw if isinstance(item, dict)]
-    return normalize_template_specs(specs)
+        return True, []
+
+    if isinstance(raw, list):
+        specs: list[dict[str, Any]] = [item for item in raw if isinstance(item, dict)]
+        return True, normalize_template_specs(specs)
+
+    if not isinstance(raw, dict):
+        return True, []
+    points_enabled = bool(raw.get("points_enabled", True))
+    labels_raw = raw.get("labels", [])
+    if not isinstance(labels_raw, list):
+        return points_enabled, []
+    specs = [item for item in labels_raw if isinstance(item, dict)]
+    normalized = normalize_template_specs(specs)
+    if not points_enabled:
+        for spec in normalized:
+            spec["point"] = 0
+    return points_enabled, normalized
+
+
+def deserialize_template_specs(definition_json: str | None) -> list[dict[str, Any]]:
+    _, specs = deserialize_template_payload(definition_json)
+    return specs
 
 
 def build_kukai_specs_from_template(template: SelectRuleTemplate) -> list[dict[str, Any]]:
-    specs = deserialize_template_specs(template.definition_json)
+    points_enabled, specs = deserialize_template_payload(template.definition_json)
     if not specs:
         specs = [s for s in default_kukai_specs() if s["label"] != AUTHOR_COMMENT_LABEL]
+    if not points_enabled:
+        for spec in specs:
+            spec["point"] = 0
     return normalize_kukai_specs(specs, template_id=template.id)
 
 
@@ -269,7 +297,7 @@ async def add_or_update_template_label(
         session.add(template)
         await session.flush()
 
-    specs = deserialize_template_specs(template.definition_json)
+    points_enabled, specs = deserialize_template_payload(template.definition_json)
     updated = False
     for spec in specs:
         if spec["label"] == label.strip():
@@ -290,10 +318,82 @@ async def add_or_update_template_label(
             }
         )
 
-    template.definition_json = serialize_template_specs(specs)
+    if not points_enabled:
+        for spec in specs:
+            spec["point"] = 0
+    template.definition_json = serialize_template_specs(specs, points_enabled=points_enabled)
     if set_default:
         defaults = await list_templates(session, guild_id)
         for row in defaults:
             row.is_default = 1 if row.id == template.id else 0
+    await session.flush()
+    return template
+
+
+async def create_or_update_template(
+    session: AsyncSession,
+    *,
+    guild_id: int,
+    created_by: int,
+    name: str,
+    points_enabled: bool = True,
+    set_default: bool = False,
+) -> SelectRuleTemplate:
+    name = name.strip()
+    if not name:
+        raise ValidationError("プリセット名は必須です。")
+    if len(name) > 100:
+        raise ValidationError("プリセット名は100文字以内にしてください。")
+
+    result = await session.execute(
+        select(SelectRuleTemplate).where(
+            SelectRuleTemplate.guild_id == guild_id,
+            SelectRuleTemplate.name == name,
+        )
+    )
+    template = result.scalar_one_or_none()
+    if template is None:
+        template = SelectRuleTemplate(
+            guild_id=guild_id,
+            name=name,
+            created_by=created_by,
+            is_default=1 if set_default else 0,
+            definition_json=serialize_template_specs([], points_enabled=points_enabled),
+        )
+        session.add(template)
+    else:
+        _, specs = deserialize_template_payload(template.definition_json)
+        template.definition_json = serialize_template_specs(specs, points_enabled=points_enabled)
+        if set_default:
+            template.is_default = 1
+
+    await session.flush()
+    if set_default:
+        defaults = await list_templates(session, guild_id)
+        for row in defaults:
+            row.is_default = 1 if row.id == template.id else 0
+    await session.flush()
+    return template
+
+
+async def delete_template(session: AsyncSession, guild_id: int, template_id: int) -> None:
+    template = await get_template(session, guild_id, template_id)
+    await session.delete(template)
+
+
+async def remove_template_label(
+    session: AsyncSession,
+    *,
+    guild_id: int,
+    template_id: int,
+    label: str,
+) -> SelectRuleTemplate:
+    template = await get_template(session, guild_id, template_id)
+    target_label = label.strip()
+    points_enabled, specs = deserialize_template_payload(template.definition_json)
+    remaining = [spec for spec in specs if spec["label"] != target_label]
+    if len(remaining) == len(specs):
+        raise NotFoundError("指定したラベルが見つかりません。")
+    template.definition_json = serialize_template_specs(remaining, points_enabled=points_enabled)
     await session.flush()
     return template

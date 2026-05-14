@@ -9,7 +9,8 @@ from bot.ui.wizard.wizard_state import WizardState, set_wizard
 
 
 def build(state: WizardState) -> tuple[discord.Embed, discord.ui.View]:
-    filled = bool(state.title)
+    channel_ready = (not state.use_existing_channel) or (state.existing_channel_id is not None)
+    filled = bool(state.title and channel_ready)
     embed = discord.Embed(
         title=f"ステップ 1/{STEP_COUNT}: 基本情報",
         color=discord.Color.blurple(),
@@ -19,7 +20,16 @@ def build(state: WizardState) -> tuple[discord.Embed, discord.ui.View]:
         embed.add_field(name="題（お題）", value=state.theme, inline=True)
     if state.description:
         embed.add_field(name="説明", value=state.description[:200], inline=False)
-    embed.set_footer(text="✅ 題名を入力すると次へ進めます。")
+    channel_mode = "既存チャンネルを使う" if state.use_existing_channel else "新規チャンネルを作成"
+    channel_value = channel_mode
+    if state.use_existing_channel:
+        channel_value += (
+            f"\n選択: <#{state.existing_channel_id}>"
+            if state.existing_channel_id
+            else "\n選択: （未選択）"
+        )
+    embed.add_field(name="句会チャンネル", value=channel_value, inline=False)
+    embed.set_footer(text="✅ 題名とチャンネル設定がそろうと次へ進めます。")
     return embed, StepBasicView(state, filled=filled)
 
 
@@ -35,6 +45,9 @@ class StepBasicView(discord.ui.View):
         )
         fill_btn.callback = self._fill
         self.add_item(fill_btn)
+
+        self.add_item(_ChannelModeSelect(state))
+        self.add_item(_ExistingChannelSelect(state))
 
         next_btn = discord.ui.Button(
             label="次へ ➜",
@@ -62,6 +75,55 @@ class StepBasicView(discord.ui.View):
 
     async def _cancel(self, interaction: discord.Interaction) -> None:
         await cancel_wizard(interaction, self.state)
+
+
+class _ChannelModeSelect(discord.ui.Select):
+    def __init__(self, state: WizardState) -> None:
+        self.state = state
+        super().__init__(
+            placeholder="句会チャンネルの作成方法",
+            options=[
+                discord.SelectOption(
+                    label="新規チャンネルを作成",
+                    value="new",
+                    default=not state.use_existing_channel,
+                ),
+                discord.SelectOption(
+                    label="既存チャンネルを使用",
+                    value="existing",
+                    default=state.use_existing_channel,
+                ),
+            ],
+            row=1,
+        )
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        self.state.use_existing_channel = self.values[0] == "existing"
+        if not self.state.use_existing_channel:
+            self.state.existing_channel_id = None
+        set_wizard(self.state)
+        embed, view = build(self.state)
+        await interaction.response.edit_message(embed=embed, view=view)
+
+
+class _ExistingChannelSelect(discord.ui.ChannelSelect):
+    def __init__(self, state: WizardState) -> None:
+        self.state = state
+        super().__init__(
+            placeholder="既存チャンネルを選択",
+            channel_types=[discord.ChannelType.text],
+            min_values=1,
+            max_values=1,
+            disabled=not state.use_existing_channel,
+            row=2,
+        )
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        channel = self.values[0]
+        self.state.existing_channel_id = int(channel.id)
+        set_wizard(self.state)
+        embed, view = build(self.state)
+        await interaction.response.edit_message(embed=embed, view=view)
 
 
 class StepBasicModal(discord.ui.Modal, title="基本情報の入力"):

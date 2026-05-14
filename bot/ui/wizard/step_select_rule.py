@@ -36,7 +36,12 @@ def build(state: WizardState) -> tuple[discord.Embed, discord.ui.View]:
         title=f"ステップ 5/{STEP_COUNT}: 選句設定",
         color=discord.Color.blurple(),
     )
-    embed.add_field(name="選択中プリセット", value=state.select_preset_name, inline=False)
+    points_label = "有効" if state.select_points_enabled else "無効（全ラベル0点）"
+    embed.add_field(
+        name="選択中プリセット",
+        value=f"{state.select_preset_name}\n点数: {points_label}",
+        inline=False,
+    )
 
     lines: list[str] = []
     for spec in state.select_label_specs:
@@ -46,7 +51,7 @@ def build(state: WizardState) -> tuple[discord.Embed, discord.ui.View]:
             f"{spec['min_count']}〜{_max_label(spec)} / comment:{spec['comment_mode']}"
         )
     embed.add_field(name="選句種別", value="\n".join(lines[:12]), inline=False)
-    embed.set_footer(text="プリセット選択後、句会ごとに選句数を調整できます。")
+    embed.set_footer(text="プリセット選択（または新規作成）後、ラベルごとに選句数/コメント設定を行います。")
     return embed, StepSelectRuleView(state)
 
 
@@ -83,6 +88,7 @@ class _PresetSelect(discord.ui.Select):
         if selected == "default":
             self.state.select_preset_template_id = None
             self.state.select_preset_name = "デフォルト"
+            self.state.select_points_enabled = True
             self.state.select_label_specs = select_rule_service.default_kukai_specs()
             _ensure_specs(self.state)
             set_wizard(self.state)
@@ -96,6 +102,7 @@ class _PresetSelect(discord.ui.Select):
                 template = await select_rule_service.get_template(
                     session, self.state.guild_id, template_id
                 )
+                points_enabled, _ = select_rule_service.deserialize_template_payload(template.definition_json)
                 specs = select_rule_service.build_kukai_specs_from_template(template)
         except ServiceError as e:
             await interaction.response.send_message(str(e), ephemeral=True)
@@ -103,6 +110,7 @@ class _PresetSelect(discord.ui.Select):
 
         self.state.select_preset_template_id = template.id
         self.state.select_preset_name = template.name
+        self.state.select_points_enabled = points_enabled
         self.state.select_label_specs = specs
         _ensure_specs(self.state)
         set_wizard(self.state)
@@ -250,6 +258,8 @@ class AddSelectTypeModal(discord.ui.Modal, title="選句種別を追加"):
         except ValueError:
             await interaction.response.send_message("点数/最小選句数は整数で指定してください。", ephemeral=True)
             return
+        if not self.state.select_points_enabled:
+            point = 0
 
         raw_max = self.max_count.value.strip()
         if not raw_max or raw_max.lower() in {"∞", "inf", "infinity", "unlimited", "無制限"}:
@@ -300,6 +310,136 @@ class AddSelectTypeModal(discord.ui.Modal, title="選句種別を追加"):
         await interaction.response.edit_message(embed=embed, view=view)
 
 
+class CreatePresetModal(discord.ui.Modal, title="新規プリセット作成"):
+    preset_name = discord.ui.TextInput(
+        label="プリセット名",
+        placeholder="五句取り（無点）",
+        required=True,
+        max_length=100,
+    )
+    points_enabled = discord.ui.TextInput(
+        label="点数機能",
+        placeholder="on / off",
+        required=False,
+        default="on",
+        max_length=8,
+    )
+
+    def __init__(self, state: WizardState) -> None:
+        super().__init__()
+        self.state = state
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        points_raw = (self.points_enabled.value or "on").strip().lower()
+        points_enabled = points_raw not in {"off", "false", "0", "無効"}
+        try:
+            async with get_session() as session:
+                template = await select_rule_service.create_or_update_template(
+                    session,
+                    guild_id=self.state.guild_id,
+                    created_by=self.state.user_id,
+                    name=self.preset_name.value.strip(),
+                    points_enabled=points_enabled,
+                    set_default=False,
+                )
+                templates = await select_rule_service.list_templates(session, self.state.guild_id)
+        except ServiceError as e:
+            await interaction.response.send_message(str(e), ephemeral=True)
+            return
+
+        self.state.select_preset_options = [{"id": t.id, "name": t.name} for t in templates]
+        self.state.select_preset_template_id = template.id
+        self.state.select_preset_name = template.name
+        self.state.select_points_enabled = points_enabled
+        self.state.select_label_specs = select_rule_service.default_kukai_specs()
+        if not points_enabled:
+            for spec in self.state.select_label_specs:
+                spec["point"] = 0
+        _ensure_specs(self.state)
+        set_wizard(self.state)
+        embed, view = build(self.state)
+        await interaction.response.edit_message(embed=embed, view=view)
+
+
+class BulkRuleModal(discord.ui.Modal, title="ラベル一括設定"):
+    def __init__(self, state: WizardState) -> None:
+        super().__init__()
+        self.state = state
+        self._labels: list[str] = []
+        non_author = [
+            row for row in state.select_label_specs
+            if row["label"] != select_rule_service.AUTHOR_COMMENT_LABEL
+        ]
+        for row in non_author[:5]:
+            label = row["label"]
+            self._labels.append(label)
+            default = f"{row['min_count']},{_max_label(row)},{row['comment_mode']}"
+            self.add_item(
+                discord.ui.TextInput(
+                    label=label,
+                    placeholder="min,max,comment_mode 例: 0,2,optional",
+                    required=True,
+                    default=default,
+                    max_length=30,
+                )
+            )
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        updates: dict[str, tuple[int, int | None, str]] = {}
+        for label, item in zip(self._labels, self.children):
+            assert isinstance(item, discord.ui.TextInput)
+            raw = item.value.strip()
+            parts = [p.strip() for p in raw.split(",")]
+            if len(parts) != 3:
+                await interaction.response.send_message(
+                    f"{label}: `min,max,comment_mode` 形式で入力してください。",
+                    ephemeral=True,
+                )
+                return
+            try:
+                min_count = int(parts[0])
+            except ValueError:
+                await interaction.response.send_message(f"{label}: min は整数です。", ephemeral=True)
+                return
+            max_part = parts[1].lower()
+            if max_part in {"∞", "inf", "infinity", "unlimited", "無制限", ""}:
+                max_count = None
+            else:
+                try:
+                    max_count = int(parts[1])
+                except ValueError:
+                    await interaction.response.send_message(f"{label}: max は整数または∞です。", ephemeral=True)
+                    return
+            comment_mode = parts[2].lower()
+            if comment_mode not in {"none", "optional", "required"}:
+                await interaction.response.send_message(
+                    f"{label}: comment_mode は none/optional/required です。",
+                    ephemeral=True,
+                )
+                return
+            updates[label] = (min_count, max_count, comment_mode)
+
+        for row in self.state.select_label_specs:
+            if row["label"] in updates:
+                min_count, max_count, comment_mode = updates[row["label"]]
+                row["min_count"] = min_count
+                row["max_count"] = max_count
+                row["comment_mode"] = comment_mode
+
+        try:
+            self.state.select_label_specs = select_rule_service.normalize_kukai_specs(
+                self.state.select_label_specs,
+                template_id=self.state.select_preset_template_id,
+            )
+        except ServiceError as e:
+            await interaction.response.send_message(str(e), ephemeral=True)
+            return
+
+        set_wizard(self.state)
+        embed, view = build(self.state)
+        await interaction.response.edit_message(embed=embed, view=view)
+
+
 class StepSelectRuleView(discord.ui.View):
     def __init__(self, state: WizardState) -> None:
         super().__init__(timeout=900)
@@ -315,18 +455,26 @@ class StepSelectRuleView(discord.ui.View):
         refresh_btn.callback = self._refresh_presets
         self.add_item(refresh_btn)
 
-        edit_count_btn = discord.ui.Button(
-            label="🔢 選句数を編集",
+        create_preset_btn = discord.ui.Button(
+            label="🆕 新規プリセット作成",
             style=discord.ButtonStyle.secondary,
             row=2,
         )
-        edit_count_btn.callback = self._edit_count
-        self.add_item(edit_count_btn)
+        create_preset_btn.callback = self._create_preset
+        self.add_item(create_preset_btn)
+
+        edit_bulk_btn = discord.ui.Button(
+            label="🧩 ラベル一括設定",
+            style=discord.ButtonStyle.primary,
+            row=3,
+        )
+        edit_bulk_btn.callback = self._edit_bulk
+        self.add_item(edit_bulk_btn)
 
         add_label_btn = discord.ui.Button(
             label="➕ 種別追加",
             style=discord.ButtonStyle.secondary,
-            row=3,
+            row=4,
         )
         add_label_btn.callback = self._add_label
         self.add_item(add_label_btn)
@@ -334,20 +482,20 @@ class StepSelectRuleView(discord.ui.View):
         remove_label_btn = discord.ui.Button(
             label="🗑️ 種別削除",
             style=discord.ButtonStyle.danger,
-            row=3,
+            row=4,
         )
         remove_label_btn.callback = self._remove_label
         self.add_item(remove_label_btn)
 
-        back_btn = discord.ui.Button(label="← 戻る", style=discord.ButtonStyle.secondary, row=4)
+        back_btn = discord.ui.Button(label="← 戻る", style=discord.ButtonStyle.secondary, row=5)
         back_btn.callback = self._back
         self.add_item(back_btn)
 
-        next_btn = discord.ui.Button(label="次へ ➜", style=discord.ButtonStyle.success, row=4)
+        next_btn = discord.ui.Button(label="次へ ➜", style=discord.ButtonStyle.success, row=5)
         next_btn.callback = self._next
         self.add_item(next_btn)
 
-        cancel_btn = discord.ui.Button(label="❌ キャンセル", style=discord.ButtonStyle.danger, row=4)
+        cancel_btn = discord.ui.Button(label="❌ キャンセル", style=discord.ButtonStyle.danger, row=5)
         cancel_btn.callback = self._cancel
         self.add_item(cancel_btn)
 
@@ -363,11 +511,18 @@ class StepSelectRuleView(discord.ui.View):
         embed, view = build(self.state)
         await interaction.response.edit_message(embed=embed, view=view)
 
-    async def _edit_count(self, interaction: discord.Interaction) -> None:
-        if not self.state.selected_select_label:
-            await interaction.response.send_message("編集対象の選句種別を選択してください。", ephemeral=True)
+    async def _create_preset(self, interaction: discord.Interaction) -> None:
+        await interaction.response.send_modal(CreatePresetModal(self.state))
+
+    async def _edit_bulk(self, interaction: discord.Interaction) -> None:
+        non_author = [
+            row for row in self.state.select_label_specs
+            if row["label"] != select_rule_service.AUTHOR_COMMENT_LABEL
+        ]
+        if not non_author:
+            await interaction.response.send_message("設定対象のラベルがありません。", ephemeral=True)
             return
-        await interaction.response.send_modal(CountEditModal(self.state))
+        await interaction.response.send_modal(BulkRuleModal(self.state))
 
     async def _add_label(self, interaction: discord.Interaction) -> None:
         await interaction.response.send_modal(AddSelectTypeModal(self.state))

@@ -46,6 +46,7 @@ async def create_kukai(
     title: str,
     theme: str | None = None,
     description: str | None = None,
+    entry_close_at: datetime | None = None,
     submission_close_at: datetime | None = None,
     selecting_close_at: datetime | None = None,
     # Optional settings (wizard-provided overrides)
@@ -78,6 +79,7 @@ async def create_kukai(
         theme=theme,
         description=description,
         state=KukaiState.DRAFT,
+        entry_close_at=entry_close_at,
         submission_close_at=submission_close_at,
         selecting_close_at=selecting_close_at,
         entry_enabled=entry_enabled,

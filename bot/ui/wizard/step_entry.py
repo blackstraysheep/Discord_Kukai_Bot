@@ -116,6 +116,12 @@ class StepEntryView(discord.ui.View):
         await goto_step(interaction, self.state)
 
     async def _next(self, interaction: discord.Interaction) -> None:
+        if self.state.entry_enabled and self.state.entry_close_at is None:
+            await interaction.response.send_message(
+                "エントリーを有効にする場合は、先に日程ステップでエントリー締切を設定してください。",
+                ephemeral=True,
+            )
+            return
         self.state.step = 4
         await goto_step(interaction, self.state)
 

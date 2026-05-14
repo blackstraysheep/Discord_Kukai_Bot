@@ -30,8 +30,10 @@ def build(state: WizardState) -> tuple[discord.Embed, discord.ui.View]:
     if state.description:
         embed.add_field(name="説明", value=state.description[:200], inline=False)
 
+    entry_str = format_jst(state.entry_close_at) if state.entry_close_at else "未設定"
     sub_str = format_jst(state.submission_close_at) if state.submission_close_at else "未設定"
     selecting_str = format_jst(state.selecting_close_at) if state.selecting_close_at else "未設定"
+    embed.add_field(name="エントリー締切", value=entry_str, inline=True)
     embed.add_field(name="投句締切", value=sub_str, inline=True)
     embed.add_field(name="選句締切", value=selecting_str, inline=True)
 
@@ -53,15 +55,20 @@ def build(state: WizardState) -> tuple[discord.Embed, discord.ui.View]:
     )
 
     embed.add_field(
-        name="公開設定",
+        name="進行・公開設定",
         value=(
-            f"投句公開: {'自動' if state.publish_mode == 'auto' else '手動'}"
-            f"　結果: {'自動' if state.result_mode == 'auto' else '手動'}"
+            f"結果: {'自動' if state.result_mode == 'auto' else '手動'}"
             f"　作者: {'公開' if state.author_reveal else '非公開'}"
             f"　0点以下作者: {('公開' if state.author_reveal_zero else '非公開') if state.author_reveal else '適用外'}"
         ),
         inline=False,
     )
+    channel_target = (
+        f"既存チャンネル: <#{state.existing_channel_id}>"
+        if state.use_existing_channel and state.existing_channel_id
+        else "新規チャンネルを作成"
+    )
+    embed.add_field(name="句会チャンネル", value=channel_target, inline=False)
     label_lines = []
     for spec in state.select_label_specs:
         max_count = "∞" if spec.get("max_count") is None else str(spec.get("max_count"))
@@ -127,17 +134,35 @@ class StepConfirmView(discord.ui.View):
 
         ch_name = _sanitize_channel_name(state.title)
         channel: discord.abc.GuildChannel | None = None
-        try:
-            channel = await guild.create_text_channel(ch_name)
-        except discord.Forbidden:
-            await interaction.edit_original_response(
-                embed=error_embed("チャンネルを作成する権限がありません。\nBotにチャンネル管理権限を付与してください。"),
-                view=None,
-            )
-            return
+        created_new_channel = False
+        if state.use_existing_channel:
+            if state.existing_channel_id is None:
+                await interaction.edit_original_response(
+                    embed=error_embed("既存チャンネルが未選択です。ステップ1で選択してください。"),
+                    view=None,
+                )
+                return
+            candidate = guild.get_channel(state.existing_channel_id)
+            if not isinstance(candidate, discord.TextChannel):
+                await interaction.edit_original_response(
+                    embed=error_embed("選択されたチャンネルが見つからないか、テキストチャンネルではありません。"),
+                    view=None,
+                )
+                return
+            channel = candidate
+        else:
+            try:
+                channel = await guild.create_text_channel(ch_name)
+                created_new_channel = True
+            except discord.Forbidden:
+                await interaction.edit_original_response(
+                    embed=error_embed("チャンネルを作成する権限がありません。\nBotにチャンネル管理権限を付与してください。"),
+                    view=None,
+                )
+                return
 
         async def _safe_delete_channel() -> None:
-            if not isinstance(channel, discord.TextChannel):
+            if not created_new_channel or not isinstance(channel, discord.TextChannel):
                 return
             try:
                 await channel.delete()
@@ -154,6 +179,7 @@ class StepConfirmView(discord.ui.View):
                     title=state.title,
                     theme=state.theme or None,
                     description=state.description or None,
+                    entry_close_at=state.entry_close_at,
                     submission_close_at=state.submission_close_at,
                     selecting_close_at=state.selecting_close_at,
                     entry_enabled=state.entry_enabled,
@@ -164,7 +190,7 @@ class StepConfirmView(discord.ui.View):
                     submission_mode=state.submission_mode,
                     selecting_mode=state.selecting_mode,
                     submission_overflow=state.submission_overflow,
-                    publish_mode=state.publish_mode,
+                    publish_mode="manual",
                     result_mode=state.result_mode,
                     author_reveal=state.author_reveal,
                     author_reveal_zero=state.author_reveal_zero,
@@ -219,6 +245,7 @@ class StepConfirmView(discord.ui.View):
         await interaction.edit_original_response(embed=success_embed_, view=None)
 
         # Post info embed to the new channel
+        entry_deadline = format_jst(state.entry_close_at) if state.entry_close_at else "未定"
         sub_str = format_jst(state.submission_close_at) if state.submission_close_at else "未定"
         selecting_str = format_jst(state.selecting_close_at) if state.selecting_close_at else "未定"
         info = discord.Embed(
@@ -229,6 +256,7 @@ class StepConfirmView(discord.ui.View):
         if state.theme:
             info.add_field(name="題", value=state.theme, inline=True)
         info.add_field(name="状態", value="下書き", inline=True)
+        info.add_field(name="エントリー締切", value=entry_deadline, inline=False)
         info.add_field(name="投句締切", value=sub_str, inline=False)
         info.add_field(name="選句締切", value=selecting_str, inline=False)
         info.set_footer(text=f"句会ID: {kukai_id}")

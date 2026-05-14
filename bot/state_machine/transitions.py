@@ -7,7 +7,6 @@ The standard forward path:
 
 Shortcuts driven by kukai settings:
   - entry_enabled=False  : draft → submission_open (skip entry states)
-  - publish_mode='auto'  : submission_closed → selecting_open (skip waiting_publish)
   - result_mode='auto'   : selecting_closed → results (skip waiting_results)
 
 Admins can also jump to any non-paused state via /kukai proceed.
@@ -45,12 +44,7 @@ def next_state(kukai) -> KukaiState:
         return KukaiState.SUBMISSION_OPEN if not kukai.entry_enabled else KukaiState.ENTRY_OPEN
 
     if current == KukaiState.SUBMISSION_CLOSED:
-        # Skip waiting_publish if auto-publish is configured
-        return (
-            KukaiState.SELECTING_OPEN
-            if kukai.publish_mode == "auto"
-            else KukaiState.WAITING_PUBLISH
-        )
+        return KukaiState.WAITING_PUBLISH
 
     if current == KukaiState.SELECTING_CLOSED:
         # Skip waiting_results if auto-result is configured

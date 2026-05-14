@@ -205,6 +205,7 @@ class KukaiCog(commands.Cog):
         try:
             published_count: int | None = None
             publish_warning: str | None = None
+            announced_message: str | None = None
             async with get_session() as session:
                 kukai = await kukai_service.get_kukai(session, kukai_id, interaction.guild.id)
                 if not await permission_service.is_kukai_admin(session, kukai, interaction.user):  # type: ignore[arg-type]
@@ -213,7 +214,7 @@ class KukaiCog(commands.Cog):
                     )
                     return
                 current_state = KukaiState.from_value(kukai.state)
-                if current_state == KukaiState.SUBMISSION_CLOSED and kukai.publish_mode == "auto":
+                if current_state in {KukaiState.SUBMISSION_CLOSED, KukaiState.WAITING_PUBLISH}:
                     await kukai_service.jump(session, kukai, KukaiState.WAITING_PUBLISH)
                     published = await submission_service.publish(session, kukai)
                     published_count = len(published)
@@ -223,8 +224,10 @@ class KukaiCog(commands.Cog):
                     if message_id is not None:
                         kukai.submission_message_id = message_id
                     new_state = await kukai_service.proceed(session, kukai)
+                    announced_message = "投句一覧を公開し、選句を開始しました。"
                 else:
                     new_state = await kukai_service.proceed(session, kukai)
+                    announced_message = self._state_announcement_text(new_state)
             state_ja = STATE_LABEL.get(str(new_state), str(new_state))
             description = f"句会「{kukai.title}」を **{state_ja}** へ進めました。"
             if published_count is not None:
@@ -235,6 +238,8 @@ class KukaiCog(commands.Cog):
                 embed=success_embed(description),
                 ephemeral=True,
             )
+            if announced_message:
+                await self._announce_to_kukai_channel(interaction.guild, kukai, announced_message)
         except ServiceError as e:
             await interaction.response.send_message(embed=error_embed(str(e)), ephemeral=True)
 
@@ -327,44 +332,6 @@ class KukaiCog(commands.Cog):
             else:
                 await interaction.response.send_message(embed=error_embed(str(e)), ephemeral=True)
 
-    @kukai.command(name="publish", description="【管理者】投句を公開し、選句を開始します")
-    @app_commands.describe(kukai_id="句会ID")
-    async def kukai_publish(self, interaction: discord.Interaction, kukai_id: int) -> None:
-        assert interaction.guild is not None
-        try:
-            async with get_session() as session:
-                kukai = await kukai_service.get_kukai(session, kukai_id, interaction.guild.id)
-                if not await permission_service.is_kukai_admin(session, kukai, interaction.user):  # type: ignore[arg-type]
-                    await interaction.response.send_message(
-                        embed=error_embed("この操作は句会管理者のみ実行できます。"), ephemeral=True
-                    )
-                    return
-                published = await submission_service.publish(session, kukai)
-                new_state = await kukai_service.proceed(session, kukai)
-
-            publish_warning, message_id = await self._post_submission_list(
-                interaction.guild, kukai, published
-            )
-
-            if message_id is not None:
-                async with get_session() as session2:
-                    kukai2 = await kukai_service.get_kukai(session2, kukai_id, interaction.guild.id)
-                    kukai2.submission_message_id = message_id
-
-            state_ja = STATE_LABEL.get(str(new_state), str(new_state))
-            description = f"{len(published)}句を公開しました。\n状態: **{state_ja}**"
-            if publish_warning:
-                description += f"\n⚠️ {publish_warning}"
-            await interaction.response.send_message(
-                embed=discord.Embed(
-                    description=description,
-                    color=COLOR_SUCCESS,
-                ),
-                ephemeral=True,
-            )
-        except ServiceError as e:
-            await interaction.response.send_message(embed=error_embed(str(e)), ephemeral=True)
-
     async def _post_submission_list(
         self,
         guild: discord.Guild,
@@ -391,6 +358,27 @@ class KukaiCog(commands.Cog):
             return "公開チャンネルへの送信権限がないため、投句一覧を投稿できません。", None
 
         return None, first_message_id
+
+    @staticmethod
+    def _state_announcement_text(state: KukaiState) -> str | None:
+        mapping = {
+            KukaiState.ENTRY_OPEN: "エントリー受付を開始しました。",
+            KukaiState.SUBMISSION_OPEN: "投句受付を開始しました。",
+            KukaiState.SELECTING_OPEN: "選句受付を開始しました。",
+            KukaiState.RESULTS: "結果を公開しました。",
+        }
+        return mapping.get(state)
+
+    async def _announce_to_kukai_channel(self, guild: discord.Guild, kukai, message: str) -> None:
+        if not kukai.channel_id:
+            return
+        channel = guild.get_channel(kukai.channel_id)
+        if not isinstance(channel, discord.TextChannel):
+            return
+        try:
+            await send_with_retry(lambda: channel.send(embed=discord.Embed(description=message, color=COLOR_INFO)))
+        except Exception:
+            pass
 
     @kukai.command(name="rollback", description="【管理者】投句公開を取り消し、公開待ちに戻します")
     @app_commands.describe(kukai_id="句会ID")
