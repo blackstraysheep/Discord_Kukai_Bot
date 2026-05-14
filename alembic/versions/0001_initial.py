@@ -99,7 +99,6 @@ def upgrade() -> None:
         sa.Column("name", sa.String(100), nullable=False),
         sa.Column("is_default", sa.Integer(), nullable=False, server_default="0"),
         sa.Column("created_by", sa.BigInteger(), nullable=False),
-        sa.Column("definition_json", sa.Text(), nullable=False, server_default="[]"),
         sa.Column("created_at", sa.DateTime(), nullable=False),
         sa.Column("updated_at", sa.DateTime(), nullable=False),
         sa.UniqueConstraint("guild_id", "name"),
