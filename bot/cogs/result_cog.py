@@ -1,6 +1,5 @@
 """Result display command: /result"""
 
-import asyncio
 import logging
 
 import discord
@@ -23,6 +22,12 @@ _PREVIEW_ALLOWED = {
     KukaiState.WAITING_RESULTS,
     KukaiState.RESULTS,
     KukaiState.ENDED,
+}
+
+_FORMAT_LABELS = {
+    "score": "点数順",
+    "number": "番号順",
+    "author": "作者別",
 }
 
 
@@ -162,6 +167,171 @@ def _overall_embeds(kukai, overall_comments, guild: discord.Guild) -> list[disco
     return pages
 
 
+def _available_formats(kukai) -> list[str]:
+    formats: list[str] = []
+    if kukai.points_enabled:
+        formats.append("score")
+    formats.append("number")
+    if kukai.author_reveal:
+        formats.append("author")
+    return formats
+
+
+def _resolve_initial_format(kukai, requested: str | None) -> str:
+    available = _available_formats(kukai)
+    if not available:
+        return "number"
+
+    if requested and requested in available:
+        return requested
+
+    default_format = kukai.result_display_default if kukai.result_display_default in available else None
+    if default_format:
+        return default_format
+
+    return available[0]
+
+
+class _ResultFormatSelect(discord.ui.Select):
+    def __init__(self, owner: "ResultSwitchView") -> None:
+        self._owner = owner
+        options = [
+            discord.SelectOption(
+                label=_FORMAT_LABELS.get(fmt, fmt),
+                value=fmt,
+                default=(fmt == owner.current_format),
+            )
+            for fmt in owner.available_formats
+        ]
+        super().__init__(
+            placeholder="表示形式を切替",
+            options=options,
+            min_values=1,
+            max_values=1,
+            row=0,
+        )
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        self._owner.current_format = self.values[0]
+        self._owner.current_page = 0
+        self._owner._build_items()
+        await interaction.response.edit_message(
+            embed=self._owner.current_embed(),
+            view=self._owner,
+        )
+
+
+class ResultSwitchView(discord.ui.View):
+    def __init__(self, kukai, results, overall_comments, guild: discord.Guild, *, initial_format: str) -> None:
+        super().__init__(timeout=1800)
+        self.kukai = kukai
+        self.results = results
+        self.overall_comments = overall_comments
+        self.guild = guild
+        self.available_formats = _available_formats(kukai)
+        self.current_format = _resolve_initial_format(kukai, initial_format)
+        self.current_page = 0
+        self._pages_cache: dict[str, list[discord.Embed]] = {}
+        self._build_items()
+
+    def _pages_for(self, fmt: str) -> list[discord.Embed]:
+        cached = self._pages_cache.get(fmt)
+        if cached is not None:
+            return cached
+
+        if fmt == "score":
+            totals: dict[int, int] = {}
+            for r in self.results:
+                totals[r.author_user_id] = totals.get(r.author_user_id, 0) + r.total_score
+            if not self.kukai.author_reveal:
+                visible_author_ids: set[int] = set()
+            elif self.kukai.author_reveal_zero:
+                visible_author_ids = set(totals.keys())
+            else:
+                visible_author_ids = {uid for uid, score in totals.items() if score > 0}
+            reveal_map = {uid: uid in visible_author_ids for uid in totals.keys()}
+            pages = _score_embed(
+                self.kukai,
+                self.results,
+                reveal_author_for_user=reveal_map,
+                guild=self.guild,
+            )
+        elif fmt == "number":
+            pages = _number_embed(self.kukai, self.results, guild=self.guild)
+        elif fmt == "author":
+            totals: dict[int, int] = {}
+            for r in self.results:
+                totals[r.author_user_id] = totals.get(r.author_user_id, 0) + r.total_score
+            if self.kukai.author_reveal_zero:
+                visible_author_ids = set(totals.keys())
+            else:
+                visible_author_ids = {uid for uid, score in totals.items() if score > 0}
+            if not visible_author_ids:
+                pages = [
+                    discord.Embed(
+                        description="公開対象の作者がいないため、作者別表示はできません。",
+                        color=COLOR_INFO,
+                    )
+                ]
+            else:
+                pages = _author_embed(
+                    self.kukai,
+                    self.results,
+                    guild=self.guild,
+                    visible_author_ids=visible_author_ids,
+                )
+        else:
+            pages = [discord.Embed(description="不明な表示形式です。", color=COLOR_INFO)]
+
+        pages.extend(_overall_embeds(self.kukai, self.overall_comments, guild=self.guild))
+        self._pages_cache[fmt] = pages
+        return pages
+
+    def current_embed(self) -> discord.Embed:
+        pages = self._pages_for(self.current_format)
+        index = min(max(self.current_page, 0), len(pages) - 1)
+        self.current_page = index
+        return pages[index]
+
+    def _build_items(self) -> None:
+        self.clear_items()
+        self.add_item(_ResultFormatSelect(self))
+
+        pages = self._pages_for(self.current_format)
+        total_pages = len(pages)
+
+        prev_btn = discord.ui.Button(
+            label="◀",
+            style=discord.ButtonStyle.secondary,
+            row=1,
+            disabled=(self.current_page <= 0),
+        )
+        prev_btn.callback = self._on_prev
+        self.add_item(prev_btn)
+
+        next_btn = discord.ui.Button(
+            label="▶",
+            style=discord.ButtonStyle.secondary,
+            row=1,
+            disabled=(self.current_page >= total_pages - 1),
+        )
+        next_btn.callback = self._on_next
+        self.add_item(next_btn)
+
+    async def _on_prev(self, interaction: discord.Interaction) -> None:
+        if self.current_page > 0:
+            self.current_page -= 1
+        self._build_items()
+        await interaction.response.edit_message(embed=self.current_embed(), view=self)
+
+    async def _on_next(self, interaction: discord.Interaction) -> None:
+        pages = self._pages_for(self.current_format)
+        if self.current_page < len(pages) - 1:
+            self.current_page += 1
+        self._build_items()
+        await interaction.response.edit_message(embed=self.current_embed(), view=self)
+
+
 class ResultCog(commands.Cog):
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
@@ -182,7 +352,7 @@ class ResultCog(commands.Cog):
         self,
         interaction: discord.Interaction,
         kukai_id: int,
-        format: str = "score",
+        format: str | None = None,
     ) -> None:
         assert interaction.guild is not None
         try:
@@ -216,65 +386,37 @@ class ResultCog(commands.Cog):
                 )
                 return
 
-            reveal = kukai.author_reveal
-            # author_reveal_zero=False: hide authors with score <= 0
-            if format == "score":
-                totals: dict[int, int] = {}
-                for r in results:
-                    totals[r.author_user_id] = totals.get(r.author_user_id, 0) + r.total_score
-                if not kukai.author_reveal:
-                    visible_author_ids: set[int] = set()
-                elif kukai.author_reveal_zero:
-                    visible_author_ids = set(totals.keys())
-                else:
-                    visible_author_ids = {uid for uid, score in totals.items() if score > 0}
-                reveal_map = {uid: uid in visible_author_ids for uid in totals.keys()}
-                embeds = _score_embed(
-                    kukai,
-                    results,
-                    reveal_author_for_user=reveal_map,
-                    guild=interaction.guild,
+            requested_format = format
+            if requested_format == "score" and not kukai.points_enabled:
+                await interaction.response.send_message(
+                    embed=error_embed("この句会は点数制OFFのため、点数順表示はできません。"),
+                    ephemeral=True,
                 )
-            elif format == "number":
-                embeds = _number_embed(kukai, results, guild=interaction.guild)
-            else:
-                if not reveal:
-                    await interaction.response.send_message(
-                        embed=error_embed("この句会は作者非公開に設定されています。"), ephemeral=True
-                    )
-                    return
-                totals: dict[int, int] = {}
-                for r in results:
-                    totals[r.author_user_id] = totals.get(r.author_user_id, 0) + r.total_score
-                if kukai.author_reveal_zero:
-                    visible_author_ids = set(totals.keys())
-                else:
-                    visible_author_ids = {uid for uid, score in totals.items() if score > 0}
-                if not visible_author_ids:
-                    await interaction.response.send_message(
-                        embed=error_embed("公開対象の作者がいないため、作者別表示はできません。"),
-                        ephemeral=True,
-                    )
-                    return
-                embeds = _author_embed(
-                    kukai,
-                    results,
-                    guild=interaction.guild,
-                    visible_author_ids=visible_author_ids,
+                return
+            if requested_format == "author" and not kukai.author_reveal:
+                await interaction.response.send_message(
+                    embed=error_embed("この句会は作者非公開に設定されています。"),
+                    ephemeral=True,
                 )
+                return
 
-            embeds.extend(_overall_embeds(kukai, overall_comments, guild=interaction.guild))
+            view = ResultSwitchView(
+                kukai,
+                results,
+                overall_comments,
+                interaction.guild,
+                initial_format=_resolve_initial_format(kukai, requested_format),
+            )
 
             # Public in RESULTS state, ephemeral otherwise
             ephemeral = state != KukaiState.RESULTS
             await send_with_retry(
-                lambda: interaction.response.send_message(embed=embeds[0], ephemeral=ephemeral)
-            )
-            for extra in embeds[1:]:
-                await asyncio.sleep(0.35)
-                await send_with_retry(
-                    lambda: interaction.followup.send(embed=extra, ephemeral=ephemeral)
+                lambda: interaction.response.send_message(
+                    embed=view.current_embed(),
+                    view=view,
+                    ephemeral=ephemeral,
                 )
+            )
 
         except ServiceError as e:
             await interaction.response.send_message(embed=error_embed(str(e)), ephemeral=True)
