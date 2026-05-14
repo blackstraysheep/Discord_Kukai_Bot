@@ -129,16 +129,16 @@ class OverallSelectCommentModal(discord.ui.Modal, title="総評を入力"):
 
 
 class _SubmissionSelect(discord.ui.Select):
-    def __init__(self, parent: "SelectView") -> None:
-        self.parent = parent
+    def __init__(self, view_owner: "SelectView") -> None:
+        self._view_owner = view_owner
         options = []
-        for ps in parent._pub_subs[:25]:
+        for ps in view_owner._pub_subs[:25]:
             options.append(
                 discord.SelectOption(
                     label=f"No.{ps.number}",
                     value=str(ps.submission_id),
                     description=(ps.submission.text[:95] or "（空）"),
-                    default=ps.submission_id == parent._selected_submission_id,
+                    default=ps.submission_id == view_owner._selected_submission_id,
                 )
             )
         super().__init__(
@@ -150,31 +150,34 @@ class _SubmissionSelect(discord.ui.Select):
         )
 
     async def callback(self, interaction: discord.Interaction) -> None:
-        self.parent._selected_submission_id = int(self.values[0])
-        self.parent._selected_label_value = self.parent._default_label_value()
-        self.parent._build_items()
-        await interaction.response.edit_message(embed=self.parent.build_embed(), view=self.parent)
+        self._view_owner._selected_submission_id = int(self.values[0])
+        self._view_owner._selected_label_value = self._view_owner._default_label_value()
+        self._view_owner._build_items()
+        await interaction.response.edit_message(
+            embed=self._view_owner.build_embed(),
+            view=self._view_owner,
+        )
 
 
 class _LabelSelect(discord.ui.Select):
-    def __init__(self, parent: "SelectView") -> None:
-        self.parent = parent
-        ps = parent._selected_ps()
-        is_own = ps.submission.user_id == parent._selector_user_id
+    def __init__(self, view_owner: "SelectView") -> None:
+        self._view_owner = view_owner
+        ps = view_owner._selected_ps()
+        is_own = ps.submission.user_id == view_owner._selector_user_id
 
         options: list[discord.SelectOption] = []
         if is_own:
-            if parent._author_label is not None:
+            if view_owner._author_label is not None:
                 options.append(
                     discord.SelectOption(
                         label=_AUTHOR_COMMENT_LABEL,
                         value="author_comment",
                         description="自分の句には作者コメントのみ設定可能",
-                        default=parent._selected_label_value == "author_comment",
+                        default=view_owner._selected_label_value == "author_comment",
                     )
                 )
         else:
-            for lbl in parent._labels:
+            for lbl in view_owner._labels:
                 if lbl.label == _AUTHOR_COMMENT_LABEL:
                     continue
                 desc = f"{lbl.point:+d}pt"
@@ -185,7 +188,7 @@ class _LabelSelect(discord.ui.Select):
                         label=lbl.label,
                         value=str(lbl.id),
                         description=desc,
-                        default=parent._selected_label_value == str(lbl.id),
+                        default=view_owner._selected_label_value == str(lbl.id),
                     )
                 )
 
@@ -209,8 +212,11 @@ class _LabelSelect(discord.ui.Select):
         )
 
     async def callback(self, interaction: discord.Interaction) -> None:
-        self.parent._selected_label_value = self.values[0]
-        await interaction.response.edit_message(embed=self.parent.build_embed(), view=self.parent)
+        self._view_owner._selected_label_value = self.values[0]
+        await interaction.response.edit_message(
+            embed=self._view_owner.build_embed(),
+            view=self._view_owner,
+        )
 
 
 class SelectView(discord.ui.View):
