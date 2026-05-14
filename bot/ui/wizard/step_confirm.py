@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 def build(state: WizardState) -> tuple[discord.Embed, discord.ui.View]:
     embed = discord.Embed(
-        title=f"ステップ 6/{STEP_COUNT}: 確認",
+        title=f"ステップ 7/{STEP_COUNT}: 確認",
         description="以下の設定で句会を作成します。よろしければ「作成」を押してください。",
         color=discord.Color.green(),
     )
@@ -62,6 +62,20 @@ def build(state: WizardState) -> tuple[discord.Embed, discord.ui.View]:
         ),
         inline=False,
     )
+    label_lines = []
+    for spec in state.select_label_specs:
+        max_count = "∞" if spec.get("max_count") is None else str(spec.get("max_count"))
+        label_lines.append(
+            f"{spec.get('label')} ({spec.get('point', 0):+d}pt / {spec.get('min_count', 0)}〜{max_count})"
+        )
+    embed.add_field(
+        name="選句仕様",
+        value=(
+            f"プリセット: {state.select_preset_name}\n"
+            + ("\n".join(label_lines[:8]) if label_lines else "未設定")
+        ),
+        inline=False,
+    )
     return embed, StepConfirmView(state)
 
 
@@ -99,7 +113,7 @@ class StepConfirmView(discord.ui.View):
         self.add_item(cancel_btn)
 
     async def _back(self, interaction: discord.Interaction) -> None:
-        self.state.step = 5
+        self.state.step = 6
         await goto_step(interaction, self.state)
 
     async def _cancel(self, interaction: discord.Interaction) -> None:
@@ -154,6 +168,7 @@ class StepConfirmView(discord.ui.View):
                     result_mode=state.result_mode,
                     author_reveal=state.author_reveal,
                     author_reveal_zero=state.author_reveal_zero,
+                    select_label_specs=state.select_label_specs,
                 )
                 kukai_id = kukai.id
                 kukai_title = kukai.title

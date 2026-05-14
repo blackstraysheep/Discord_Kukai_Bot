@@ -1,6 +1,6 @@
 from typing import TYPE_CHECKING, Optional
 
-from sqlalchemy import BigInteger, ForeignKey, Integer, String, UniqueConstraint
+from sqlalchemy import BigInteger, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from bot.models.base import Base, TimestampMixin
@@ -18,6 +18,7 @@ class SelectRuleTemplate(Base, TimestampMixin):
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     is_default: Mapped[bool] = mapped_column(Integer, nullable=False, default=0)
     created_by: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    definition_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
 
     __table_args__ = (UniqueConstraint("guild_id", "name"),)
 

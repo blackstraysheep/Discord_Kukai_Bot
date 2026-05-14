@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Any, Optional
 
 
 @dataclass
@@ -35,7 +35,14 @@ class WizardState:
     selecting_mode: str = "manual"
     submission_overflow: bool = False
 
-    # Step 5: Publish / Result
+    # Step 5: Select rule
+    select_preset_template_id: Optional[int] = None
+    select_preset_name: str = "デフォルト"
+    select_preset_options: list[dict[str, Any]] = field(default_factory=list)
+    select_label_specs: list[dict[str, Any]] = field(default_factory=list)
+    selected_select_label: str = ""
+
+    # Step 6: Publish / Result
     publish_mode: str = "manual"
     result_mode: str = "manual"
     author_reveal: bool = True

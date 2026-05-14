@@ -9,8 +9,14 @@ from discord import app_commands
 from discord.ext import commands
 
 from bot.database import get_session
-from bot.services import kukai_service, notification_service, permission_service, submission_service
-from bot.services.errors import ServiceError
+from bot.services import (
+    kukai_service,
+    notification_service,
+    permission_service,
+    select_rule_service,
+    submission_service,
+)
+from bot.services.errors import ServiceError, ValidationError
 from bot.state_machine.states import KukaiState
 from bot.ui.common import ConfirmView
 from bot.ui.submission_view import RollbackView
@@ -33,8 +39,6 @@ STATE_LABEL: dict[str, str] = {
     "submission_open": "投句受付中",
     "submission_closed": "投句締切",
     "waiting_publish": "投句公開待ち",
-    "selecting_open": "選句受付中",
-    "selecting_closed": "選句締切",
     "selecting_open": "選句受付中",
     "selecting_closed": "選句締切",
     "waiting_results": "結果公開待ち",
@@ -114,6 +118,7 @@ class KukaiCog(commands.Cog):
             allowed = await permission_service.can_create_kukai(
                 session, interaction.guild.id, interaction.user  # type: ignore[arg-type]
             )
+            templates = await select_rule_service.list_templates(session, interaction.guild.id)
         if not allowed:
             await interaction.response.send_message(
                 embed=error_embed("句会の作成権限がありません。"), ephemeral=True
@@ -124,8 +129,74 @@ class KukaiCog(commands.Cog):
         from bot.ui.wizard.wizard_state import WizardState, set_wizard
 
         state = WizardState(user_id=interaction.user.id, guild_id=interaction.guild.id)
+        state.select_preset_options = [{"id": t.id, "name": t.name} for t in templates]
+        state.select_label_specs = select_rule_service.default_kukai_specs()
+        state.selected_select_label = "特選"
         set_wizard(state)
         await goto_step(interaction, state, first_send=True)
+
+    @kukai.command(name="select_preset_add", description="【管理者】選句プリセットへ選句種別を追加/更新します")
+    @app_commands.describe(
+        preset_name="プリセット名",
+        set_default="このプリセットを既定にする",
+    )
+    async def select_preset_add(
+        self,
+        interaction: discord.Interaction,
+        preset_name: str,
+        set_default: bool = False,
+    ) -> None:
+        assert interaction.guild is not None
+        async with get_session() as session:
+            allowed = await permission_service.can_create_kukai(
+                session, interaction.guild.id, interaction.user  # type: ignore[arg-type]
+            )
+        if not allowed:
+            await interaction.response.send_message(
+                embed=error_embed("この操作を行う権限がありません。"),
+                ephemeral=True,
+            )
+            return
+        await interaction.response.send_modal(
+            SelectPresetLabelModal(
+                guild_id=interaction.guild.id,
+                user_id=interaction.user.id,
+                preset_name=preset_name,
+                set_default=set_default,
+            )
+        )
+
+    @kukai.command(name="select_preset_list", description="選句プリセット一覧を表示します")
+    async def select_preset_list(self, interaction: discord.Interaction) -> None:
+        assert interaction.guild is not None
+        try:
+            async with get_session() as session:
+                templates = await select_rule_service.list_templates(session, interaction.guild.id)
+            if not templates:
+                await interaction.response.send_message(
+                    embed=discord.Embed(
+                        description="登録済みの選句プリセットはありません。",
+                        color=COLOR_INFO,
+                    ),
+                    ephemeral=True,
+                )
+                return
+
+            embed = discord.Embed(title="選句プリセット一覧", color=COLOR_INFO)
+            for template in templates[:10]:
+                specs = select_rule_service.deserialize_template_specs(template.definition_json)
+                labels = ", ".join(str(s["label"]) for s in specs[:4]) or "（未設定）"
+                suffix = "（既定）" if bool(template.is_default) else ""
+                embed.add_field(
+                    name=f"[{template.id}] {template.name}{suffix}",
+                    value=f"種別数: {len(specs)} / {labels}",
+                    inline=False,
+                )
+            if len(templates) > 10:
+                embed.set_footer(text=f"他 {len(templates) - 10} 件")
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+        except ServiceError as e:
+            await interaction.response.send_message(embed=error_embed(str(e)), ephemeral=True)
 
     @kukai.command(name="proceed", description="【管理者】句会を次の状態へ進めます")
     @app_commands.describe(kukai_id="句会ID")
@@ -471,6 +542,92 @@ class KukaiCog(commands.Cog):
             )
         except ServiceError as e:
             await interaction.response.send_message(embed=error_embed(str(e)), ephemeral=True)
+
+
+class SelectPresetLabelModal(discord.ui.Modal, title="選句プリセット: 種別追加/更新"):
+    label = discord.ui.TextInput(label="選句種別名", placeholder="特選", required=True, max_length=50)
+    point = discord.ui.TextInput(label="点数", placeholder="2", required=True, max_length=5)
+    min_count = discord.ui.TextInput(label="最小選句数", placeholder="0", required=True, max_length=3)
+    max_count = discord.ui.TextInput(
+        label="最大選句数（∞可）",
+        placeholder="1 / ∞",
+        required=False,
+        max_length=8,
+    )
+    comment_mode = discord.ui.TextInput(
+        label="comment_mode",
+        placeholder="none / optional / required",
+        required=False,
+        max_length=10,
+        default="none",
+    )
+
+    def __init__(self, *, guild_id: int, user_id: int, preset_name: str, set_default: bool) -> None:
+        super().__init__()
+        self.guild_id = guild_id
+        self.user_id = user_id
+        self.preset_name = preset_name
+        self.set_default = set_default
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        label = self.label.value.strip()
+        if not label:
+            await interaction.response.send_message(
+                embed=error_embed("選句種別名は必須です。"),
+                ephemeral=True,
+            )
+            return
+
+        try:
+            point = int(self.point.value.strip())
+            min_count = int(self.min_count.value.strip())
+        except ValueError:
+            await interaction.response.send_message(
+                embed=error_embed("点数と最小選句数は整数で指定してください。"),
+                ephemeral=True,
+            )
+            return
+
+        raw_max = self.max_count.value.strip()
+        if not raw_max or raw_max.lower() in {"∞", "inf", "infinity", "unlimited", "無制限"}:
+            max_count = None
+        else:
+            try:
+                max_count = int(raw_max)
+            except ValueError:
+                await interaction.response.send_message(
+                    embed=error_embed("最大選句数は整数または∞で指定してください。"),
+                    ephemeral=True,
+                )
+                return
+
+        comment_mode = (self.comment_mode.value or "none").strip().lower()
+        try:
+            async with get_session() as session:
+                template = await select_rule_service.add_or_update_template_label(
+                    session,
+                    guild_id=self.guild_id,
+                    created_by=self.user_id,
+                    template_name=self.preset_name,
+                    label=label,
+                    point=point,
+                    min_count=min_count,
+                    max_count=max_count,
+                    comment_mode=comment_mode,
+                    set_default=self.set_default,
+                )
+                specs = select_rule_service.deserialize_template_specs(template.definition_json)
+        except (ServiceError, ValidationError) as e:
+            await interaction.response.send_message(embed=error_embed(str(e)), ephemeral=True)
+            return
+
+        await interaction.response.send_message(
+            embed=success_embed(
+                f"プリセット「{template.name}」を更新しました。\n"
+                f"種別数: {len(specs)}"
+            ),
+            ephemeral=True,
+        )
 
 
 def _build_info_embed(kukai) -> discord.Embed:

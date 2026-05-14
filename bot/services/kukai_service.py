@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from bot.models.kukai import Kukai, KukaiAdmin
 from bot.models.select_rule import SelectLabel
 from bot.repositories import kukai_repo
+from bot.services import select_rule_service
 from bot.services.errors import (
     DeadlineConflictError,
     InvalidStateError,
@@ -20,46 +21,6 @@ from bot.state_machine.transitions import next_state
 
 # Shared state machine instance (no callbacks yet; added in later phases)
 _state_machine = StateMachine()
-
-# Default select labels copied into every new kukai (requirements §5.1)
-_DEFAULT_SELECT_LABELS = [
-    {
-        "label": "特選",
-        "point": 2,
-        "rank_priority": 1,
-        "display_order": 1,
-        "min_count": 0,
-        "max_count": 1,
-        "comment_mode": "none",
-    },
-    {
-        "label": "並選",
-        "point": 1,
-        "rank_priority": 2,
-        "display_order": 2,
-        "min_count": 0,
-        "max_count": 5,
-        "comment_mode": "none",
-    },
-    {
-        "label": "予選",
-        "point": 0,
-        "rank_priority": 3,
-        "display_order": 3,
-        "min_count": 0,
-        "max_count": None,
-        "comment_mode": "none",
-    },
-    {
-        "label": "作者コメント",
-        "point": 0,
-        "rank_priority": 999,
-        "display_order": 999,
-        "min_count": 0,
-        "max_count": None,
-        "comment_mode": "required",
-    },
-]
 
 _SUBMISSION_LOCKED_STATES = {
     KukaiState.SELECTING_OPEN,
@@ -100,6 +61,7 @@ async def create_kukai(
     result_mode: str = "manual",
     author_reveal: bool = True,
     author_reveal_zero: bool = True,
+    select_label_specs: list[dict] | None = None,
 ) -> Kukai:
     if not entry_enabled:
         entry_approval = False
@@ -134,7 +96,11 @@ async def create_kukai(
     session.add(kukai)
     await session.flush()  # obtain id
 
-    for data in _DEFAULT_SELECT_LABELS:
+    if select_label_specs is None:
+        select_label_specs = select_rule_service.default_kukai_specs()
+    normalized_specs = select_rule_service.normalize_kukai_specs(select_label_specs)
+
+    for data in normalized_specs:
         session.add(SelectLabel(kukai_id=kukai.id, **data))
     await session.flush()
     await session.refresh(kukai, attribute_names=["select_labels"])

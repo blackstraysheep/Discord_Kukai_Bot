@@ -17,7 +17,7 @@ def build(state: WizardState) -> tuple[discord.Embed, discord.ui.View]:
     else:
         zero_reveal_str = "（作者非公開時は適用外）"
     embed = discord.Embed(
-        title=f"ステップ 5/{STEP_COUNT}: 公開・結果設定",
+        title=f"ステップ 6/{STEP_COUNT}: 公開・結果設定",
         color=discord.Color.blurple(),
     )
     embed.add_field(name="投句公開", value=publish_str, inline=True)
@@ -181,11 +181,11 @@ class StepPublishView(discord.ui.View):
         self.add_item(cancel_btn)
 
     async def _back(self, interaction: discord.Interaction) -> None:
-        self.state.step = 4
+        self.state.step = 5
         await goto_step(interaction, self.state)
 
     async def _next(self, interaction: discord.Interaction) -> None:
-        self.state.step = 6
+        self.state.step = 7
         await goto_step(interaction, self.state)
 
     async def _cancel(self, interaction: discord.Interaction) -> None:
