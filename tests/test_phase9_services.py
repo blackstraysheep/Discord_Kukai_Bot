@@ -77,6 +77,20 @@ async def test_edit_kukai_blocks_submission_settings_after_voting_open(db_sessio
 
 
 @pytest.mark.asyncio
+async def test_edit_kukai_can_set_submission_max_unlimited(db_session):
+    kukai = await _make_kukai(db_session)
+    assert kukai.submission_max == 3
+
+    await kukai_service.edit_kukai(
+        db_session,
+        kukai,
+        submission_max_unlimited=True,
+    )
+
+    assert kukai.submission_max is None
+
+
+@pytest.mark.asyncio
 async def test_add_and_remove_kukai_admin(db_session):
     kukai = await _make_kukai(db_session)
 

@@ -358,7 +358,11 @@ async def import_payload(
             min_participants=int(source_kukai.get("min_participants", 0)),
             min_participants_action=source_kukai.get("min_participants_action") or "admin",
             submission_min=int(source_kukai.get("submission_min", 1)),
-            submission_max=int(source_kukai.get("submission_max", 3)),
+            submission_max=(
+                int(source_kukai["submission_max"])
+                if source_kukai.get("submission_max") is not None
+                else None
+            ),
             submission_overflow=bool(source_kukai.get("submission_overflow", False)),
             submission_underflow=bool(source_kukai.get("submission_underflow", False)),
             submission_mode=source_kukai.get("submission_mode") or "manual",

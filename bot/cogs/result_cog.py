@@ -25,7 +25,13 @@ _PREVIEW_ALLOWED = {
 }
 
 
-def _score_embed(kukai, results, *, reveal_author: bool, guild: discord.Guild) -> list[discord.Embed]:
+def _score_embed(
+    kukai,
+    results,
+    *,
+    reveal_author_for_user: dict[int, bool],
+    guild: discord.Guild,
+) -> list[discord.Embed]:
     """Build result embeds sorted by rank (score desc)."""
     pages: list[discord.Embed] = []
     embed = discord.Embed(
@@ -36,7 +42,7 @@ def _score_embed(kukai, results, *, reveal_author: bool, guild: discord.Guild) -
 
     for r in results:
         author_line = ""
-        if reveal_author:
+        if reveal_author_for_user.get(r.author_user_id, False):
             member = guild.get_member(r.author_user_id)
             author_name = member.display_name if member else f"UID:{r.author_user_id}"
             author_line = f"　作者: {discord_safe(author_name)}"
@@ -89,11 +95,19 @@ def _number_embed(kukai, results, guild: discord.Guild) -> list[discord.Embed]:
     return [embed]
 
 
-def _author_embed(kukai, results, guild: discord.Guild) -> list[discord.Embed]:
+def _author_embed(
+    kukai,
+    results,
+    guild: discord.Guild,
+    *,
+    visible_author_ids: set[int],
+) -> list[discord.Embed]:
     """Build result embeds grouped by author."""
     from collections import defaultdict
     by_author: dict[int, list] = defaultdict(list)
     for r in results:
+        if r.author_user_id not in visible_author_ids:
+            continue
         by_author[r.author_user_id].append(r)
 
     embed = discord.Embed(
@@ -173,7 +187,22 @@ class ResultCog(commands.Cog):
             reveal = kukai.author_reveal
             # author_reveal_zero=False: hide authors with score <= 0
             if format == "score":
-                embeds = _score_embed(kukai, results, reveal_author=reveal, guild=interaction.guild)
+                totals: dict[int, int] = {}
+                for r in results:
+                    totals[r.author_user_id] = totals.get(r.author_user_id, 0) + r.total_score
+                if not kukai.author_reveal:
+                    visible_author_ids: set[int] = set()
+                elif kukai.author_reveal_zero:
+                    visible_author_ids = set(totals.keys())
+                else:
+                    visible_author_ids = {uid for uid, score in totals.items() if score > 0}
+                reveal_map = {uid: uid in visible_author_ids for uid in totals.keys()}
+                embeds = _score_embed(
+                    kukai,
+                    results,
+                    reveal_author_for_user=reveal_map,
+                    guild=interaction.guild,
+                )
             elif format == "number":
                 embeds = _number_embed(kukai, results, guild=interaction.guild)
             else:
@@ -182,7 +211,25 @@ class ResultCog(commands.Cog):
                         embed=error_embed("この句会は作者非公開に設定されています。"), ephemeral=True
                     )
                     return
-                embeds = _author_embed(kukai, results, guild=interaction.guild)
+                totals: dict[int, int] = {}
+                for r in results:
+                    totals[r.author_user_id] = totals.get(r.author_user_id, 0) + r.total_score
+                if kukai.author_reveal_zero:
+                    visible_author_ids = set(totals.keys())
+                else:
+                    visible_author_ids = {uid for uid, score in totals.items() if score > 0}
+                if not visible_author_ids:
+                    await interaction.response.send_message(
+                        embed=error_embed("公開対象の作者がいないため、作者別表示はできません。"),
+                        ephemeral=True,
+                    )
+                    return
+                embeds = _author_embed(
+                    kukai,
+                    results,
+                    guild=interaction.guild,
+                    visible_author_ids=visible_author_ids,
+                )
 
             # Public in RESULTS state, ephemeral otherwise
             ephemeral = state != KukaiState.RESULTS

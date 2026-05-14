@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 import discord
 
 from bot.ui.wizard.base import STEP_COUNT, cancel_wizard, goto_step
@@ -106,6 +108,18 @@ class StepScheduleModal(discord.ui.Modal, title="日程の入力"):
             vote_close = parse_datetime(self.voting_close.value)
         except ValueError as e:
             await interaction.response.send_message(str(e), ephemeral=True)
+            return
+
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        if sub_close <= now:
+            await interaction.response.send_message(
+                "投句締切は現在時刻より未来に設定してください。", ephemeral=True
+            )
+            return
+        if vote_close <= now:
+            await interaction.response.send_message(
+                "選句締切は現在時刻より未来に設定してください。", ephemeral=True
+            )
             return
 
         if vote_close <= sub_close:

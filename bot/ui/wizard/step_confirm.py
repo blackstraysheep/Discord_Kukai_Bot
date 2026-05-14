@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import re
 
 import discord
@@ -13,6 +14,8 @@ from bot.ui.wizard.base import STEP_COUNT, cancel_wizard, goto_step
 from bot.ui.wizard.wizard_state import WizardState, clear_wizard
 from bot.utils.datetime_utils import format_jst
 from bot.utils.embed_builder import COLOR_INFO, COLOR_SUCCESS, error_embed
+
+logger = logging.getLogger(__name__)
 
 
 def build(state: WizardState) -> tuple[discord.Embed, discord.ui.View]:
@@ -38,11 +41,12 @@ def build(state: WizardState) -> tuple[discord.Embed, discord.ui.View]:
     embed.add_field(name="エントリー", value=entry_str, inline=True)
 
     sub_mode_labels = {"manual": "手動", "semi_auto": "半自動", "full_auto": "全自動"}
+    max_label = "∞" if state.submission_max is None else str(state.submission_max)
     embed.add_field(
         name="投句設定",
         value=(
             f"モード: {sub_mode_labels.get(state.submission_mode, state.submission_mode)}"
-            f"　{state.submission_min}〜{state.submission_max}句"
+            f"　{state.submission_min}〜{max_label}句"
         ),
         inline=False,
     )
@@ -53,6 +57,7 @@ def build(state: WizardState) -> tuple[discord.Embed, discord.ui.View]:
             f"投句公開: {'自動' if state.publish_mode == 'auto' else '手動'}"
             f"　結果: {'自動' if state.result_mode == 'auto' else '手動'}"
             f"　作者: {'公開' if state.author_reveal else '非公開'}"
+            f"　0点以下作者: {('公開' if state.author_reveal_zero else '非公開') if state.author_reveal else '適用外'}"
         ),
         inline=False,
     )
@@ -106,6 +111,7 @@ class StepConfirmView(discord.ui.View):
         assert guild is not None
 
         ch_name = _sanitize_channel_name(state.title)
+        channel: discord.abc.GuildChannel | None = None
         try:
             channel = await guild.create_text_channel(ch_name)
         except discord.Forbidden:
@@ -114,6 +120,14 @@ class StepConfirmView(discord.ui.View):
                 view=None,
             )
             return
+
+        async def _safe_delete_channel() -> None:
+            if not isinstance(channel, discord.TextChannel):
+                return
+            try:
+                await channel.delete()
+            except Exception:
+                logger.exception("Failed to delete temporary channel after wizard error")
 
         try:
             async with get_session() as session:
@@ -137,28 +151,52 @@ class StepConfirmView(discord.ui.View):
                     publish_mode=state.publish_mode,
                     result_mode=state.result_mode,
                     author_reveal=state.author_reveal,
+                    author_reveal_zero=state.author_reveal_zero,
                 )
-                await notification_service.schedule_kukai_jobs(session, kukai)
                 kukai_id = kukai.id
                 kukai_title = kukai.title
         except ServiceError as e:
-            await channel.delete()
+            await _safe_delete_channel()
             await interaction.edit_original_response(embed=error_embed(str(e)), view=None)
             return
         except Exception:
-            await channel.delete()
-            raise
+            logger.exception("Unhandled error during kukai wizard confirmation")
+            await _safe_delete_channel()
+            await interaction.edit_original_response(
+                embed=error_embed(
+                    "句会作成中に内部エラーが発生しました。"
+                    "\nBotログを確認してください（チャンネルはロールバック済み）。"
+                ),
+                view=None,
+            )
+            return
+
+        schedule_warning: str | None = None
+        try:
+            async with get_session() as session:
+                kukai = await kukai_service.get_kukai(session, kukai_id, guild.id)
+                await notification_service.schedule_kukai_jobs(session, kukai)
+        except Exception:
+            logger.exception("Failed to schedule jobs for newly created kukai (id=%s)", kukai_id)
+            schedule_warning = (
+                "通知ジョブの登録に失敗しました。`/kukai pause`→`/kukai resume` で再登録を試してください。"
+            )
 
         clear_wizard(state.user_id)
 
+        success_description = (
+            f"句会「**{kukai_title}**」を作成しました。\n"
+            f"チャンネル: {channel.mention}\n"
+            f"句会ID: `{kukai_id}`\n\n"
+            f"`/kukai proceed kukai_id:{kukai_id}` で受付を開始できます。\n"
+            "このウィザードは完了しました（再操作不可）。"
+        )
+        if schedule_warning:
+            success_description += f"\n\n⚠️ {schedule_warning}"
+
         success_embed_ = discord.Embed(
             title="✅ 句会作成完了",
-            description=(
-                f"句会「**{kukai_title}**」を作成しました。\n"
-                f"チャンネル: {channel.mention}\n"
-                f"句会ID: `{kukai_id}`\n\n"
-                f"`/kukai proceed kukai_id:{kukai_id}` で受付を開始できます。"
-            ),
+            description=success_description,
             color=COLOR_SUCCESS,
         )
         await interaction.edit_original_response(embed=success_embed_, view=None)
@@ -178,3 +216,12 @@ class StepConfirmView(discord.ui.View):
         info.add_field(name="選句締切", value=vote_str, inline=False)
         info.set_footer(text=f"句会ID: {kukai_id}")
         await channel.send(embed=info)
+
+        if interaction.channel and interaction.channel.id != channel.id:
+            try:
+                await interaction.channel.send(
+                    f"📣 句会「**{kukai_title}**」を作成しました。"
+                    f" 開催チャンネル: {channel.mention} / 句会ID: `{kukai_id}`"
+                )
+            except Exception:
+                logger.exception("Failed to announce kukai creation in original channel")

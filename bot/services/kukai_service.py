@@ -82,13 +82,19 @@ async def create_kukai(
     entry_approval: bool = False,
     min_participants: int = 0,
     submission_min: int = 1,
-    submission_max: int = 3,
+    submission_max: int | None = 3,
     submission_mode: str = "manual",
     submission_overflow: bool = False,
     publish_mode: str = "manual",
     result_mode: str = "manual",
     author_reveal: bool = True,
+    author_reveal_zero: bool = True,
 ) -> Kukai:
+    if not entry_enabled:
+        entry_approval = False
+    if not author_reveal:
+        author_reveal_zero = True
+
     _validate_deadlines(submission_close_at, voting_close_at)
 
     kukai = Kukai(
@@ -111,6 +117,7 @@ async def create_kukai(
         publish_mode=publish_mode,
         result_mode=result_mode,
         author_reveal=author_reveal,
+        author_reveal_zero=author_reveal_zero,
     )
     session.add(kukai)
     await session.flush()  # obtain id
@@ -204,16 +211,19 @@ async def edit_kukai(
     voting_close_at: datetime | None = None,
     submission_min: int | None = None,
     submission_max: int | None = None,
+    submission_max_unlimited: bool = False,
     submission_mode: str | None = None,
     publish_mode: str | None = None,
     result_mode: str | None = None,
     author_reveal: bool | None = None,
+    author_reveal_zero: bool | None = None,
 ) -> bool:
     """Edit kukai fields and return True when deadline fields changed."""
     state = KukaiState(kukai.state)
 
-    submission_setting_change = any(
-        value is not None for value in (submission_min, submission_max, submission_mode)
+    submission_setting_change = (
+        submission_max_unlimited
+        or any(value is not None for value in (submission_min, submission_max, submission_mode))
     )
     if submission_setting_change and state in _SUBMISSION_LOCKED_STATES:
         raise InvalidStateError("この状態では投句設定を変更できません。")
@@ -249,17 +259,35 @@ async def edit_kukai(
 
     if author_reveal is not None:
         kukai.author_reveal = author_reveal
+        if not author_reveal:
+            kukai.author_reveal_zero = True
+    if author_reveal_zero is not None:
+        kukai.author_reveal_zero = author_reveal_zero
+
+    if not kukai.entry_enabled:
+        kukai.entry_approval = False
+    if not kukai.author_reveal:
+        kukai.author_reveal_zero = True
+
+    if submission_max_unlimited and submission_max is not None:
+        raise ValidationError("submission_max と submission_max_unlimited は同時指定できません。")
 
     effective_submission_min = submission_min if submission_min is not None else kukai.submission_min
-    effective_submission_max = submission_max if submission_max is not None else kukai.submission_max
+    effective_submission_max = (
+        None
+        if submission_max_unlimited
+        else (submission_max if submission_max is not None else kukai.submission_max)
+    )
     if effective_submission_min < 1:
         raise ValidationError("submission_min は1以上にしてください。")
-    if effective_submission_max < effective_submission_min:
+    if effective_submission_max is not None and effective_submission_max < effective_submission_min:
         raise ValidationError("submission_max は submission_min 以上にしてください。")
 
     if submission_min is not None:
         kukai.submission_min = submission_min
-    if submission_max is not None:
+    if submission_max_unlimited:
+        kukai.submission_max = None
+    elif submission_max is not None:
         kukai.submission_max = submission_max
 
     old_submission_close_at = kukai.submission_close_at

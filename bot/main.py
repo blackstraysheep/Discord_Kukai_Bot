@@ -33,7 +33,7 @@ class KukaiBot(commands.Bot):
         from bot.scheduler.jobs import set_bot
         from bot.scheduler.setup import init_scheduler
 
-        scheduler = init_scheduler(self.settings.sync_db_url)
+        scheduler = init_scheduler(self.settings.scheduler_sync_db_url)
         set_bot(self)
         scheduler.start()
 

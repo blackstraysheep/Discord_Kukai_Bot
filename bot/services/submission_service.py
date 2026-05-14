@@ -39,7 +39,7 @@ async def submit(
 
     current_count = await submission_repo.count_user_submissions(session, kukai.id, user_id)
     over_limit = False
-    if current_count >= kukai.submission_max:
+    if kukai.submission_max is not None and current_count >= kukai.submission_max:
         if not kukai.submission_overflow:
             raise ValidationError(f"投句数の上限（{kukai.submission_max}句）に達しています。")
         over_limit = True

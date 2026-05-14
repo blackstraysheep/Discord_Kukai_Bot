@@ -14,7 +14,10 @@ def build(state: WizardState) -> tuple[discord.Embed, discord.ui.View]:
         color=discord.Color.blurple(),
     )
     enabled_str = "✅ 有効（エントリー制）" if state.entry_enabled else "🚫 無効（全員参加可）"
-    approval_str = "✅ 要" if state.entry_approval else "🚫 不要（自動承認）"
+    if state.entry_enabled:
+        approval_str = "✅ 要" if state.entry_approval else "🚫 不要（自動承認）"
+    else:
+        approval_str = "（エントリー無効時は常に不要）"
     embed.add_field(name="エントリー機能", value=enabled_str, inline=False)
     embed.add_field(name="承認制", value=approval_str, inline=True)
     embed.set_footer(text="選句後「次へ」で進めます。")
@@ -43,6 +46,8 @@ class _EntryEnabledSelect(discord.ui.Select):
 
     async def callback(self, interaction: discord.Interaction) -> None:
         self.state.entry_enabled = self.values[0] == "true"
+        if not self.state.entry_enabled:
+            self.state.entry_approval = False
         set_wizard(self.state)
         embed, view = build(self.state)
         await interaction.response.edit_message(embed=embed, view=view)
@@ -53,6 +58,7 @@ class _EntryApprovalSelect(discord.ui.Select):
         self.state = state
         super().__init__(
             placeholder="承認制",
+            disabled=not state.entry_enabled,
             options=[
                 discord.SelectOption(
                     label="承認不要（自動承認）",
@@ -69,6 +75,11 @@ class _EntryApprovalSelect(discord.ui.Select):
         )
 
     async def callback(self, interaction: discord.Interaction) -> None:
+        if not self.state.entry_enabled:
+            await interaction.response.send_message(
+                "エントリー無効時は承認制を変更できません。", ephemeral=True
+            )
+            return
         self.state.entry_approval = self.values[0] == "true"
         set_wizard(self.state)
         embed, view = build(self.state)

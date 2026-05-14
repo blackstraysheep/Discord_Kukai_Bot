@@ -30,7 +30,7 @@ class WizardState:
 
     # Step 4: Submission
     submission_min: int = 1
-    submission_max: int = 3
+    submission_max: Optional[int] = 3
     submission_mode: str = "manual"
     submission_overflow: bool = False
 
@@ -38,6 +38,7 @@ class WizardState:
     publish_mode: str = "manual"
     result_mode: str = "manual"
     author_reveal: bool = True
+    author_reveal_zero: bool = True
 
     @property
     def is_expired(self) -> bool:

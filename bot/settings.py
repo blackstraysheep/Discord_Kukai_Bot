@@ -8,6 +8,7 @@ class Settings(BaseSettings):
 
     bot_token: str
     database_url: str = "sqlite+aiosqlite:///./data/kukai.db"
+    scheduler_db_url: str = "sqlite:///./data/kukai_scheduler.db"
     data_dir: str = "./data"
     log_level: str = "INFO"
     # Comma-separated guild IDs for fast command sync during development
@@ -23,6 +24,11 @@ class Settings(BaseSettings):
     def sync_db_url(self) -> str:
         """Synchronous SQLite URL used by Alembic migrations."""
         return self.database_url.replace("sqlite+aiosqlite", "sqlite")
+
+    @property
+    def scheduler_sync_db_url(self) -> str:
+        """Synchronous DB URL used by APScheduler SQLAlchemyJobStore."""
+        return self.scheduler_db_url.replace("sqlite+aiosqlite", "sqlite")
 
 
 @lru_cache

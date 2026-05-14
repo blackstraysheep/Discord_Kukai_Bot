@@ -1,5 +1,7 @@
 """Kukai management commands: /kukai *"""
 
+import asyncio
+
 from typing import Literal
 
 import discord
@@ -14,7 +16,7 @@ from bot.ui.common import ConfirmView
 from bot.ui.submission_view import RollbackView
 from bot.utils.discord_retry import send_with_retry
 from bot.utils.datetime_utils import format_jst, parse_datetime
-from bot.utils.text import discord_safe
+from bot.utils.submission_publish import build_submission_publish_embeds
 from bot.utils.embed_builder import (
     COLOR_INFO,
     COLOR_RESULT,
@@ -128,6 +130,8 @@ class KukaiCog(commands.Cog):
     async def kukai_proceed(self, interaction: discord.Interaction, kukai_id: int) -> None:
         assert interaction.guild is not None
         try:
+            published_count: int | None = None
+            publish_warning: str | None = None
             async with get_session() as session:
                 kukai = await kukai_service.get_kukai(session, kukai_id, interaction.guild.id)
                 if not await permission_service.is_kukai_admin(session, kukai, interaction.user):  # type: ignore[arg-type]
@@ -135,10 +139,27 @@ class KukaiCog(commands.Cog):
                         embed=error_embed("この操作は句会管理者のみ実行できます。"), ephemeral=True
                     )
                     return
-                new_state = await kukai_service.proceed(session, kukai)
+                current_state = KukaiState(kukai.state)
+                if current_state == KukaiState.SUBMISSION_CLOSED and kukai.publish_mode == "auto":
+                    await kukai_service.jump(session, kukai, KukaiState.WAITING_PUBLISH)
+                    published = await submission_service.publish(session, kukai)
+                    published_count = len(published)
+                    publish_warning, message_id = await self._post_submission_list(
+                        interaction.guild, kukai, published
+                    )
+                    if message_id is not None:
+                        kukai.submission_message_id = message_id
+                    new_state = await kukai_service.proceed(session, kukai)
+                else:
+                    new_state = await kukai_service.proceed(session, kukai)
             state_ja = STATE_LABEL.get(str(new_state), str(new_state))
+            description = f"句会「{kukai.title}」を **{state_ja}** へ進めました。"
+            if published_count is not None:
+                description += f"\n{published_count}句を番号付きで公開しました。"
+                if publish_warning:
+                    description += f"\n⚠️ {publish_warning}"
             await interaction.response.send_message(
-                embed=success_embed(f"句会「{kukai.title}」を **{state_ja}** へ進めました。"),
+                embed=success_embed(description),
                 ephemeral=True,
             )
         except ServiceError as e:
@@ -248,31 +269,14 @@ class KukaiCog(commands.Cog):
                 published = await submission_service.publish(session, kukai)
                 new_state = await kukai_service.proceed(session, kukai)
 
-            lines = [f"`{ps.number}.` {discord_safe(ps.submission.text)}" for ps in published]
-            pub_embed = discord.Embed(
-                title=f"📋 {kukai.title} — 投句一覧",
-                description="\n".join(lines),
-                color=COLOR_INFO,
+            publish_warning, message_id = await self._post_submission_list(
+                interaction.guild, kukai, published
             )
-            pub_embed.set_footer(text=f"全 {len(published)} 句　|　句会 ID: {kukai.id}")
 
-            msg_id: int | None = None
-            publish_warning: str | None = None
-            if kukai.channel_id:
-                channel = interaction.guild.get_channel(kukai.channel_id)
-                if isinstance(channel, discord.TextChannel):
-                    try:
-                        msg = await send_with_retry(lambda: channel.send(embed=pub_embed))
-                        msg_id = msg.id
-                    except discord.Forbidden:
-                        publish_warning = (
-                            "公開チャンネルへの送信権限がないため、句会チャンネルへの投稿に失敗しました。"
-                        )
-
-            if msg_id:
+            if message_id is not None:
                 async with get_session() as session2:
                     kukai2 = await kukai_service.get_kukai(session2, kukai_id, interaction.guild.id)
-                    kukai2.submission_message_id = msg_id
+                    kukai2.submission_message_id = message_id
 
             state_ja = STATE_LABEL.get(str(new_state), str(new_state))
             description = f"{len(published)}句を公開しました。\n状態: **{state_ja}**"
@@ -287,6 +291,33 @@ class KukaiCog(commands.Cog):
             )
         except ServiceError as e:
             await interaction.response.send_message(embed=error_embed(str(e)), ephemeral=True)
+
+    async def _post_submission_list(
+        self,
+        guild: discord.Guild,
+        kukai,
+        published_submissions,
+    ) -> tuple[str | None, int | None]:
+        if not kukai.channel_id:
+            return "公開先チャンネルが未設定のため、投句一覧を投稿できません。", None
+
+        channel = guild.get_channel(kukai.channel_id)
+        if not isinstance(channel, discord.TextChannel):
+            return "公開先チャンネルが見つからないため、投句一覧を投稿できません。", None
+
+        embeds = build_submission_publish_embeds(kukai, published_submissions)
+        first_message_id: int | None = None
+        try:
+            for index, embed in enumerate(embeds):
+                sent = await send_with_retry(lambda e=embed: channel.send(embed=e))
+                if index == 0:
+                    first_message_id = sent.id
+                if index < len(embeds) - 1:
+                    await asyncio.sleep(0.35)
+        except discord.Forbidden:
+            return "公開チャンネルへの送信権限がないため、投句一覧を投稿できません。", None
+
+        return None, first_message_id
 
     @kukai.command(name="rollback", description="【管理者】投句公開を取り消し、公開待ちに戻します")
     @app_commands.describe(kukai_id="句会ID")
@@ -363,10 +394,12 @@ class KukaiCog(commands.Cog):
         voting_close_at="選句締切 (例: 2026-05-21 23:59 JST)",
         submission_min="最小投句数",
         submission_max="最大投句数",
+        submission_max_unlimited="最大投句数を無制限にする",
         submission_mode="投句進行モード",
         publish_mode="投句公開モード",
         result_mode="結果公開モード",
         author_reveal="作者公開するか",
+        author_reveal_zero="0点以下作者を公開するか",
     )
     async def kukai_edit(
         self,
@@ -379,10 +412,12 @@ class KukaiCog(commands.Cog):
         voting_close_at: str | None = None,
         submission_min: int | None = None,
         submission_max: int | None = None,
+        submission_max_unlimited: bool | None = None,
         submission_mode: Literal["manual", "semi_auto", "full_auto"] | None = None,
         publish_mode: Literal["manual", "auto"] | None = None,
         result_mode: Literal["manual", "auto"] | None = None,
         author_reveal: bool | None = None,
+        author_reveal_zero: bool | None = None,
     ) -> None:
         assert interaction.guild is not None
         try:
@@ -412,10 +447,12 @@ class KukaiCog(commands.Cog):
                     voting_close_at=voting_close_dt,
                     submission_min=submission_min,
                     submission_max=submission_max,
+                    submission_max_unlimited=bool(submission_max_unlimited),
                     submission_mode=submission_mode,
                     publish_mode=publish_mode,
                     result_mode=result_mode,
                     author_reveal=author_reveal,
+                    author_reveal_zero=author_reveal_zero,
                 )
 
                 if deadlines_changed:

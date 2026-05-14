@@ -124,6 +124,19 @@ async def test_submit_overflow_allowed(db_session):
 
 
 @pytest.mark.asyncio
+async def test_submit_unlimited_when_submission_max_none(db_session):
+    kukai = await _make_kukai(db_session, entry_enabled=False, submission_max=None)
+    await _advance_to_submission_open(db_session, kukai)
+
+    for idx in range(10):
+        sub, over = await submission_service.submit(
+            db_session, kukai, user_id=1, text=f"句{idx}"
+        )
+        assert sub is not None
+        assert over is False
+
+
+@pytest.mark.asyncio
 async def test_edit(db_session):
     kukai = await _make_kukai(db_session, entry_enabled=False)
     await _advance_to_submission_open(db_session, kukai)

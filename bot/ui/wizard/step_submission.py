@@ -24,8 +24,9 @@ def build(state: WizardState) -> tuple[discord.Embed, discord.ui.View]:
         value=_SUBMISSION_MODE_LABELS.get(state.submission_mode, state.submission_mode),
         inline=False,
     )
+    max_label = "∞" if state.submission_max is None else str(state.submission_max)
     embed.add_field(name="最低投句数", value=str(state.submission_min), inline=True)
-    embed.add_field(name="最大投句数", value=str(state.submission_max), inline=True)
+    embed.add_field(name="最大投句数", value=max_label, inline=True)
     embed.set_footer(text="詳細設定で最低/最大投句数を変更できます。")
     return embed, StepSubmissionView(state)
 
@@ -120,28 +121,51 @@ class SubmissionDetailModal(discord.ui.Modal, title="投句数制限の設定"):
         default="1",
     )
     max_count = discord.ui.TextInput(
-        label="最大投句数",
-        placeholder="3",
-        max_length=2,
-        default="3",
+        label="最大投句数（∞可）",
+        placeholder="3 / ∞",
+        required=False,
+        max_length=8,
     )
 
     def __init__(self, state: WizardState) -> None:
         super().__init__()
         self.state = state
         self.min_count.default = str(state.submission_min)
-        self.max_count.default = str(state.submission_max)
+        if state.submission_max is None:
+            self.max_count.default = "∞"
+        else:
+            self.max_count.default = str(state.submission_max)
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
         try:
             mn = int(self.min_count.value)
-            mx = int(self.max_count.value)
         except ValueError:
             await interaction.response.send_message("数値を入力してください。", ephemeral=True)
             return
-        if mn < 1 or mx < 1 or mn > mx:
+
+        raw_max_text = self.max_count.value.strip()
+        max_text = raw_max_text.lower()
+        if not raw_max_text:
+            mx = None
+        elif max_text in {"∞", "inf", "infinity", "unlimited", "無制限"}:
+            mx = None
+        else:
+            try:
+                mx = int(max_text)
+            except ValueError:
+                await interaction.response.send_message(
+                    "最大投句数は数値または「∞」で指定してください。", ephemeral=True
+                )
+                return
+
+        if mn < 1:
             await interaction.response.send_message(
-                "最低投句数 ≥ 1、最大投句数 ≥ 最低投句数 にしてください。", ephemeral=True
+                "最低投句数は1以上にしてください。", ephemeral=True
+            )
+            return
+        if mx is not None and (mx < 1 or mn > mx):
+            await interaction.response.send_message(
+                "最大投句数は1以上、かつ最低投句数以上にしてください。", ephemeral=True
             )
             return
         self.state.submission_min = mn

@@ -6,6 +6,7 @@ restore them across restarts. They receive only serializable arguments.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
@@ -123,7 +124,7 @@ async def deadline_job(kukai_id: int, event_type: str) -> None:
     await _bot.wait_until_ready()
 
     from bot.database import get_session
-    from bot.services import kukai_service, submission_service
+    from bot.services import kukai_service
     from bot.services.errors import ServiceError
     from bot.state_machine.states import KukaiState
     from bot.utils.embed_builder import COLOR_INFO
@@ -156,12 +157,24 @@ async def deadline_job(kukai_id: int, event_type: str) -> None:
                 if should_advance:
                     await kukai_service.proceed(session, kukai)
                     logger.info(
-                        "deadline_job: auto-advanced kukai %d (submission_close)", kukai_id
+                        "deadline_job: auto-advanced kukai %d to submission_closed", kukai_id
                     )
-                    await _notify_channel(
-                        _bot, kukai,
-                        f"投句期間が終了しました。次のステップに進んでください。",
-                    )
+                    if kukai.publish_mode == "auto":
+                        await _auto_publish_submission_list(session, kukai)
+                        await kukai_service.proceed(session, kukai)
+                        logger.info(
+                            "deadline_job: auto-published and advanced kukai %d to voting_open",
+                            kukai_id,
+                        )
+                        await _notify_channel(
+                            _bot, kukai,
+                            "投句期間が終了したため、投句一覧を番号付きで公開して選句を開始しました。",
+                        )
+                    else:
+                        await _notify_channel(
+                            _bot, kukai,
+                            "投句期間が終了しました。次のステップに進んでください。",
+                        )
                 else:
                     await _notify_admins(
                         _bot, kukai,
@@ -304,3 +317,64 @@ async def _notify_admins(bot, kukai, message: str) -> None:
                         )
                     except Exception as channel_error:
                         logger.error("_notify_admins channel fallback failed: %s", channel_error)
+
+
+async def _auto_publish_submission_list(session, kukai) -> None:
+    """Publish numbered submissions to channel and store the first message ID."""
+    import discord
+
+    from bot.services import kukai_service, submission_service
+    from bot.state_machine.states import KukaiState
+    from bot.utils.discord_retry import send_with_retry
+    from bot.utils.submission_publish import build_submission_publish_embeds
+
+    if KukaiState(kukai.state) != KukaiState.SUBMISSION_CLOSED:
+        return
+
+    await kukai_service.jump(session, kukai, KukaiState.WAITING_PUBLISH)
+    published = await submission_service.publish(session, kukai)
+
+    if not kukai.channel_id:
+        logger.warning(
+            "_auto_publish_submission_list: no channel set (kukai_id=%d)",
+            kukai.id,
+        )
+        return
+
+    guild = _bot.get_guild(kukai.guild_id) if _bot else None
+    if not guild:
+        logger.warning(
+            "_auto_publish_submission_list: guild not found (kukai_id=%d, guild_id=%d)",
+            kukai.id,
+            kukai.guild_id,
+        )
+        return
+
+    channel = guild.get_channel(kukai.channel_id)
+    if not isinstance(channel, discord.TextChannel):
+        logger.warning(
+            "_auto_publish_submission_list: text channel not found (kukai_id=%d, channel_id=%d)",
+            kukai.id,
+            kukai.channel_id,
+        )
+        return
+
+    first_message_id: int | None = None
+    embeds = build_submission_publish_embeds(kukai, published)
+    try:
+        for index, embed in enumerate(embeds):
+            sent = await send_with_retry(lambda e=embed: channel.send(embed=e))
+            if index == 0:
+                first_message_id = sent.id
+            if index < len(embeds) - 1:
+                await asyncio.sleep(0.35)
+    except Exception as error:
+        logger.warning(
+            "_auto_publish_submission_list: failed to post list (kukai_id=%d): %s",
+            kukai.id,
+            error,
+        )
+        return
+
+    if first_message_id is not None:
+        kukai.submission_message_id = first_message_id
