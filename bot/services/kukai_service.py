@@ -120,11 +120,14 @@ async def get_kukai(
 
 
 async def list_kukais(session: AsyncSession, guild_id: int) -> list[Kukai]:
-    """Return non-terminal kukais for a guild, newest first."""
+    """Return listed kukais for a guild, newest first.
+
+    RESULTS is treated as already-finished for `/kukai list`.
+    """
     result = await session.execute(
         select(Kukai)
         .where(Kukai.guild_id == guild_id)
-        .where(Kukai.state.notin_([KukaiState.ENDED, KukaiState.CANCELLED]))
+        .where(Kukai.state.notin_([KukaiState.RESULTS, KukaiState.ENDED, KukaiState.CANCELLED]))
         .order_by(Kukai.created_at.desc())
     )
     return list(result.scalars().all())

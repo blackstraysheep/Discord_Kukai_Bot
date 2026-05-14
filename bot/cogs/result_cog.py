@@ -8,6 +8,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from bot.database import get_session
+from bot.repositories import select_repo
 from bot.services import kukai_service, permission_service, result_service
 from bot.services.errors import ServiceError
 from bot.state_machine.states import KukaiState
@@ -131,6 +132,36 @@ def _author_embed(
     return [embed]
 
 
+def _overall_embeds(kukai, overall_comments, guild: discord.Guild) -> list[discord.Embed]:
+    if not overall_comments:
+        return []
+
+    pages: list[discord.Embed] = []
+    embed = discord.Embed(
+        title=f"📝 総評 — {kukai.title}",
+        color=COLOR_INFO,
+    )
+    char_count = len(embed.title)
+
+    for overall in overall_comments:
+        member = guild.get_member(overall.user_id)
+        user_name = member.display_name if member else f"UID:{overall.user_id}"
+        header = discord_safe(user_name)
+        body = discord_safe(overall.comment[:1000])
+
+        if len(embed.fields) >= 25 or char_count + len(header) + len(body) > 5800:
+            pages.append(embed)
+            embed = discord.Embed(color=COLOR_INFO)
+            char_count = 0
+
+        embed.add_field(name=header, value=body, inline=False)
+        char_count += len(header) + len(body)
+
+    embed.set_footer(text=f"句会 ID: {kukai.id}　|　総評 {len(overall_comments)} 件")
+    pages.append(embed)
+    return pages
+
+
 class ResultCog(commands.Cog):
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
@@ -176,6 +207,7 @@ class ResultCog(commands.Cog):
                         return
 
                 results = await result_service.compute_results(session, kukai)
+                overall_comments = await select_repo.list_overall_comments(session, kukai.id)
 
             if not results:
                 await interaction.response.send_message(
@@ -230,6 +262,8 @@ class ResultCog(commands.Cog):
                     guild=interaction.guild,
                     visible_author_ids=visible_author_ids,
                 )
+
+            embeds.extend(_overall_embeds(kukai, overall_comments, guild=interaction.guild))
 
             # Public in RESULTS state, ephemeral otherwise
             ephemeral = state != KukaiState.RESULTS

@@ -10,11 +10,14 @@ async def get(session: AsyncSession, kukai_id: int) -> Kukai | None:
 
 
 async def list_active(session: AsyncSession, guild_id: int) -> list[Kukai]:
-    """Return kukais that are not ended or cancelled, newest first."""
+    """Return active-list kukais, newest first.
+
+    RESULTS is excluded to align with `/kukai list` semantics.
+    """
     result = await session.execute(
         select(Kukai)
         .where(Kukai.guild_id == guild_id)
-        .where(Kukai.state.notin_([KukaiState.ENDED, KukaiState.CANCELLED]))
+        .where(Kukai.state.notin_([KukaiState.RESULTS, KukaiState.ENDED, KukaiState.CANCELLED]))
         .order_by(Kukai.created_at.desc())
     )
     return list(result.scalars().all())

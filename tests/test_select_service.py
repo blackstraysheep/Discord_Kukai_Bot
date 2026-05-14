@@ -175,6 +175,36 @@ async def test_cast_select_with_comment(db_session):
 
 
 @pytest.mark.asyncio
+async def test_cast_select_author_comment_saved(db_session):
+    kukai = await _setup_selecting(db_session)
+    sub_id = await _get_submission_id(db_session, kukai.id)
+    author_label_id = next(lbl.id for lbl in kukai.select_labels if lbl.label == "作者コメント")
+
+    sel = await select_service.cast_select(
+        db_session,
+        kukai,
+        selector_user_id=1,
+        submission_id=sub_id,
+        select_label_id=author_label_id,
+        comment="この句は春の朝を詠みました",
+        is_self_comment=True,
+    )
+    await db_session.commit()
+
+    assert sel.is_self_comment is True
+    assert sel.comment is not None
+    assert sel.comment.comment == "この句は春の朝を詠みました"
+
+    from bot.repositories import select_repo
+
+    loaded = await select_repo.get_select(db_session, kukai.id, 1, sub_id)
+    assert loaded is not None
+    assert loaded.is_self_comment is True
+    assert loaded.comment is not None
+    assert loaded.comment.comment == "この句は春の朝を詠みました"
+
+
+@pytest.mark.asyncio
 async def test_cast_select_required_comment_missing_raises(db_session):
     kukai = await _setup_selecting(db_session, comment_mode="required")
     sub_id = await _get_submission_id(db_session, kukai.id)

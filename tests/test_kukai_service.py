@@ -169,3 +169,48 @@ async def test_cannot_proceed_from_terminal(db_session):
 
     with pytest.raises(InvalidStateError):
         await kukai_service.proceed(db_session, kukai)
+
+
+@pytest.mark.asyncio
+async def test_list_kukais_excludes_results_state(db_session):
+    active = await kukai_service.create_kukai(
+        db_session,
+        guild_id=1,
+        created_by=100,
+        channel_id=200,
+        title="開催中",
+        submission_close_at=_utc(7),
+        selecting_close_at=_utc(14),
+    )
+    active.state = KukaiState.SELECTING_OPEN
+
+    results = await kukai_service.create_kukai(
+        db_session,
+        guild_id=1,
+        created_by=100,
+        channel_id=200,
+        title="結果公開中",
+        submission_close_at=_utc(7),
+        selecting_close_at=_utc(14),
+    )
+    results.state = KukaiState.RESULTS
+
+    ended = await kukai_service.create_kukai(
+        db_session,
+        guild_id=1,
+        created_by=100,
+        channel_id=200,
+        title="終了済み",
+        submission_close_at=_utc(7),
+        selecting_close_at=_utc(14),
+    )
+    ended.state = KukaiState.ENDED
+
+    await db_session.commit()
+
+    listed = await kukai_service.list_kukais(db_session, guild_id=1)
+    listed_ids = {k.id for k in listed}
+
+    assert active.id in listed_ids
+    assert results.id not in listed_ids
+    assert ended.id not in listed_ids
