@@ -5,9 +5,15 @@ from datetime import datetime
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from bot.models.kukai import Kukai
+from bot.models.kukai import Kukai, KukaiAdmin
 from bot.models.vote_rule import VoteLabel
-from bot.services.errors import DeadlineConflictError, NotFoundError
+from bot.repositories import kukai_repo
+from bot.services.errors import (
+    DeadlineConflictError,
+    InvalidStateError,
+    NotFoundError,
+    ValidationError,
+)
 from bot.state_machine.machine import StateMachine
 from bot.state_machine.states import KukaiState
 from bot.state_machine.transitions import next_state
@@ -45,6 +51,19 @@ _DEFAULT_VOTE_LABELS = [
         "comment_mode": "none",
     },
 ]
+
+_SUBMISSION_LOCKED_STATES = {
+    KukaiState.VOTING_OPEN,
+    KukaiState.VOTING_CLOSED,
+    KukaiState.WAITING_RESULTS,
+    KukaiState.RESULTS,
+    KukaiState.ENDED,
+    KukaiState.CANCELLED,
+}
+
+_VALID_SUBMISSION_MODES = {"manual", "semi_auto", "full_auto"}
+_VALID_PUBLISH_MODES = {"manual", "auto"}
+_VALID_RESULT_MODES = {"manual", "auto"}
 
 
 async def create_kukai(
@@ -142,6 +161,128 @@ async def resume(session: AsyncSession, kukai: Kukai) -> KukaiState:
 
 async def cancel(session: AsyncSession, kukai: Kukai) -> None:
     await _state_machine.cancel(kukai, session)
+
+
+async def add_kukai_admin(
+    session: AsyncSession,
+    kukai: Kukai,
+    *,
+    user_id: int,
+    added_by: int,
+) -> KukaiAdmin:
+    if user_id == kukai.created_by:
+        raise ValidationError("作成者はすでに句会管理者です。")
+
+    if await kukai_repo.is_admin(session, kukai.id, user_id):
+        raise ValidationError("すでに句会管理者に追加されています。")
+
+    return await kukai_repo.add_admin(session, kukai.id, user_id, added_by)
+
+
+async def remove_kukai_admin(
+    session: AsyncSession,
+    kukai: Kukai,
+    *,
+    user_id: int,
+) -> None:
+    if user_id == kukai.created_by:
+        raise ValidationError("作成者は句会管理者から削除できません。")
+
+    removed = await kukai_repo.remove_admin(session, kukai.id, user_id)
+    if not removed:
+        raise NotFoundError("指定ユーザーは句会管理者ではありません。")
+
+
+async def edit_kukai(
+    session: AsyncSession,
+    kukai: Kukai,
+    *,
+    title: str | None = None,
+    theme: str | None = None,
+    description: str | None = None,
+    submission_close_at: datetime | None = None,
+    voting_close_at: datetime | None = None,
+    submission_min: int | None = None,
+    submission_max: int | None = None,
+    submission_mode: str | None = None,
+    publish_mode: str | None = None,
+    result_mode: str | None = None,
+    author_reveal: bool | None = None,
+) -> bool:
+    """Edit kukai fields and return True when deadline fields changed."""
+    state = KukaiState(kukai.state)
+
+    submission_setting_change = any(
+        value is not None for value in (submission_min, submission_max, submission_mode)
+    )
+    if submission_setting_change and state in _SUBMISSION_LOCKED_STATES:
+        raise InvalidStateError("この状態では投句設定を変更できません。")
+
+    if title is not None:
+        title = title.strip()
+        if not title:
+            raise ValidationError("title は空にできません。")
+        kukai.title = title
+
+    if theme is not None:
+        theme = theme.strip()
+        kukai.theme = theme or None
+
+    if description is not None:
+        description = description.strip()
+        kukai.description = description or None
+
+    if submission_mode is not None:
+        if submission_mode not in _VALID_SUBMISSION_MODES:
+            raise ValidationError("submission_mode は manual/semi_auto/full_auto で指定してください。")
+        kukai.submission_mode = submission_mode
+
+    if publish_mode is not None:
+        if publish_mode not in _VALID_PUBLISH_MODES:
+            raise ValidationError("publish_mode は manual/auto で指定してください。")
+        kukai.publish_mode = publish_mode
+
+    if result_mode is not None:
+        if result_mode not in _VALID_RESULT_MODES:
+            raise ValidationError("result_mode は manual/auto で指定してください。")
+        kukai.result_mode = result_mode
+
+    if author_reveal is not None:
+        kukai.author_reveal = author_reveal
+
+    effective_submission_min = submission_min if submission_min is not None else kukai.submission_min
+    effective_submission_max = submission_max if submission_max is not None else kukai.submission_max
+    if effective_submission_min < 1:
+        raise ValidationError("submission_min は1以上にしてください。")
+    if effective_submission_max < effective_submission_min:
+        raise ValidationError("submission_max は submission_min 以上にしてください。")
+
+    if submission_min is not None:
+        kukai.submission_min = submission_min
+    if submission_max is not None:
+        kukai.submission_max = submission_max
+
+    old_submission_close_at = kukai.submission_close_at
+    old_voting_close_at = kukai.voting_close_at
+
+    new_submission_close_at = (
+        submission_close_at if submission_close_at is not None else kukai.submission_close_at
+    )
+    new_voting_close_at = voting_close_at if voting_close_at is not None else kukai.voting_close_at
+    _validate_deadlines(new_submission_close_at, new_voting_close_at)
+
+    if submission_close_at is not None:
+        kukai.submission_close_at = submission_close_at
+    if voting_close_at is not None:
+        kukai.voting_close_at = voting_close_at
+
+    return (
+        submission_close_at is not None
+        and submission_close_at != old_submission_close_at
+    ) or (
+        voting_close_at is not None
+        and voting_close_at != old_voting_close_at
+    )
 
 
 async def update_deadlines(

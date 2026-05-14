@@ -1,5 +1,7 @@
 """Kukai management commands: /kukai *"""
 
+from typing import Literal
+
 import discord
 from discord import app_commands
 from discord.ext import commands
@@ -10,7 +12,7 @@ from bot.services.errors import ServiceError
 from bot.state_machine.states import KukaiState
 from bot.ui.common import ConfirmView
 from bot.ui.submission_view import RollbackView
-from bot.utils.datetime_utils import format_jst
+from bot.utils.datetime_utils import format_jst, parse_datetime
 from bot.utils.text import discord_safe
 from bot.utils.embed_builder import (
     COLOR_INFO,
@@ -342,9 +344,81 @@ class KukaiCog(commands.Cog):
                 await interaction.response.send_message(embed=error_embed(str(e)), ephemeral=True)
 
     @kukai.command(name="edit", description="【管理者】句会の設定を変更します")
-    @app_commands.describe(kukai_id="句会ID")
-    async def kukai_edit(self, interaction: discord.Interaction, kukai_id: int) -> None:
-        await interaction.response.send_message("🚧 Phase 9 で実装予定", ephemeral=True)
+    @app_commands.describe(
+        kukai_id="句会ID",
+        title="新しいタイトル",
+        theme="新しい題（空文字でクリア）",
+        description="新しい説明（空文字でクリア）",
+        submission_close_at="投句締切 (例: 2026-05-20 23:59 JST)",
+        voting_close_at="選句締切 (例: 2026-05-21 23:59 JST)",
+        submission_min="最小投句数",
+        submission_max="最大投句数",
+        submission_mode="投句進行モード",
+        publish_mode="投句公開モード",
+        result_mode="結果公開モード",
+        author_reveal="作者公開するか",
+    )
+    async def kukai_edit(
+        self,
+        interaction: discord.Interaction,
+        kukai_id: int,
+        title: str | None = None,
+        theme: str | None = None,
+        description: str | None = None,
+        submission_close_at: str | None = None,
+        voting_close_at: str | None = None,
+        submission_min: int | None = None,
+        submission_max: int | None = None,
+        submission_mode: Literal["manual", "semi_auto", "full_auto"] | None = None,
+        publish_mode: Literal["manual", "auto"] | None = None,
+        result_mode: Literal["manual", "auto"] | None = None,
+        author_reveal: bool | None = None,
+    ) -> None:
+        assert interaction.guild is not None
+        try:
+            submission_close_dt = parse_datetime(submission_close_at) if submission_close_at else None
+            voting_close_dt = parse_datetime(voting_close_at) if voting_close_at else None
+        except ValueError as e:
+            await interaction.response.send_message(embed=error_embed(str(e)), ephemeral=True)
+            return
+
+        try:
+            async with get_session() as session:
+                kukai = await kukai_service.get_kukai(session, kukai_id, interaction.guild.id)
+                if not await permission_service.is_kukai_admin(session, kukai, interaction.user):  # type: ignore[arg-type]
+                    await interaction.response.send_message(
+                        embed=error_embed("この操作は句会管理者のみ実行できます。"),
+                        ephemeral=True,
+                    )
+                    return
+
+                deadlines_changed = await kukai_service.edit_kukai(
+                    session,
+                    kukai,
+                    title=title,
+                    theme=theme,
+                    description=description,
+                    submission_close_at=submission_close_dt,
+                    voting_close_at=voting_close_dt,
+                    submission_min=submission_min,
+                    submission_max=submission_max,
+                    submission_mode=submission_mode,
+                    publish_mode=publish_mode,
+                    result_mode=result_mode,
+                    author_reveal=author_reveal,
+                )
+
+                if deadlines_changed:
+                    await notification_service.cancel_kukai_jobs(session, kukai.id)
+                    await notification_service.schedule_kukai_jobs(session, kukai)
+
+            extra = "\n締切変更に合わせて通知ジョブを再登録しました。" if deadlines_changed else ""
+            await interaction.response.send_message(
+                embed=success_embed(f"句会「{kukai.title}」の設定を更新しました。{extra}"),
+                ephemeral=True,
+            )
+        except ServiceError as e:
+            await interaction.response.send_message(embed=error_embed(str(e)), ephemeral=True)
 
 
 def _build_info_embed(kukai) -> discord.Embed:

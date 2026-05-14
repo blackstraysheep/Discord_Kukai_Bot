@@ -8,7 +8,7 @@
 
 Discord完結型句会管理Bot。Python 3.13 / discord.py 2.x / SQLAlchemy 2.x async / aiosqlite / APScheduler 3.x。
 
-**現在の状態**: Phase 1〜8 完了。テスト 52件すべてパス。
+**現在の状態**: Phase 1〜9(コア) 完了。テスト 56件すべてパス。
 
 ---
 
@@ -93,18 +93,36 @@ Discord完結型句会管理Bot。Python 3.13 / discord.py 2.x / SQLAlchemy 2.x 
 - `bot/services/kukai_service.py` 更新: create_kukai()にウィザード設定パラメータ追加
 - `/kukai create` をウィザード起動に差し替え（権限チェック後、step 1を送信）
 
+### Phase 9 — Export / Import + /kukai edit + ギルド設定（コア実装）
+- `bot/services/export_service.py` 追加
+  - `export_payload()` — 句会設定/entries/submissions/published_submissions/votes/vote_comments/overall_comments/results/通知情報をJSON化
+  - `import_payload()` — エクスポートJSONを同一guildへ復元（ID再採番マッピング）
+  - `payload_to_json()`, `payload_to_csv()` を実装
+- `bot/cogs/admin_cog.py` 実装
+  - `/kukai_admin export` — JSON/CSVをDM送信
+  - `/kukai_admin import_data` — JSON添付から復元
+  - `/kukai_admin add_admin`, `/kukai_admin remove_admin`
+  - `/guild settings` — create_role と role/user ID リストの確認・更新
+- `bot/services/kukai_service.py` 拡張
+  - `add_kukai_admin()`, `remove_kukai_admin()`
+  - `edit_kukai()` — title/theme/description/締切/submission設定/publish_mode/result_mode/author_revealを更新
+  - 状態制約: `VOTING_OPEN` 以降は submission設定変更不可
+- `bot/cogs/kukai_cog.py` 実装
+  - `/kukai edit` を実装（権限チェック、JST日時パース、更新、締切変更時のジョブ再登録）
+
 ---
 
 ## テスト状況
 
 ```
-tests/test_kukai_service.py      8件  ✅
-tests/test_entry_service.py     12件  ✅
+tests/test_kukai_service.py       8件  ✅
+tests/test_entry_service.py      12件  ✅
 tests/test_submission_service.py 15件  ✅
-tests/test_vote_service.py      11件  ✅
-tests/test_result_service.py     6件  ✅
+tests/test_vote_service.py       11件  ✅
+tests/test_result_service.py      6件  ✅
+tests/test_phase9_services.py     4件  ✅
                               -------
-合計                            52件  全パス
+合計                            56件  全パス
 ```
 
 実行: `py -m pytest tests/ -v`
@@ -196,24 +214,13 @@ kukai_bot/
 
 ## 残タスク
 
-### Phase 9 — Export / Import + /kukai edit + ギルド設定
-
-**Export / Import**（`bot/services/export_service.py` + `admin_cog.py` の実装）
-- `/kukai_admin export kukai_id` — JSON or CSV でDMに送付
-  - エクスポート対象: kukai設定, entries, submissions, published_submissions, votes, vote_comments, overall_comments, results
-- `/kukai_admin import_data` — JSON添付ファイルをパースして復元（同サーバーへのインポートのみ想定）
-- `/kukai_admin add_admin kukai_id user` — KukaiAdminにレコード追加（admin_cog.pyのスタブ実装）
-- `/kukai_admin remove_admin kukai_id user` — 同上（削除）
-
-**`/kukai edit`**（`kukai_cog.py`のスタブ実装）
-- 変更可能フィールド: title, theme, description, 各締切日時, submission_min/max/mode, publish_mode, result_mode, author_reveal
-- 状態に応じて変更可否を制限（例: VOTING_OPEN以降はsubmission設定変更不可）
-- 締切変更時はスケジューラのジョブを reschedule
-
-**ギルド設定**（`bot/cogs/admin_cog.py`または新規 `guild_cog.py`）
-- `/guild settings` — create_role の確認・変更
-  - create_role: everyone / admin / owner / role / specific
-  - role/specificの場合はロールID/ユーザーIDのリスト管理
+### Phase 9 — 追加改善（任意）
+- `/kukai edit` の更新対象をさらに拡張
+  - entry関連の時刻・設定項目や submission_overflow/underflow など
+- `/kukai_admin import_data` の運用強化
+  - dry-run検証、部分インポート、重複検出レポート
+- `/kukai_admin export` のCSV改善
+  - 分析向けのテーブル別CSV出力（現在は汎用フラット形式）
 
 ---
 
