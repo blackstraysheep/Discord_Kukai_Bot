@@ -35,12 +35,13 @@ async def test_create_kukai_creates_default_labels(db_session):
         )
     ).scalars().all()
 
-    assert len(labels) == 3
-    assert {l.label for l in labels} == {"特選", "並選", "予選"}
+    assert len(labels) == 4
+    assert {l.label for l in labels} == {"特選", "並選", "予選", "作者コメント"}
     points = {l.label: l.point for l in labels}
     assert points["特選"] == 2
     assert points["並選"] == 1
     assert points["予選"] == 0
+    assert points["作者コメント"] == 0
 
 
 @pytest.mark.asyncio
