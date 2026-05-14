@@ -1,0 +1,65 @@
+"""Wizard navigation helpers."""
+
+from __future__ import annotations
+
+import discord
+
+from bot.ui.wizard.wizard_state import WizardState, clear_wizard
+
+STEP_COUNT = 6
+STEP_NAMES = {
+    1: "基本情報",
+    2: "日程",
+    3: "エントリー設定",
+    4: "投句設定",
+    5: "公開・結果設定",
+    6: "確認",
+}
+
+
+def step_header(step: int) -> str:
+    return f"ステップ {step}/{STEP_COUNT}: {STEP_NAMES.get(step, '')}"
+
+
+async def goto_step(
+    interaction: discord.Interaction,
+    state: WizardState,
+    *,
+    first_send: bool = False,
+) -> None:
+    """Render the step view for state.step. Use first_send=True from the initial slash command."""
+    embed, view = _make_step(state)
+    if first_send:
+        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+    else:
+        await interaction.response.edit_message(embed=embed, view=view)
+
+
+def _make_step(state: WizardState) -> tuple[discord.Embed, discord.ui.View]:
+    # lazy imports to avoid circular references
+    if state.step == 1:
+        from bot.ui.wizard.step_basic import build
+    elif state.step == 2:
+        from bot.ui.wizard.step_schedule import build
+    elif state.step == 3:
+        from bot.ui.wizard.step_entry import build
+    elif state.step == 4:
+        from bot.ui.wizard.step_submission import build
+    elif state.step == 5:
+        from bot.ui.wizard.step_publish import build
+    elif state.step == 6:
+        from bot.ui.wizard.step_confirm import build
+    else:
+        raise ValueError(f"Unknown wizard step: {state.step}")
+    return build(state)  # type: ignore[possibly-undefined]
+
+
+async def cancel_wizard(interaction: discord.Interaction, state: WizardState) -> None:
+    clear_wizard(state.user_id)
+    await interaction.response.edit_message(
+        embed=discord.Embed(
+            description="句会作成をキャンセルしました。",
+            color=discord.Color.red(),
+        ),
+        view=None,
+    )
