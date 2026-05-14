@@ -149,7 +149,7 @@ class _ActionSelect(discord.ui.Select):
         if self._owner.operation == _OP_ADD:
             self._owner.selected_preset_id = None
         self._owner.rebuild()
-        await interaction.response.edit_message(embed=self._owner.build_embed(), view=self._owner)
+        await self._owner.respond_edit(interaction)
 
 
 class _PresetSelect(discord.ui.Select):
@@ -188,7 +188,7 @@ class _PresetSelect(discord.ui.Select):
         value = self.values[0]
         self._owner.selected_preset_id = None if value == "none" else int(value)
         self._owner.rebuild()
-        await interaction.response.edit_message(embed=self._owner.build_embed(), view=self._owner)
+        await self._owner.respond_edit(interaction)
 
 
 class PresetConfigModal(discord.ui.Modal, title="プリセット設定（ステップ2/2）"):
@@ -383,6 +383,26 @@ class PresetWizardView(discord.ui.View):
         except Exception:
             return
 
+    async def _send_expired_notice(self, interaction: discord.Interaction) -> None:
+        msg = "このプリセットGUIの操作期限が切れました。`/preset gui` を開き直してください。"
+        try:
+            if interaction.response.is_done():
+                await interaction.followup.send(embed=error_embed(msg), ephemeral=True)
+            else:
+                await interaction.response.send_message(embed=error_embed(msg), ephemeral=True)
+        except Exception:
+            return
+
+    async def respond_edit(self, interaction: discord.Interaction) -> None:
+        try:
+            if interaction.response.is_done():
+                await interaction.edit_original_response(embed=self.build_embed(), view=self)
+            else:
+                await interaction.response.edit_message(embed=self.build_embed(), view=self)
+        except discord.NotFound:
+            self.stop()
+            await self._send_expired_notice(interaction)
+
     async def _on_next(self, interaction: discord.Interaction) -> None:
         current = self.current_preset()
         if self.operation in {_OP_EDIT, _OP_DELETE} and current is None:
@@ -434,13 +454,16 @@ class PresetWizardView(discord.ui.View):
 
     async def _on_refresh(self, interaction: discord.Interaction) -> None:
         await self.reload()
-        await interaction.response.edit_message(embed=self.build_embed(), view=self)
+        await self.respond_edit(interaction)
 
     async def _on_close(self, interaction: discord.Interaction) -> None:
-        await interaction.response.edit_message(
-            embed=discord.Embed(description="プリセットGUIを閉じました。", color=COLOR_INFO),
-            view=None,
-        )
+        try:
+            await interaction.response.edit_message(
+                embed=discord.Embed(description="プリセットGUIを閉じました。", color=COLOR_INFO),
+                view=None,
+            )
+        except discord.NotFound:
+            self.stop()
 
 
 async def open_preset_wizard(interaction: discord.Interaction) -> None:
