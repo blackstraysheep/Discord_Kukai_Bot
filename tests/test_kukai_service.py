@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from bot.models.kukai import Kukai
-from bot.models.vote_rule import VoteLabel
+from bot.models.select_rule import SelectLabel
 from bot.services import kukai_service
 from bot.services.errors import DeadlineConflictError, InvalidStateError, NotFoundError
 from bot.state_machine.states import KukaiState
@@ -24,14 +24,14 @@ async def test_create_kukai_creates_default_labels(db_session):
         channel_id=200,
         title="テスト句会",
         submission_close_at=_utc(7),
-        voting_close_at=_utc(14),
+        selecting_close_at=_utc(14),
     )
     await db_session.commit()
 
     from sqlalchemy import select
     labels = (
         await db_session.execute(
-            select(VoteLabel).where(VoteLabel.kukai_id == kukai.id)
+            select(SelectLabel).where(SelectLabel.kukai_id == kukai.id)
         )
     ).scalars().all()
 
@@ -53,7 +53,7 @@ async def test_create_kukai_deadline_conflict(db_session):
             channel_id=200,
             title="締切逆転",
             submission_close_at=_utc(14),
-            voting_close_at=_utc(7),  # before submission
+            selecting_close_at=_utc(7),  # before submission
         )
 
 
@@ -66,7 +66,7 @@ async def test_get_kukai_wrong_guild(db_session):
         channel_id=200,
         title="別ギルド",
         submission_close_at=_utc(7),
-        voting_close_at=_utc(14),
+        selecting_close_at=_utc(14),
     )
     await db_session.commit()
 
@@ -83,7 +83,7 @@ async def test_state_machine_proceed(db_session):
         channel_id=200,
         title="状態遷移テスト",
         submission_close_at=_utc(7),
-        voting_close_at=_utc(14),
+        selecting_close_at=_utc(14),
     )
     await db_session.commit()
     assert kukai.state == KukaiState.DRAFT
@@ -103,7 +103,7 @@ async def test_state_machine_proceed_skip_entry(db_session):
         channel_id=200,
         title="エントリースキップ",
         submission_close_at=_utc(7),
-        voting_close_at=_utc(14),
+        selecting_close_at=_utc(14),
     )
     kukai.entry_enabled = False
     await db_session.commit()
@@ -121,7 +121,7 @@ async def test_pause_and_resume(db_session):
         channel_id=200,
         title="ポーズテスト",
         submission_close_at=_utc(7),
-        voting_close_at=_utc(14),
+        selecting_close_at=_utc(14),
     )
     await kukai_service.proceed(db_session, kukai)  # → entry_open
     await db_session.commit()
@@ -145,7 +145,7 @@ async def test_cancel(db_session):
         channel_id=200,
         title="中止テスト",
         submission_close_at=_utc(7),
-        voting_close_at=_utc(14),
+        selecting_close_at=_utc(14),
     )
     await db_session.commit()
     await kukai_service.cancel(db_session, kukai)
@@ -161,7 +161,7 @@ async def test_cannot_proceed_from_terminal(db_session):
         channel_id=200,
         title="終了後テスト",
         submission_close_at=_utc(7),
-        voting_close_at=_utc(14),
+        selecting_close_at=_utc(14),
     )
     await kukai_service.cancel(db_session, kukai)
     await db_session.commit()

@@ -38,7 +38,7 @@ class StateMachine:
         await self._transition(kukai, target, session, is_admin=True)
 
     async def pause(self, kukai, session: Any) -> None:
-        current = KukaiState(kukai.state)
+        current = KukaiState.from_value(kukai.state)
         if current not in PAUSABLE:
             raise InvalidStateError(f"状態 {current} では一時停止できません。")
         kukai.pre_pause_state = kukai.state
@@ -50,14 +50,14 @@ class StateMachine:
             raise InvalidStateError("一時停止中ではありません。")
         if not kukai.pre_pause_state:
             raise InvalidStateError("再開前の状態が記録されていません。")
-        restored = KukaiState(kukai.pre_pause_state)
+        restored = KukaiState.from_value(kukai.pre_pause_state)
         kukai.state = restored
         kukai.pre_pause_state = None
         kukai.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
         return restored
 
     async def cancel(self, kukai, session: Any) -> None:
-        current = KukaiState(kukai.state)
+        current = KukaiState.from_value(kukai.state)
         if current in KukaiState.terminal_states():
             raise InvalidStateError(f"状態 {current} からはキャンセルできません。")
         kukai.state = KukaiState.CANCELLED
@@ -70,7 +70,7 @@ class StateMachine:
     async def _transition(
         self, kukai, target: KukaiState, session: Any, *, is_admin: bool
     ) -> None:
-        current = KukaiState(kukai.state)
+        current = KukaiState.from_value(kukai.state)
 
         if current == target:
             raise InvalidStateError(f"既に {target} 状態です。")

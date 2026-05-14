@@ -18,7 +18,7 @@ from bot.utils.text import discord_safe
 logger = logging.getLogger(__name__)
 
 _PREVIEW_ALLOWED = {
-    KukaiState.VOTING_CLOSED,
+    KukaiState.SELECTING_CLOSED,
     KukaiState.WAITING_RESULTS,
     KukaiState.RESULTS,
     KukaiState.ENDED,
@@ -47,7 +47,7 @@ def _score_embed(
             author_name = member.display_name if member else f"UID:{r.author_user_id}"
             author_line = f"　作者: {discord_safe(author_name)}"
 
-        label_parts = [f"{lv.label}×{lv.count}" for lv in r.label_votes]
+        label_parts = [f"{lv.label}×{lv.count}" for lv in r.label_selects]
         label_str = "　".join(label_parts) if label_parts else "（無選）"
 
         header = f"**{r.rank}位 ({r.total_score}pt)** — No.{r.number}{author_line}"
@@ -56,7 +56,7 @@ def _score_embed(
             label_str,
         ]
         # Inline comments (up to 3)
-        for lv in r.label_votes:
+        for lv in r.label_selects:
             for comment in lv.comments[:3]:
                 body_lines.append(f"　💬 [{lv.label}] {discord_safe(comment[:80])}")
 
@@ -85,7 +85,7 @@ def _number_embed(kukai, results, guild: discord.Guild) -> list[discord.Embed]:
     )
     lines = []
     for r in sorted_r:
-        label_str = "　".join(f"{lv.label}×{lv.count}" for lv in r.label_votes) or "（無選）"
+        label_str = "　".join(f"{lv.label}×{lv.count}" for lv in r.label_selects) or "（無選）"
         lines.append(f"`No.{r.number}` {discord_safe(r.text)}　— {label_str} ({r.total_score}pt)")
     embed.description = "\n".join(lines[:40])
     if len(sorted_r) > 40:
@@ -157,7 +157,7 @@ class ResultCog(commands.Cog):
         try:
             async with get_session() as session:
                 kukai = await kukai_service.get_kukai(session, kukai_id, interaction.guild.id)
-                state = KukaiState(kukai.state)
+                state = KukaiState.from_value(kukai.state)
 
                 # Non-RESULTS states require admin
                 if state != KukaiState.RESULTS:

@@ -26,7 +26,7 @@ async def _make_kukai(session, *, entry_enabled: bool = False):
         channel_id=200,
         title="通知テスト句会",
         submission_close_at=_utc(7),
-        voting_close_at=_utc(14),
+        selecting_close_at=_utc(14),
     )
     kukai.entry_enabled = entry_enabled
     await session.flush()
@@ -119,7 +119,7 @@ async def test_schedule_kukai_jobs_registers_notification_and_deadline_jobs(db_s
     added_ids = {item["id"] for item in scheduler.added}
     assert any(job_id.startswith("notify_") for job_id in added_ids)
     assert f"deadline_{kukai.id}_submission_close" in added_ids
-    assert f"deadline_{kukai.id}_voting_close" in added_ids
+    assert f"deadline_{kukai.id}_selecting_close" in added_ids
 
 
 @pytest.mark.asyncio
@@ -134,7 +134,7 @@ async def test_cancel_kukai_jobs_removes_registered_jobs(db_session, monkeypatch
 
     removed = set(scheduler.removed)
     assert f"deadline_{kukai.id}_submission_close" in removed
-    assert f"deadline_{kukai.id}_voting_close" in removed
+    assert f"deadline_{kukai.id}_selecting_close" in removed
     assert any(job_id.startswith("notify_") for job_id in removed)
 
 

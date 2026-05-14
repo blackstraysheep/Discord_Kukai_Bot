@@ -44,8 +44,8 @@ def upgrade() -> None:
         sa.Column("entry_close_at", sa.DateTime(), nullable=True),
         sa.Column("submission_open_at", sa.DateTime(), nullable=True),
         sa.Column("submission_close_at", sa.DateTime(), nullable=True),
-        sa.Column("voting_open_at", sa.DateTime(), nullable=True),
-        sa.Column("voting_close_at", sa.DateTime(), nullable=True),
+        sa.Column("selecting_open_at", sa.DateTime(), nullable=True),
+        sa.Column("selecting_close_at", sa.DateTime(), nullable=True),
         sa.Column("results_at", sa.DateTime(), nullable=True),
         # Entry settings
         sa.Column("entry_enabled", sa.Boolean(), nullable=False, server_default="1"),
@@ -59,9 +59,9 @@ def upgrade() -> None:
         sa.Column("submission_underflow", sa.Boolean(), nullable=False, server_default="0"),
         sa.Column("submission_mode", sa.String(20), nullable=False, server_default="manual"),
         sa.Column("submission_incomplete", sa.String(10), nullable=False, server_default="keep"),
-        # Voting settings
-        sa.Column("voting_mode", sa.String(20), nullable=False, server_default="manual"),
-        sa.Column("voting_incomplete", sa.String(10), nullable=False, server_default="keep"),
+        # Selecting settings
+        sa.Column("selecting_mode", sa.String(20), nullable=False, server_default="manual"),
+        sa.Column("selecting_incomplete", sa.String(10), nullable=False, server_default="keep"),
         sa.Column("points_enabled", sa.Boolean(), nullable=False, server_default="1"),
         # Publish / result settings
         sa.Column("publish_mode", sa.String(10), nullable=False, server_default="manual"),
@@ -93,7 +93,7 @@ def upgrade() -> None:
     op.create_index("idx_kadmin_kukai", "kukai_admins", ["kukai_id"])
 
     op.create_table(
-        "vote_rule_templates",
+        "select_rule_templates",
         sa.Column("id", sa.Integer(), primary_key=True, autoincrement=True),
         sa.Column("guild_id", sa.BigInteger(), nullable=False),
         sa.Column("name", sa.String(100), nullable=False),
@@ -105,7 +105,7 @@ def upgrade() -> None:
     )
 
     op.create_table(
-        "vote_labels",
+        "select_labels",
         sa.Column("id", sa.Integer(), primary_key=True, autoincrement=True),
         sa.Column("kukai_id", sa.Integer(), sa.ForeignKey("kukais.id", ondelete="CASCADE"), nullable=False),
         sa.Column("template_id", sa.Integer(), nullable=True),
@@ -118,7 +118,7 @@ def upgrade() -> None:
         sa.Column("comment_mode", sa.String(10), nullable=False, server_default="none"),
         sa.UniqueConstraint("kukai_id", "label"),
     )
-    op.create_index("idx_vlabel_kukai", "vote_labels", ["kukai_id"])
+    op.create_index("idx_vlabel_kukai", "select_labels", ["kukai_id"])
 
     op.create_table(
         "entries",
@@ -163,25 +163,25 @@ def upgrade() -> None:
     op.create_index("idx_pubsub_kukai", "published_submissions", ["kukai_id"])
 
     op.create_table(
-        "votes",
+        "selects",
         sa.Column("id", sa.Integer(), primary_key=True, autoincrement=True),
         sa.Column("kukai_id", sa.Integer(), sa.ForeignKey("kukais.id", ondelete="CASCADE"), nullable=False),
-        sa.Column("voter_user_id", sa.BigInteger(), nullable=False),
+        sa.Column("selector_user_id", sa.BigInteger(), nullable=False),
         sa.Column("submission_id", sa.Integer(), sa.ForeignKey("submissions.id", ondelete="CASCADE"), nullable=False),
-        sa.Column("vote_label_id", sa.Integer(), sa.ForeignKey("vote_labels.id", ondelete="CASCADE"), nullable=False),
+        sa.Column("select_label_id", sa.Integer(), sa.ForeignKey("select_labels.id", ondelete="CASCADE"), nullable=False),
         sa.Column("is_self_comment", sa.Boolean(), nullable=False, server_default="0"),
         sa.Column("created_at", sa.DateTime(), nullable=False),
         sa.Column("updated_at", sa.DateTime(), nullable=False),
-        sa.UniqueConstraint("kukai_id", "voter_user_id", "submission_id", "vote_label_id"),
+        sa.UniqueConstraint("kukai_id", "selector_user_id", "submission_id", "select_label_id"),
     )
-    op.create_index("idx_vote_kukai", "votes", ["kukai_id"])
-    op.create_index("idx_vote_voter", "votes", ["kukai_id", "voter_user_id"])
-    op.create_index("idx_vote_sub", "votes", ["submission_id"])
+    op.create_index("idx_select_kukai", "selects", ["kukai_id"])
+    op.create_index("idx_select_selector", "selects", ["kukai_id", "selector_user_id"])
+    op.create_index("idx_select_sub", "selects", ["submission_id"])
 
     op.create_table(
-        "vote_comments",
+        "select_comments",
         sa.Column("id", sa.Integer(), primary_key=True, autoincrement=True),
-        sa.Column("vote_id", sa.Integer(), sa.ForeignKey("votes.id", ondelete="CASCADE"), nullable=False, unique=True),
+        sa.Column("select_id", sa.Integer(), sa.ForeignKey("selects.id", ondelete="CASCADE"), nullable=False, unique=True),
         sa.Column("comment", sa.Text(), nullable=False),
         sa.Column("created_at", sa.DateTime(), nullable=False),
         sa.Column("updated_at", sa.DateTime(), nullable=False),
@@ -239,13 +239,13 @@ def downgrade() -> None:
     op.drop_table("notification_logs")
     op.drop_table("notification_schedules")
     op.drop_table("overall_comments")
-    op.drop_table("vote_comments")
-    op.drop_table("votes")
+    op.drop_table("select_comments")
+    op.drop_table("selects")
     op.drop_table("published_submissions")
     op.drop_table("submissions")
     op.drop_table("entries")
-    op.drop_table("vote_labels")
-    op.drop_table("vote_rule_templates")
+    op.drop_table("select_labels")
+    op.drop_table("select_rule_templates")
     op.drop_table("kukai_admins")
     op.drop_table("kukais")
     op.drop_table("guild_settings")

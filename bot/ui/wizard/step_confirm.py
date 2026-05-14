@@ -31,9 +31,9 @@ def build(state: WizardState) -> tuple[discord.Embed, discord.ui.View]:
         embed.add_field(name="説明", value=state.description[:200], inline=False)
 
     sub_str = format_jst(state.submission_close_at) if state.submission_close_at else "未設定"
-    vote_str = format_jst(state.voting_close_at) if state.voting_close_at else "未設定"
+    selecting_str = format_jst(state.selecting_close_at) if state.selecting_close_at else "未設定"
     embed.add_field(name="投句締切", value=sub_str, inline=True)
-    embed.add_field(name="選句締切", value=vote_str, inline=True)
+    embed.add_field(name="選句締切", value=selecting_str, inline=True)
 
     entry_str = "有効" if state.entry_enabled else "無効"
     if state.entry_enabled:
@@ -45,7 +45,8 @@ def build(state: WizardState) -> tuple[discord.Embed, discord.ui.View]:
     embed.add_field(
         name="投句設定",
         value=(
-            f"モード: {sub_mode_labels.get(state.submission_mode, state.submission_mode)}"
+            f"投句モード: {sub_mode_labels.get(state.submission_mode, state.submission_mode)}"
+            f"　選句モード: {sub_mode_labels.get(state.selecting_mode, state.selecting_mode)}"
             f"　{state.submission_min}〜{max_label}句"
         ),
         inline=False,
@@ -140,13 +141,14 @@ class StepConfirmView(discord.ui.View):
                     theme=state.theme or None,
                     description=state.description or None,
                     submission_close_at=state.submission_close_at,
-                    voting_close_at=state.voting_close_at,
+                    selecting_close_at=state.selecting_close_at,
                     entry_enabled=state.entry_enabled,
                     entry_approval=state.entry_approval,
                     min_participants=state.min_participants,
                     submission_min=state.submission_min,
                     submission_max=state.submission_max,
                     submission_mode=state.submission_mode,
+                    selecting_mode=state.selecting_mode,
                     submission_overflow=state.submission_overflow,
                     publish_mode=state.publish_mode,
                     result_mode=state.result_mode,
@@ -203,7 +205,7 @@ class StepConfirmView(discord.ui.View):
 
         # Post info embed to the new channel
         sub_str = format_jst(state.submission_close_at) if state.submission_close_at else "未定"
-        vote_str = format_jst(state.voting_close_at) if state.voting_close_at else "未定"
+        selecting_str = format_jst(state.selecting_close_at) if state.selecting_close_at else "未定"
         info = discord.Embed(
             title=f"📋 {kukai_title}",
             description=state.description or "",
@@ -213,7 +215,7 @@ class StepConfirmView(discord.ui.View):
             info.add_field(name="題", value=state.theme, inline=True)
         info.add_field(name="状態", value="下書き", inline=True)
         info.add_field(name="投句締切", value=sub_str, inline=False)
-        info.add_field(name="選句締切", value=vote_str, inline=False)
+        info.add_field(name="選句締切", value=selecting_str, inline=False)
         info.set_footer(text=f"句会ID: {kukai_id}")
         await channel.send(embed=info)
 

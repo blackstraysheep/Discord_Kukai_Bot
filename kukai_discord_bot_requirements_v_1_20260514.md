@@ -31,9 +31,9 @@ submission_closed
 ↓
 waiting_publish
 ↓
-voting_open
+selecting_open
 ↓
-voting_closed
+selecting_closed
 ↓
 waiting_results
 ↓
@@ -797,7 +797,7 @@ author
 
 ```text
 submission_open
-voting_open
+selecting_open
 results
 ```
 

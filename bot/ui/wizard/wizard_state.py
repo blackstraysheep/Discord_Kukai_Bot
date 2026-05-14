@@ -21,7 +21,7 @@ class WizardState:
 
     # Step 2: Schedule
     submission_close_at: Optional[datetime] = None
-    voting_close_at: Optional[datetime] = None
+    selecting_close_at: Optional[datetime] = None
 
     # Step 3: Entry
     entry_enabled: bool = True
@@ -32,6 +32,7 @@ class WizardState:
     submission_min: int = 1
     submission_max: Optional[int] = 3
     submission_mode: str = "manual"
+    selecting_mode: str = "manual"
     submission_overflow: bool = False
 
     # Step 5: Publish / Result
@@ -46,7 +47,7 @@ class WizardState:
 
     @property
     def can_confirm(self) -> bool:
-        return bool(self.title and self.submission_close_at and self.voting_close_at)
+        return bool(self.title and self.submission_close_at and self.selecting_close_at)
 
 
 _wizards: dict[int, WizardState] = {}

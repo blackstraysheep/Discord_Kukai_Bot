@@ -8,9 +8,9 @@ from sqlalchemy import select
 from bot.models.entry import Entry
 from bot.models.kukai import KukaiAdmin
 from bot.models.submission import PublishedSubmission, Submission
-from bot.models.vote import Vote
+from bot.models.select import Select
 from bot.repositories import kukai_repo
-from bot.services import entry_service, export_service, kukai_service, submission_service, vote_service
+from bot.services import entry_service, export_service, kukai_service, submission_service, select_service
 from bot.services.errors import InvalidStateError
 from bot.state_machine.states import KukaiState
 
@@ -27,7 +27,7 @@ async def _make_kukai(session):
         channel_id=200,
         title="Phase9テスト句会",
         submission_close_at=_utc(7),
-        voting_close_at=_utc(14),
+        selecting_close_at=_utc(14),
     )
 
 
@@ -35,14 +35,14 @@ async def _make_kukai(session):
 async def test_edit_kukai_updates_fields_and_deadlines(db_session):
     kukai = await _make_kukai(db_session)
     new_submission_close = _utc(10)
-    new_voting_close = _utc(15)
+    new_selecting_close = _utc(15)
 
     changed = await kukai_service.edit_kukai(
         db_session,
         kukai,
         title="更新後タイトル",
         submission_close_at=new_submission_close,
-        voting_close_at=new_voting_close,
+        selecting_close_at=new_selecting_close,
         submission_min=2,
         submission_max=4,
         submission_mode="semi_auto",
@@ -54,7 +54,7 @@ async def test_edit_kukai_updates_fields_and_deadlines(db_session):
     assert changed is True
     assert kukai.title == "更新後タイトル"
     assert kukai.submission_close_at == new_submission_close
-    assert kukai.voting_close_at == new_voting_close
+    assert kukai.selecting_close_at == new_selecting_close
     assert kukai.submission_min == 2
     assert kukai.submission_max == 4
     assert kukai.submission_mode == "semi_auto"
@@ -64,12 +64,12 @@ async def test_edit_kukai_updates_fields_and_deadlines(db_session):
 
 
 @pytest.mark.asyncio
-async def test_edit_kukai_blocks_submission_settings_after_voting_open(db_session):
+async def test_edit_kukai_blocks_submission_settings_after_selecting_open(db_session):
     kukai = await _make_kukai(db_session)
     kukai.entry_enabled = False
     await db_session.flush()
 
-    while KukaiState(kukai.state) != KukaiState.VOTING_OPEN:
+    while KukaiState(kukai.state) != KukaiState.SELECTING_OPEN:
         await kukai_service.proceed(db_session, kukai)
 
     with pytest.raises(InvalidStateError):
@@ -128,16 +128,16 @@ async def test_export_and_import_payload_roundtrip(db_session):
     await kukai_service.proceed(db_session, kukai)  # submission_closed
     await kukai_service.proceed(db_session, kukai)  # waiting_publish
     published = await submission_service.publish(db_session, kukai)
-    await kukai_service.proceed(db_session, kukai)  # voting_open
-    await vote_service.cast_vote(
+    await kukai_service.proceed(db_session, kukai)  # selecting_open
+    await select_service.cast_select(
         db_session,
         kukai,
-        voter_user_id=202,
+        selector_user_id=202,
         submission_id=sub.id,
-        vote_label_id=kukai.vote_labels[0].id,
+        select_label_id=kukai.select_labels[0].id,
         comment="良い句",
     )
-    await kukai_service.proceed(db_session, kukai)  # voting_closed
+    await kukai_service.proceed(db_session, kukai)  # selecting_closed
 
     payload = await export_service.export_payload(db_session, guild_id=1, kukai_id=kukai.id)
     assert payload["kukai_count"] == 1
@@ -146,8 +146,8 @@ async def test_export_and_import_payload_roundtrip(db_session):
     assert len(first["entries"]) == 1
     assert len(first["submissions"]) == 1
     assert len(first["published_submissions"]) == 1
-    assert len(first["votes"]) == 1
-    assert len(first["vote_comments"]) == 1
+    assert len(first["selects"]) == 1
+    assert len(first["select_comments"]) == 1
     assert len(first["results"]) == 1
 
     imported_ids = await export_service.import_payload(db_session, guild_id=1, payload=payload)
@@ -171,13 +171,13 @@ async def test_export_and_import_payload_roundtrip(db_session):
             select(PublishedSubmission).where(PublishedSubmission.kukai_id == imported_kukai_id)
         )
     ).scalars().all()
-    vote_count = (
-        await db_session.execute(select(Vote).where(Vote.kukai_id == imported_kukai_id))
+    select_count = (
+        await db_session.execute(select(Select).where(Select.kukai_id == imported_kukai_id))
     ).scalars().all()
 
     assert len(admin_count) == 0
     assert len(entry_count) == 1
     assert len(submission_count) == 1
     assert len(published_count) == 1
-    assert len(vote_count) == 1
+    assert len(select_count) == 1
     assert published[0].number == 1

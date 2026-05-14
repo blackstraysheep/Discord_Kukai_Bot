@@ -18,7 +18,7 @@ Discord完結型句会管理Bot。Python 3.13 / discord.py 2.x / SQLAlchemy 2.x 
 - `pyproject.toml`, `Dockerfile`, `docker-compose.yml`
 - `bot/settings.py` — pydantic-settings（BOT_TOKEN, DATABASE_URL, DATA_DIR, LOG_LEVEL, DEV_GUILD_IDS）
 - `bot/database.py` — async engine, sessionmaker, `get_session()` コンテキストマネージャ
-- `bot/models/` — 全14テーブル（Kukai, KukaiAdmin, VoteLabel, Entry, Submission, PublishedSubmission, Vote, VoteComment, OverallComment, NotificationSchedule, NotificationLog, GuildSettings, VoteRuleTemplate, VoiceSession）
+- `bot/models/` — 全14テーブル（Kukai, KukaiAdmin, SelectLabel, Entry, Submission, PublishedSubmission, Select, SelectComment, OverallSelectComment, NotificationSchedule, NotificationLog, GuildSettings, SelectRuleTemplate, VoiceSession）
 - `alembic/versions/0001_initial.py` — 初期マイグレーション
 - `bot/main.py` — KukaiBot クラス、Cog一括ロード、APScheduler起動
 
@@ -51,17 +51,17 @@ Discord完結型句会管理Bot。Python 3.13 / discord.py 2.x / SQLAlchemy 2.x 
 - **テスト**: `test_submission_service.py`（15件）
 
 ### Phase 5 — 選句
-- `bot/repositories/vote_repo.py`
-- `bot/services/vote_service.py` — cast_vote/remove_vote/set_overall_comment/list_votes_for_voter
-  - cast_vote: 自句禁止・max_count制限・comment_mode対応・既存票の上書き（upsert）
-- `bot/ui/vote_view.py` — VoteView（1句ずつ表示、ラベルSelect、コメントModal、前後ナビ）
-- `bot/cogs/vote_cog.py` — `/select kukai_id`
+- `bot/repositories/select_repo.py`
+- `bot/services/select_service.py` — cast_select/remove_select/set_overall_comment/list_selects_for_selector
+  - cast_select: 自句禁止・max_count制限・comment_mode対応・既存票の上書き（upsert）
+- `bot/ui/select_view.py` — SelectView（1句ずつ表示、ラベルSelect、コメントModal、前後ナビ）
+- `bot/cogs/select_cog.py` — `/select kukai_id`
 - `bot/cogs/check_cog.py` — `/check kukai_id`（エントリー/投句/選句の状況一覧）
-- **テスト**: `test_vote_service.py`（11件）
+- **テスト**: `test_select_service.py`（11件）
 
 ### Phase 6 — 結果表示
 - `bot/services/result_service.py` — compute_results()
-  - SubmissionResult / LabelVotes データクラス
+  - SubmissionResult / LabelSelects データクラス
   - スコア降順ソート、タイブレーク（rank_priority順のラベル数比較）、同点同順位
 - `bot/cogs/result_cog.py` — `/result kukai_id [format:score/number/author]`
   - RESULTS状態で公開（非ephemeral）、それ以前は管理者のみプレビュー（ephemeral）
@@ -70,7 +70,7 @@ Discord完結型句会管理Bot。Python 3.13 / discord.py 2.x / SQLAlchemy 2.x 
 
 ### Phase 7 — Scheduler + 通知
 - `bot/scheduler/setup.py` — init_scheduler / get_scheduler / has_scheduler
-- `bot/scheduler/jobs.py` — notification_job / deadline_job / _all_submitted / _all_voted / _notify_channel / _notify_admins
+- `bot/scheduler/jobs.py` — notification_job / deadline_job / _all_submitted / _all_selected / _notify_channel / _notify_admins
   - `notification_job(schedule_id)`: NotificationScheduleを取得しリマインダー送信
   - `deadline_job(kukai_id, event_type)`: manual/semi_auto/full_autoに応じた自動進行
 - `bot/repositories/notification_repo.py`
@@ -89,13 +89,13 @@ Discord完結型句会管理Bot。Python 3.13 / discord.py 2.x / SQLAlchemy 2.x 
 - `bot/ui/wizard/step_submission.py` — Step 4: 投句設定（Select + 詳細Modalで最低/最大投句数）
 - `bot/ui/wizard/step_publish.py` — Step 5: 公開/結果/作者設定（Select × 3）
 - `bot/ui/wizard/step_confirm.py` — Step 6: 確認・作成（チャンネル作成 → create_kukai → schedule_kukai_jobs）
-- `bot/ui/wizard/step_vote_rule.py` / `step_notify.py` / `step_voice.py` — 将来用スタブ
+- `bot/ui/wizard/step_select_rule.py` / `step_notify.py` / `step_voice.py` — 将来用スタブ
 - `bot/services/kukai_service.py` 更新: create_kukai()にウィザード設定パラメータ追加
 - `/kukai create` をウィザード起動に差し替え（権限チェック後、step 1を送信）
 
 ### Phase 9 — Export / Import + /kukai edit + ギルド設定（コア実装）
 - `bot/services/export_service.py` 追加
-  - `export_payload()` — 句会設定/entries/submissions/published_submissions/votes/vote_comments/overall_comments/results/通知情報をJSON化
+  - `export_payload()` — 句会設定/entries/submissions/published_submissions/selects/select_comments/overall_comments/results/通知情報をJSON化
   - `import_payload()` — エクスポートJSONを同一guildへ復元（ID再採番マッピング）
   - `payload_to_json()`, `payload_to_csv()` を実装
 - `bot/cogs/admin_cog.py` 実装
@@ -106,7 +106,7 @@ Discord完結型句会管理Bot。Python 3.13 / discord.py 2.x / SQLAlchemy 2.x 
 - `bot/services/kukai_service.py` 拡張
   - `add_kukai_admin()`, `remove_kukai_admin()`
   - `edit_kukai()` — title/theme/description/締切/submission設定/publish_mode/result_mode/author_revealを更新
-  - 状態制約: `VOTING_OPEN` 以降は submission設定変更不可
+  - 状態制約: `SELECTING_OPEN` 以降は submission設定変更不可
 - `bot/cogs/kukai_cog.py` 実装
   - `/kukai edit` を実装（権限チェック、JST日時パース、更新、締切変更時のジョブ再登録）
 
@@ -118,7 +118,7 @@ Discord完結型句会管理Bot。Python 3.13 / discord.py 2.x / SQLAlchemy 2.x 
 tests/test_kukai_service.py       8件  ✅
 tests/test_entry_service.py      12件  ✅
 tests/test_submission_service.py 15件  ✅
-tests/test_vote_service.py       11件  ✅
+tests/test_select_service.py       11件  ✅
 tests/test_result_service.py      6件  ✅
 tests/test_phase9_services.py     4件  ✅
 tests/test_notification_phase10.py 5件 ✅
@@ -144,10 +144,10 @@ kukai_bot/
 │   ├── models/
 │   │   ├── base.py
 │   │   ├── kukai.py          # Kukai, KukaiAdmin
-│   │   ├── vote_rule.py      # VoteLabel, VoteRuleTemplate
+│   │   ├── select_rule.py    # SelectLabel, SelectRuleTemplate
 │   │   ├── entry.py
 │   │   ├── submission.py     # Submission, PublishedSubmission
-│   │   ├── vote.py           # Vote, VoteComment, OverallComment
+│   │   ├── select.py         # Select, SelectComment, OverallSelectComment
 │   │   ├── notification.py   # NotificationSchedule, NotificationLog
 │   │   ├── guild_settings.py
 │   │   └── voice_session.py
@@ -155,14 +155,14 @@ kukai_bot/
 │   │   ├── kukai_repo.py
 │   │   ├── entry_repo.py
 │   │   ├── submission_repo.py
-│   │   ├── vote_repo.py
+│   │   ├── select_repo.py
 │   │   └── notification_repo.py
 │   ├── services/
 │   │   ├── errors.py
 │   │   ├── kukai_service.py
 │   │   ├── entry_service.py
 │   │   ├── submission_service.py
-│   │   ├── vote_service.py
+│   │   ├── select_service.py
 │   │   ├── result_service.py
 │   │   ├── notification_service.py
 │   │   └── permission_service.py
@@ -177,14 +177,14 @@ kukai_bot/
 │   │   ├── kukai_cog.py      # /kukai *
 │   │   ├── entry_cog.py      # /entry *
 │   │   ├── submission_cog.py # /submit
-│   │   ├── vote_cog.py       # /select
+│   │   ├── select_cog.py       # /select
 │   │   ├── check_cog.py      # /check
 │   │   ├── result_cog.py     # /result
 │   │   └── admin_cog.py      # /kukai_admin *, /guild settings
 │   ├── ui/
 │   │   ├── common.py         # ConfirmView, PaginatedEmbed, error_embed
 │   │   ├── submission_view.py
-│   │   ├── vote_view.py
+│   │   ├── select_view.py
 │   │   ├── entry_manage_view.py
 │   │   └── wizard/
 │   │       ├── wizard_state.py
@@ -195,7 +195,7 @@ kukai_bot/
 │   │       ├── step_submission.py
 │   │       ├── step_publish.py
 │   │       ├── step_confirm.py
-│   │       ├── step_vote_rule.py  # スタブ
+│   │       ├── step_select_rule.py  # スタブ
 │   │       ├── step_notify.py     # スタブ
 │   │       └── step_voice.py      # スタブ
 │   └── utils/
@@ -208,7 +208,7 @@ kukai_bot/
     ├── test_kukai_service.py
     ├── test_entry_service.py
     ├── test_submission_service.py
-    ├── test_vote_service.py
+    ├── test_select_service.py
     ├── test_result_service.py
     ├── test_phase9_services.py
     └── test_notification_phase10.py
@@ -241,7 +241,7 @@ kukai_bot/
   - Discordの権限不足（Forbidden）エラーのフォールバック ✅（`/kukai publish` / `/result` / scheduler通知）
 
 **未実装のスタブ**
-- `bot/ui/wizard/step_vote_rule.py` — ウィザード内での投票ラベルカスタマイズ
+- `bot/ui/wizard/step_select_rule.py` — ウィザード内での投票ラベルカスタマイズ
 - `bot/ui/wizard/step_notify.py` — ウィザード内での通知チャンネル設定
 - `bot/ui/wizard/step_voice.py` — ボイスセッション連携（VoiceSessionモデルはあるが未活用）
 - `bot/models/voice_session.py` — VoiceSessionモデルは存在するがCog/Serviceが未実装

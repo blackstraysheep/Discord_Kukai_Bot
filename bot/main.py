@@ -13,7 +13,7 @@ COGS = [
     "bot.cogs.kukai_cog",
     "bot.cogs.entry_cog",
     "bot.cogs.submission_cog",
-    "bot.cogs.vote_cog",
+    "bot.cogs.select_cog",
     "bot.cogs.check_cog",
     "bot.cogs.result_cog",
     "bot.cogs.admin_cog",

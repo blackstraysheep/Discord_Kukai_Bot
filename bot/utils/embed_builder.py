@@ -37,8 +37,8 @@ def kukai_info_embed(kukai) -> discord.Embed:
 
     if kukai.submission_close_at:
         embed.add_field(name="投句締切", value=format_jst(kukai.submission_close_at), inline=False)
-    if kukai.voting_close_at:
-        embed.add_field(name="選句締切", value=format_jst(kukai.voting_close_at), inline=False)
+    if kukai.selecting_close_at:
+        embed.add_field(name="選句締切", value=format_jst(kukai.selecting_close_at), inline=False)
 
     embed.set_footer(text=f"句会 ID: {kukai.id}")
     return embed

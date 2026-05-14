@@ -8,14 +8,14 @@ from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.models.submission import PublishedSubmission, Submission
-from bot.models.vote import OverallComment, Vote
+from bot.models.select import OverallSelectComment, Select
 from bot.repositories import entry_repo, submission_repo
 from bot.services.errors import InvalidStateError, NotFoundError, ValidationError
 from bot.state_machine.states import KukaiState
 from bot.utils.text import normalize
 
 _SUBMISSION_OPEN = KukaiState.SUBMISSION_OPEN
-_ROLLBACK_ALLOWED = {KukaiState.WAITING_PUBLISH, KukaiState.VOTING_OPEN, KukaiState.VOTING_CLOSED}
+_ROLLBACK_ALLOWED = {KukaiState.WAITING_PUBLISH, KukaiState.SELECTING_OPEN, KukaiState.SELECTING_CLOSED}
 
 
 async def submit(
@@ -25,7 +25,7 @@ async def submit(
     text: str,
 ) -> tuple[Submission, bool]:
     """Register a haiku. Returns (submission, over_limit_warning)."""
-    if KukaiState(kukai.state) != _SUBMISSION_OPEN:
+    if KukaiState.from_value(kukai.state) != _SUBMISSION_OPEN:
         raise InvalidStateError("現在投句を受け付けていません。")
 
     text = normalize(text.strip())
@@ -57,7 +57,7 @@ async def edit(
     submission_id: int,
     new_text: str,
 ) -> Submission:
-    if KukaiState(kukai.state) != _SUBMISSION_OPEN:
+    if KukaiState.from_value(kukai.state) != _SUBMISSION_OPEN:
         raise InvalidStateError("現在投句を受け付けていません。")
 
     new_text = normalize(new_text.strip())
@@ -78,7 +78,7 @@ async def delete_submission(
     user_id: int,
     submission_id: int,
 ) -> None:
-    if KukaiState(kukai.state) != _SUBMISSION_OPEN:
+    if KukaiState.from_value(kukai.state) != _SUBMISSION_OPEN:
         raise InvalidStateError("現在投句を受け付けていません。")
 
     sub = await submission_repo.get(session, submission_id)
@@ -99,7 +99,7 @@ async def publish(
     kukai,
 ) -> list[PublishedSubmission]:
     """Assign random display numbers. State must be WAITING_PUBLISH."""
-    if KukaiState(kukai.state) != KukaiState.WAITING_PUBLISH:
+    if KukaiState.from_value(kukai.state) != KukaiState.WAITING_PUBLISH:
         raise InvalidStateError("投句公開は「投句公開待ち」状態でのみ実行できます。")
 
     if kukai.submission_incomplete == "discard":
@@ -142,15 +142,15 @@ async def rollback_publish(
     session: AsyncSession,
     kukai,
     *,
-    reset_votes: bool = False,
+    reset_selects: bool = False,
 ) -> None:
-    """Undo publish: delete PublishedSubmission rows and optionally all votes."""
-    if KukaiState(kukai.state) not in _ROLLBACK_ALLOWED:
+    """Undo publish: delete PublishedSubmission rows and optionally all selects."""
+    if KukaiState.from_value(kukai.state) not in _ROLLBACK_ALLOWED:
         raise InvalidStateError("この状態ではロールバックできません。")
 
     await submission_repo.restore_discarded(session, kukai.id)
     await submission_repo.delete_published(session, kukai.id)
 
-    if reset_votes:
-        await session.execute(delete(Vote).where(Vote.kukai_id == kukai.id))
-        await session.execute(delete(OverallComment).where(OverallComment.kukai_id == kukai.id))
+    if reset_selects:
+        await session.execute(delete(Select).where(Select.kukai_id == kukai.id))
+        await session.execute(delete(OverallSelectComment).where(OverallSelectComment.kukai_id == kukai.id))

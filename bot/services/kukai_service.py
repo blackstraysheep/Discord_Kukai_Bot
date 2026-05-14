@@ -6,7 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.models.kukai import Kukai, KukaiAdmin
-from bot.models.vote_rule import VoteLabel
+from bot.models.select_rule import SelectLabel
 from bot.repositories import kukai_repo
 from bot.services.errors import (
     DeadlineConflictError,
@@ -21,8 +21,8 @@ from bot.state_machine.transitions import next_state
 # Shared state machine instance (no callbacks yet; added in later phases)
 _state_machine = StateMachine()
 
-# Default vote labels copied into every new kukai (requirements §5.1)
-_DEFAULT_VOTE_LABELS = [
+# Default select labels copied into every new kukai (requirements §5.1)
+_DEFAULT_SELECT_LABELS = [
     {
         "label": "特選",
         "point": 2,
@@ -50,11 +50,20 @@ _DEFAULT_VOTE_LABELS = [
         "max_count": None,
         "comment_mode": "none",
     },
+    {
+        "label": "作者コメント",
+        "point": 0,
+        "rank_priority": 999,
+        "display_order": 999,
+        "min_count": 0,
+        "max_count": None,
+        "comment_mode": "required",
+    },
 ]
 
 _SUBMISSION_LOCKED_STATES = {
-    KukaiState.VOTING_OPEN,
-    KukaiState.VOTING_CLOSED,
+    KukaiState.SELECTING_OPEN,
+    KukaiState.SELECTING_CLOSED,
     KukaiState.WAITING_RESULTS,
     KukaiState.RESULTS,
     KukaiState.ENDED,
@@ -62,6 +71,7 @@ _SUBMISSION_LOCKED_STATES = {
 }
 
 _VALID_SUBMISSION_MODES = {"manual", "semi_auto", "full_auto"}
+_VALID_SELECTING_MODES = {"manual", "semi_auto", "full_auto"}
 _VALID_PUBLISH_MODES = {"manual", "auto"}
 _VALID_RESULT_MODES = {"manual", "auto"}
 
@@ -76,7 +86,7 @@ async def create_kukai(
     theme: str | None = None,
     description: str | None = None,
     submission_close_at: datetime | None = None,
-    voting_close_at: datetime | None = None,
+    selecting_close_at: datetime | None = None,
     # Optional settings (wizard-provided overrides)
     entry_enabled: bool = True,
     entry_approval: bool = False,
@@ -84,6 +94,7 @@ async def create_kukai(
     submission_min: int = 1,
     submission_max: int | None = 3,
     submission_mode: str = "manual",
+    selecting_mode: str = "manual",
     submission_overflow: bool = False,
     publish_mode: str = "manual",
     result_mode: str = "manual",
@@ -95,7 +106,7 @@ async def create_kukai(
     if not author_reveal:
         author_reveal_zero = True
 
-    _validate_deadlines(submission_close_at, voting_close_at)
+    _validate_deadlines(submission_close_at, selecting_close_at)
 
     kukai = Kukai(
         guild_id=guild_id,
@@ -106,13 +117,14 @@ async def create_kukai(
         description=description,
         state=KukaiState.DRAFT,
         submission_close_at=submission_close_at,
-        voting_close_at=voting_close_at,
+        selecting_close_at=selecting_close_at,
         entry_enabled=entry_enabled,
         entry_approval=entry_approval,
         min_participants=min_participants,
         submission_min=submission_min,
         submission_max=submission_max,
         submission_mode=submission_mode,
+        selecting_mode=selecting_mode,
         submission_overflow=submission_overflow,
         publish_mode=publish_mode,
         result_mode=result_mode,
@@ -122,10 +134,10 @@ async def create_kukai(
     session.add(kukai)
     await session.flush()  # obtain id
 
-    for data in _DEFAULT_VOTE_LABELS:
-        session.add(VoteLabel(kukai_id=kukai.id, **data))
+    for data in _DEFAULT_SELECT_LABELS:
+        session.add(SelectLabel(kukai_id=kukai.id, **data))
     await session.flush()
-    await session.refresh(kukai, attribute_names=["vote_labels"])
+    await session.refresh(kukai, attribute_names=["select_labels"])
 
     return kukai
 
@@ -208,22 +220,31 @@ async def edit_kukai(
     theme: str | None = None,
     description: str | None = None,
     submission_close_at: datetime | None = None,
-    voting_close_at: datetime | None = None,
+    selecting_close_at: datetime | None = None,
     submission_min: int | None = None,
     submission_max: int | None = None,
     submission_max_unlimited: bool = False,
     submission_mode: str | None = None,
+    selecting_mode: str | None = None,
     publish_mode: str | None = None,
     result_mode: str | None = None,
     author_reveal: bool | None = None,
     author_reveal_zero: bool | None = None,
 ) -> bool:
     """Edit kukai fields and return True when deadline fields changed."""
-    state = KukaiState(kukai.state)
+    state = KukaiState.from_value(kukai.state)
 
     submission_setting_change = (
         submission_max_unlimited
-        or any(value is not None for value in (submission_min, submission_max, submission_mode))
+        or any(
+            value is not None
+            for value in (
+                submission_min,
+                submission_max,
+                submission_mode,
+                selecting_mode,
+            )
+        )
     )
     if submission_setting_change and state in _SUBMISSION_LOCKED_STATES:
         raise InvalidStateError("この状態では投句設定を変更できません。")
@@ -246,6 +267,10 @@ async def edit_kukai(
         if submission_mode not in _VALID_SUBMISSION_MODES:
             raise ValidationError("submission_mode は manual/semi_auto/full_auto で指定してください。")
         kukai.submission_mode = submission_mode
+    if selecting_mode is not None:
+        if selecting_mode not in _VALID_SELECTING_MODES:
+            raise ValidationError("selecting_mode は manual/semi_auto/full_auto で指定してください。")
+        kukai.selecting_mode = selecting_mode
 
     if publish_mode is not None:
         if publish_mode not in _VALID_PUBLISH_MODES:
@@ -291,25 +316,25 @@ async def edit_kukai(
         kukai.submission_max = submission_max
 
     old_submission_close_at = kukai.submission_close_at
-    old_voting_close_at = kukai.voting_close_at
+    old_selecting_close_at = kukai.selecting_close_at
 
     new_submission_close_at = (
         submission_close_at if submission_close_at is not None else kukai.submission_close_at
     )
-    new_voting_close_at = voting_close_at if voting_close_at is not None else kukai.voting_close_at
-    _validate_deadlines(new_submission_close_at, new_voting_close_at)
+    new_selecting_close_at = selecting_close_at if selecting_close_at is not None else kukai.selecting_close_at
+    _validate_deadlines(new_submission_close_at, new_selecting_close_at)
 
     if submission_close_at is not None:
         kukai.submission_close_at = submission_close_at
-    if voting_close_at is not None:
-        kukai.voting_close_at = voting_close_at
+    if selecting_close_at is not None:
+        kukai.selecting_close_at = selecting_close_at
 
     return (
         submission_close_at is not None
         and submission_close_at != old_submission_close_at
     ) or (
-        voting_close_at is not None
-        and voting_close_at != old_voting_close_at
+        selecting_close_at is not None
+        and selecting_close_at != old_selecting_close_at
     )
 
 
@@ -317,22 +342,22 @@ async def update_deadlines(
     session: AsyncSession,
     kukai: Kukai,
     submission_close_at: datetime | None,
-    voting_close_at: datetime | None,
+    selecting_close_at: datetime | None,
 ) -> None:
-    _validate_deadlines(submission_close_at, voting_close_at)
+    _validate_deadlines(submission_close_at, selecting_close_at)
     if submission_close_at is not None:
         kukai.submission_close_at = submission_close_at
-    if voting_close_at is not None:
-        kukai.voting_close_at = voting_close_at
+    if selecting_close_at is not None:
+        kukai.selecting_close_at = selecting_close_at
 
 
 def _validate_deadlines(
     submission_close_at: datetime | None,
-    voting_close_at: datetime | None,
+    selecting_close_at: datetime | None,
 ) -> None:
     if (
         submission_close_at is not None
-        and voting_close_at is not None
-        and voting_close_at <= submission_close_at
+        and selecting_close_at is not None
+        and selecting_close_at <= submission_close_at
     ):
         raise DeadlineConflictError("選句締切は投句締切より後に設定してください。")

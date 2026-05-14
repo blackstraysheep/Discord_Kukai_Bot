@@ -6,21 +6,21 @@ from bot.models.kukai import Kukai, KukaiAdmin
 from bot.models.notification import NotificationLog, NotificationSchedule
 from bot.models.submission import PublishedSubmission, Submission
 from bot.models.voice_session import VoiceSession
-from bot.models.vote import OverallComment, Vote, VoteComment
-from bot.models.vote_rule import VoteLabel, VoteRuleTemplate
+from bot.models.select import OverallSelectComment, Select, SelectComment
+from bot.models.select_rule import SelectLabel, SelectRuleTemplate
 
 __all__ = [
     "GuildSettings",
     "Kukai",
     "KukaiAdmin",
-    "VoteRuleTemplate",
-    "VoteLabel",
+    "SelectRuleTemplate",
+    "SelectLabel",
     "Entry",
     "Submission",
     "PublishedSubmission",
-    "Vote",
-    "VoteComment",
-    "OverallComment",
+    "Select",
+    "SelectComment",
+    "OverallSelectComment",
     "NotificationSchedule",
     "NotificationLog",
     "VoiceSession",

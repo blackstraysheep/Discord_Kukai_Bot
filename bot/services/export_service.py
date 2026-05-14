@@ -16,8 +16,8 @@ from bot.models.entry import Entry
 from bot.models.kukai import Kukai, KukaiAdmin
 from bot.models.notification import NotificationLog, NotificationSchedule
 from bot.models.submission import PublishedSubmission, Submission
-from bot.models.vote import OverallComment, Vote, VoteComment
-from bot.models.vote_rule import VoteLabel
+from bot.models.select import OverallSelectComment, Select, SelectComment
+from bot.models.select_rule import SelectLabel
 from bot.services import result_service
 from bot.services.errors import InvalidStateError, NotFoundError, ValidationError
 
@@ -40,7 +40,7 @@ def _serialize_results(results: list[result_service.SubmissionResult]) -> list[d
             "text": item.text,
             "author_user_id": item.author_user_id,
             "total_score": item.total_score,
-            "label_votes": [
+            "label_selects": [
                 {
                     "label": lv.label,
                     "point": lv.point,
@@ -48,7 +48,7 @@ def _serialize_results(results: list[result_service.SubmissionResult]) -> list[d
                     "count": lv.count,
                     "comments": lv.comments,
                 }
-                for lv in item.label_votes
+                for lv in item.label_selects
             ],
         }
         for item in results
@@ -66,10 +66,10 @@ async def export_payload(
         .where(Kukai.guild_id == guild_id)
         .options(
             selectinload(Kukai.admins),
-            selectinload(Kukai.vote_labels),
+            selectinload(Kukai.select_labels),
             selectinload(Kukai.entries),
             selectinload(Kukai.submissions).selectinload(Submission.published),
-            selectinload(Kukai.votes).selectinload(Vote.comment),
+            selectinload(Kukai.selects).selectinload(Select.comment),
             selectinload(Kukai.overall_comments),
             selectinload(Kukai.notification_schedules).selectinload(NotificationSchedule.logs),
         )
@@ -106,8 +106,8 @@ async def export_payload(
                 "entry_close_at": _dt_to_str(kukai.entry_close_at),
                 "submission_open_at": _dt_to_str(kukai.submission_open_at),
                 "submission_close_at": _dt_to_str(kukai.submission_close_at),
-                "voting_open_at": _dt_to_str(kukai.voting_open_at),
-                "voting_close_at": _dt_to_str(kukai.voting_close_at),
+                "selecting_open_at": _dt_to_str(kukai.selecting_open_at),
+                "selecting_close_at": _dt_to_str(kukai.selecting_close_at),
                 "results_at": _dt_to_str(kukai.results_at),
                 "entry_enabled": kukai.entry_enabled,
                 "entry_approval": kukai.entry_approval,
@@ -119,8 +119,8 @@ async def export_payload(
                 "submission_underflow": kukai.submission_underflow,
                 "submission_mode": kukai.submission_mode,
                 "submission_incomplete": kukai.submission_incomplete,
-                "voting_mode": kukai.voting_mode,
-                "voting_incomplete": kukai.voting_incomplete,
+                "selecting_mode": kukai.selecting_mode,
+                "selecting_incomplete": kukai.selecting_incomplete,
                 "points_enabled": kukai.points_enabled,
                 "publish_mode": kukai.publish_mode,
                 "result_mode": kukai.result_mode,
@@ -144,7 +144,7 @@ async def export_payload(
                 }
                 for row in sorted(kukai.admins, key=lambda x: x.id)
             ],
-            "vote_labels": [
+            "select_labels": [
                 {
                     "id": row.id,
                     "kukai_id": row.kukai_id,
@@ -157,7 +157,7 @@ async def export_payload(
                     "max_count": row.max_count,
                     "comment_mode": row.comment_mode,
                 }
-                for row in sorted(kukai.vote_labels, key=lambda x: x.display_order)
+                for row in sorted(kukai.select_labels, key=lambda x: x.display_order)
             ],
             "entries": [
                 {
@@ -197,28 +197,28 @@ async def export_payload(
                 for row in sorted(kukai.submissions, key=lambda x: x.id)
                 if row.published is not None
             ],
-            "votes": [
+            "selects": [
                 {
                     "id": row.id,
                     "kukai_id": row.kukai_id,
-                    "voter_user_id": row.voter_user_id,
+                    "selector_user_id": row.selector_user_id,
                     "submission_id": row.submission_id,
-                    "vote_label_id": row.vote_label_id,
+                    "select_label_id": row.select_label_id,
                     "is_self_comment": row.is_self_comment,
                     "created_at": _dt_to_str(row.created_at),
                     "updated_at": _dt_to_str(row.updated_at),
                 }
-                for row in sorted(kukai.votes, key=lambda x: x.id)
+                for row in sorted(kukai.selects, key=lambda x: x.id)
             ],
-            "vote_comments": [
+            "select_comments": [
                 {
                     "id": row.comment.id,
-                    "vote_id": row.comment.vote_id,
+                    "select_id": row.comment.select_id,
                     "comment": row.comment.comment,
                     "created_at": _dt_to_str(row.comment.created_at),
                     "updated_at": _dt_to_str(row.comment.updated_at),
                 }
-                for row in sorted(kukai.votes, key=lambda x: x.id)
+                for row in sorted(kukai.selects, key=lambda x: x.id)
                 if row.comment is not None
             ],
             "overall_comments": [
@@ -286,12 +286,12 @@ def payload_to_csv(payload: dict[str, Any]) -> str:
         writer.writerow([kukai_id, "kukai", json.dumps(kukai, ensure_ascii=False)])
         for section in (
             "admins",
-            "vote_labels",
+            "select_labels",
             "entries",
             "submissions",
             "published_submissions",
-            "votes",
-            "vote_comments",
+            "selects",
+            "select_comments",
             "overall_comments",
             "notification_schedules",
             "notification_logs",
@@ -350,8 +350,12 @@ async def import_payload(
             entry_close_at=_str_to_dt(source_kukai.get("entry_close_at")),
             submission_open_at=_str_to_dt(source_kukai.get("submission_open_at")),
             submission_close_at=_str_to_dt(source_kukai.get("submission_close_at")),
-            voting_open_at=_str_to_dt(source_kukai.get("voting_open_at")),
-            voting_close_at=_str_to_dt(source_kukai.get("voting_close_at")),
+            selecting_open_at=_str_to_dt(
+                source_kukai.get("selecting_open_at") or source_kukai.get("selecting_open_at")
+            ),
+            selecting_close_at=_str_to_dt(
+                source_kukai.get("selecting_close_at") or source_kukai.get("selecting_close_at")
+            ),
             results_at=_str_to_dt(source_kukai.get("results_at")),
             entry_enabled=bool(source_kukai.get("entry_enabled", True)),
             entry_approval=bool(source_kukai.get("entry_approval", False)),
@@ -367,8 +371,16 @@ async def import_payload(
             submission_underflow=bool(source_kukai.get("submission_underflow", False)),
             submission_mode=source_kukai.get("submission_mode") or "manual",
             submission_incomplete=source_kukai.get("submission_incomplete") or "keep",
-            voting_mode=source_kukai.get("voting_mode") or "manual",
-            voting_incomplete=source_kukai.get("voting_incomplete") or "keep",
+            selecting_mode=(
+                source_kukai.get("selecting_mode")
+                or source_kukai.get("selecting_mode")
+                or "manual"
+            ),
+            selecting_incomplete=(
+                source_kukai.get("selecting_incomplete")
+                or source_kukai.get("selecting_incomplete")
+                or "keep"
+            ),
             points_enabled=bool(source_kukai.get("points_enabled", True)),
             publish_mode=source_kukai.get("publish_mode") or "manual",
             result_mode=source_kukai.get("result_mode") or "manual",
@@ -385,7 +397,7 @@ async def import_payload(
         created_ids.append(kukai.id)
         label_id_map: dict[int, int] = {}
         submission_id_map: dict[int, int] = {}
-        vote_id_map: dict[int, int] = {}
+        select_id_map: dict[int, int] = {}
         schedule_id_map: dict[int, int] = {}
 
         for row in _require_list(bundle.get("admins"), "admins"):
@@ -400,8 +412,8 @@ async def import_payload(
                 )
             )
 
-        for row in _require_list(bundle.get("vote_labels"), "vote_labels"):
-            label = VoteLabel(
+        for row in _require_list(bundle.get("select_labels"), "select_labels"):
+            label = SelectLabel(
                 kukai_id=kukai.id,
                 template_id=row.get("template_id"),
                 display_order=int(row.get("display_order", 1)),
@@ -454,36 +466,36 @@ async def import_payload(
                 )
             )
 
-        for row in _require_list(bundle.get("votes"), "votes"):
+        for row in _require_list(bundle.get("selects"), "selects"):
             mapped_submission_id = submission_id_map.get(int(row["submission_id"]))
-            mapped_label_id = label_id_map.get(int(row["vote_label_id"]))
+            mapped_label_id = label_id_map.get(int(row["select_label_id"]))
             if mapped_submission_id is None or mapped_label_id is None:
                 continue
-            vote = Vote(
+            sel = Select(
                 kukai_id=kukai.id,
-                voter_user_id=int(row["voter_user_id"]),
+                selector_user_id=int(row["selector_user_id"]),
                 submission_id=mapped_submission_id,
-                vote_label_id=mapped_label_id,
+                select_label_id=mapped_label_id,
                 is_self_comment=bool(row.get("is_self_comment", False)),
             )
-            session.add(vote)
+            session.add(sel)
             await session.flush()
-            vote_id_map[int(row["id"])] = vote.id
+            select_id_map[int(row["id"])] = sel.id
 
-        for row in _require_list(bundle.get("vote_comments"), "vote_comments"):
-            mapped_vote_id = vote_id_map.get(int(row["vote_id"]))
-            if mapped_vote_id is None:
+        for row in _require_list(bundle.get("select_comments"), "select_comments"):
+            mapped_select_id = select_id_map.get(int(row["select_id"]))
+            if mapped_select_id is None:
                 continue
             session.add(
-                VoteComment(
-                    vote_id=mapped_vote_id,
+                SelectComment(
+                    select_id=mapped_select_id,
                     comment=row.get("comment") or "",
                 )
             )
 
         for row in _require_list(bundle.get("overall_comments"), "overall_comments"):
             session.add(
-                OverallComment(
+                OverallSelectComment(
                     kukai_id=kukai.id,
                     user_id=int(row["user_id"]),
                     comment=row.get("comment") or "",

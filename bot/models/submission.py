@@ -8,7 +8,7 @@ from bot.models.base import Base, TimestampMixin
 
 if TYPE_CHECKING:
     from bot.models.kukai import Kukai
-    from bot.models.vote import Vote
+    from bot.models.select import Select
 
 
 class Submission(Base, TimestampMixin):
@@ -32,7 +32,7 @@ class Submission(Base, TimestampMixin):
     published: Mapped[Optional["PublishedSubmission"]] = relationship(
         "PublishedSubmission", back_populates="submission", cascade="all, delete-orphan", uselist=False
     )
-    votes: Mapped[list["Vote"]] = relationship("Vote", back_populates="submission")
+    selects: Mapped[list["Select"]] = relationship("Select", back_populates="submission")
 
 
 class PublishedSubmission(Base):

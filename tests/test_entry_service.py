@@ -21,7 +21,7 @@ async def _make_kukai(session, *, entry_approval=False, entry_enabled=True):
         channel_id=200,
         title="テスト句会",
         submission_close_at=_utc(7),
-        voting_close_at=_utc(14),
+        selecting_close_at=_utc(14),
     )
     kukai.entry_approval = entry_approval
     kukai.entry_enabled = entry_enabled

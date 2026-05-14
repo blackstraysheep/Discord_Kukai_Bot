@@ -113,10 +113,16 @@ class _AuthorRevealSelect(discord.ui.Select):
 class _AuthorRevealZeroSelect(discord.ui.Select):
     def __init__(self, state: WizardState) -> None:
         self.state = state
-        super().__init__(
-            placeholder="0点以下作者の公開",
-            disabled=not state.author_reveal,
-            options=[
+        if not state.author_reveal:
+            options = [
+                discord.SelectOption(
+                    label="適用外（作者非公開）",
+                    value="n/a",
+                    default=True,
+                )
+            ]
+        else:
+            options = [
                 discord.SelectOption(
                     label="公開する",
                     value="true",
@@ -127,7 +133,11 @@ class _AuthorRevealZeroSelect(discord.ui.Select):
                     value="false",
                     default=not state.author_reveal_zero,
                 ),
-            ],
+            ]
+        super().__init__(
+            placeholder="0点以下作者の公開",
+            disabled=not state.author_reveal,
+            options=options,
             row=3,
         )
 

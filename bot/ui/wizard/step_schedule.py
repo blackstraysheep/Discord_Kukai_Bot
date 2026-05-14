@@ -1,4 +1,4 @@
-"""Wizard step 2: Schedule (submission_close, voting_close)."""
+"""Wizard step 2: Schedule (submission_close, selecting_close)."""
 
 from __future__ import annotations
 
@@ -12,15 +12,17 @@ from bot.utils.datetime_utils import format_jst, parse_datetime
 
 
 def build(state: WizardState) -> tuple[discord.Embed, discord.ui.View]:
-    filled = bool(state.submission_close_at and state.voting_close_at)
+    filled = bool(state.submission_close_at and state.selecting_close_at)
     embed = discord.Embed(
         title=f"ステップ 2/{STEP_COUNT}: 日程",
         color=discord.Color.blurple(),
     )
     sub_str = format_jst(state.submission_close_at) if state.submission_close_at else "（未入力）"
-    vote_str = format_jst(state.voting_close_at) if state.voting_close_at else "（未入力）"
+    selecting_str = (
+        format_jst(state.selecting_close_at) if state.selecting_close_at else "（未入力）"
+    )
     embed.add_field(name="投句締切", value=sub_str, inline=False)
-    embed.add_field(name="選句締切", value=vote_str, inline=False)
+    embed.add_field(name="選句締切", value=selecting_str, inline=False)
     embed.set_footer(text="書式: YYYY-MM-DD HH:MM（JST）")
     return embed, StepScheduleView(state, filled=filled)
 
@@ -84,7 +86,7 @@ class StepScheduleModal(discord.ui.Modal, title="日程の入力"):
         placeholder="2026-06-01 23:59",
         max_length=20,
     )
-    voting_close = discord.ui.TextInput(
+    selecting_close = discord.ui.TextInput(
         label="選句締切 *  (YYYY-MM-DD HH:MM)",
         placeholder="2026-06-08 23:59",
         max_length=20,
@@ -97,15 +99,15 @@ class StepScheduleModal(discord.ui.Modal, title="日程の入力"):
             from bot.utils.datetime_utils import to_jst
             jst = to_jst(state.submission_close_at)
             self.submission_close.default = jst.strftime("%Y-%m-%d %H:%M")
-        if state.voting_close_at:
+        if state.selecting_close_at:
             from bot.utils.datetime_utils import to_jst
-            jst = to_jst(state.voting_close_at)
-            self.voting_close.default = jst.strftime("%Y-%m-%d %H:%M")
+            jst = to_jst(state.selecting_close_at)
+            self.selecting_close.default = jst.strftime("%Y-%m-%d %H:%M")
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
         try:
             sub_close = parse_datetime(self.submission_close.value)
-            vote_close = parse_datetime(self.voting_close.value)
+            selecting_close = parse_datetime(self.selecting_close.value)
         except ValueError as e:
             await interaction.response.send_message(str(e), ephemeral=True)
             return
@@ -116,20 +118,20 @@ class StepScheduleModal(discord.ui.Modal, title="日程の入力"):
                 "投句締切は現在時刻より未来に設定してください。", ephemeral=True
             )
             return
-        if vote_close <= now:
+        if selecting_close <= now:
             await interaction.response.send_message(
                 "選句締切は現在時刻より未来に設定してください。", ephemeral=True
             )
             return
 
-        if vote_close <= sub_close:
+        if selecting_close <= sub_close:
             await interaction.response.send_message(
                 "選句締切は投句締切より後に設定してください。", ephemeral=True
             )
             return
 
         self.state.submission_close_at = sub_close
-        self.state.voting_close_at = vote_close
+        self.state.selecting_close_at = selecting_close
         set_wizard(self.state)
         embed, view = build(self.state)
         await interaction.response.edit_message(embed=embed, view=view)

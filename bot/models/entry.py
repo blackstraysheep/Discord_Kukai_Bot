@@ -24,7 +24,7 @@ class Entry(Base, TimestampMixin):
     haigo: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     # 'pending' | 'approved' | 'rejected' | 'withdrawn'
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending", index=True)
-    # Special participants can bypass submission/vote count limits
+    # Special participants can bypass submission/select count limits
     is_special: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     approved_by: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
     approved_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)

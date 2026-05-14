@@ -12,6 +12,11 @@ _SUBMISSION_MODE_LABELS = {
     "semi_auto": "半自動（全員投句完了で自動進行）",
     "full_auto": "全自動（締切到達で自動進行）",
 }
+_SELECTING_MODE_LABELS = {
+    "manual": "手動（管理者が手動で次へ進める）",
+    "semi_auto": "半自動（全員選句完了で自動進行）",
+    "full_auto": "全自動（締切到達で自動進行）",
+}
 
 
 def build(state: WizardState) -> tuple[discord.Embed, discord.ui.View]:
@@ -20,8 +25,13 @@ def build(state: WizardState) -> tuple[discord.Embed, discord.ui.View]:
         color=discord.Color.blurple(),
     )
     embed.add_field(
-        name="進行モード",
+        name="投句進行モード",
         value=_SUBMISSION_MODE_LABELS.get(state.submission_mode, state.submission_mode),
+        inline=False,
+    )
+    embed.add_field(
+        name="選句進行モード",
+        value=_SELECTING_MODE_LABELS.get(state.selecting_mode, state.selecting_mode),
         inline=False,
     )
     max_label = "∞" if state.submission_max is None else str(state.submission_max)
@@ -66,34 +76,70 @@ class _SubmissionModeSelect(discord.ui.Select):
         await interaction.response.edit_message(embed=embed, view=view)
 
 
+class _SelectingModeSelect(discord.ui.Select):
+    def __init__(self, state: WizardState) -> None:
+        self.state = state
+        super().__init__(
+            placeholder="選句進行モード",
+            options=[
+                discord.SelectOption(
+                    label="手動",
+                    description="管理者が手動で次のフェーズへ進める",
+                    value="manual",
+                    default=state.selecting_mode == "manual",
+                ),
+                discord.SelectOption(
+                    label="半自動",
+                    description="全員が選句完了したら自動進行",
+                    value="semi_auto",
+                    default=state.selecting_mode == "semi_auto",
+                ),
+                discord.SelectOption(
+                    label="全自動",
+                    description="締切到達で自動進行",
+                    value="full_auto",
+                    default=state.selecting_mode == "full_auto",
+                ),
+            ],
+            row=1,
+        )
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        self.state.selecting_mode = self.values[0]
+        set_wizard(self.state)
+        embed, view = build(self.state)
+        await interaction.response.edit_message(embed=embed, view=view)
+
+
 class StepSubmissionView(discord.ui.View):
     def __init__(self, state: WizardState) -> None:
         super().__init__(timeout=900)
         self.state = state
         self.add_item(_SubmissionModeSelect(state))
+        self.add_item(_SelectingModeSelect(state))
 
         detail_btn = discord.ui.Button(
             label="🔢 投句数制限を設定",
             style=discord.ButtonStyle.secondary,
-            row=1,
+            row=2,
         )
         detail_btn.callback = self._detail
         self.add_item(detail_btn)
 
         back_btn = discord.ui.Button(
-            label="← 戻る", style=discord.ButtonStyle.secondary, row=2
+            label="← 戻る", style=discord.ButtonStyle.secondary, row=3
         )
         back_btn.callback = self._back
         self.add_item(back_btn)
 
         next_btn = discord.ui.Button(
-            label="次へ ➜", style=discord.ButtonStyle.success, row=2
+            label="次へ ➜", style=discord.ButtonStyle.success, row=3
         )
         next_btn.callback = self._next
         self.add_item(next_btn)
 
         cancel_btn = discord.ui.Button(
-            label="❌ キャンセル", style=discord.ButtonStyle.danger, row=2
+            label="❌ キャンセル", style=discord.ButtonStyle.danger, row=3
         )
         cancel_btn.callback = self._cancel
         self.add_item(cancel_btn)

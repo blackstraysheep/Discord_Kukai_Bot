@@ -62,13 +62,13 @@ async def notification_job(schedule_id: int) -> None:
         # Build message
         EVENT_JA = {
             "submission_close": "投句締切",
-            "voting_close": "選句締切",
+            "selecting_close": "選句締切",
             "entry_close": "エントリー締切",
         }
         event_ja = EVENT_JA.get(ns.event_type, ns.event_type)
         deadline_map = {
             "submission_close": kukai.submission_close_at,
-            "voting_close": kukai.voting_close_at,
+            "selecting_close": kukai.selecting_close_at,
             "entry_close": kukai.entry_close_at if hasattr(kukai, "entry_close_at") else None,
         }
         deadline_dt = deadline_map.get(ns.event_type)
@@ -139,7 +139,7 @@ async def deadline_job(kukai_id: int, event_type: str) -> None:
             if not kukai:
                 return
 
-            state = KukaiState(kukai.state)
+            state = KukaiState.from_value(kukai.state)
 
             if event_type == "submission_close":
                 mode = kukai.submission_mode
@@ -163,7 +163,7 @@ async def deadline_job(kukai_id: int, event_type: str) -> None:
                         await _auto_publish_submission_list(session, kukai)
                         await kukai_service.proceed(session, kukai)
                         logger.info(
-                            "deadline_job: auto-published and advanced kukai %d to voting_open",
+                            "deadline_job: auto-published and advanced kukai %d to SELECTING_OPEN",
                             kukai_id,
                         )
                         await _notify_channel(
@@ -182,23 +182,23 @@ async def deadline_job(kukai_id: int, event_type: str) -> None:
                         f"\n句会「{kukai.title}」(ID: {kukai.id}) を確認してください。",
                     )
 
-            elif event_type == "voting_close":
-                mode = kukai.voting_mode
+            elif event_type == "selecting_close":
+                mode = kukai.selecting_mode
                 if mode == "manual":
                     return
-                if state != KukaiState.VOTING_OPEN:
+                if state != KukaiState.SELECTING_OPEN:
                     return
 
                 should_advance = False
                 if mode == "full_auto":
                     should_advance = True
                 elif mode == "semi_auto":
-                    should_advance = await _all_voted(session, kukai)
+                    should_advance = await _all_selected(session, kukai)
 
                 if should_advance:
                     await kukai_service.proceed(session, kukai)
                     logger.info(
-                        "deadline_job: auto-advanced kukai %d (voting_close)", kukai_id
+                        "deadline_job: auto-advanced kukai %d (selecting_close)", kukai_id
                     )
                     await _notify_channel(
                         _bot, kukai,
@@ -245,11 +245,11 @@ async def _all_submitted(session, kukai) -> bool:
     return True
 
 
-async def _all_voted(session, kukai) -> bool:
-    """Return True if all approved entrants have cast at least one vote."""
+async def _all_selected(session, kukai) -> bool:
+    """Return True if all approved entrants have cast at least one selection."""
     from sqlalchemy import select
     from bot.models.entry import Entry
-    from bot.repositories import vote_repo
+    from bot.repositories import select_repo
 
     if not kukai.entry_enabled:
         return False
@@ -265,8 +265,8 @@ async def _all_voted(session, kukai) -> bool:
         return False
 
     for entry in entries:
-        votes = await vote_repo.get_votes_by_voter(session, kukai.id, entry.user_id)
-        if not votes:
+        selects = await select_repo.get_selects_by_selector(session, kukai.id, entry.user_id)
+        if not selects:
             return False
     return True
 
@@ -328,7 +328,7 @@ async def _auto_publish_submission_list(session, kukai) -> None:
     from bot.utils.discord_retry import send_with_retry
     from bot.utils.submission_publish import build_submission_publish_embeds
 
-    if KukaiState(kukai.state) != KukaiState.SUBMISSION_CLOSED:
+    if KukaiState.from_value(kukai.state) != KukaiState.SUBMISSION_CLOSED:
         return
 
     await kukai_service.jump(session, kukai, KukaiState.WAITING_PUBLISH)

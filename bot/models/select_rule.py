@@ -7,11 +7,11 @@ from bot.models.base import Base, TimestampMixin
 
 if TYPE_CHECKING:
     from bot.models.kukai import Kukai
-    from bot.models.vote import Vote
+    from bot.models.select import Select
 
 
-class VoteRuleTemplate(Base, TimestampMixin):
-    __tablename__ = "vote_rule_templates"
+class SelectRuleTemplate(Base, TimestampMixin):
+    __tablename__ = "select_rule_templates"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     guild_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
@@ -22,14 +22,14 @@ class VoteRuleTemplate(Base, TimestampMixin):
     __table_args__ = (UniqueConstraint("guild_id", "name"),)
 
 
-class VoteLabel(Base):
-    """One row per selectable vote category within a kukai.
+class SelectLabel(Base):
+    """One row per selectable category within a kukai.
 
     Copied from a template at kukai creation and then independent.
     Negative points are allowed (e.g. 逆選).
     """
 
-    __tablename__ = "vote_labels"
+    __tablename__ = "select_labels"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     kukai_id: Mapped[int] = mapped_column(
@@ -45,7 +45,7 @@ class VoteLabel(Base):
     # 'none' | 'optional' | 'required'
     comment_mode: Mapped[str] = mapped_column(String(10), nullable=False, default="none")
 
-    kukai: Mapped["Kukai"] = relationship("Kukai", back_populates="vote_labels")
-    votes: Mapped[list["Vote"]] = relationship("Vote", back_populates="vote_label")
+    kukai: Mapped["Kukai"] = relationship("Kukai", back_populates="select_labels")
+    selects: Mapped[list["Select"]] = relationship("Select", back_populates="select_label")
 
     __table_args__ = (UniqueConstraint("kukai_id", "label"),)

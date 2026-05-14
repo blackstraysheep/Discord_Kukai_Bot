@@ -29,7 +29,7 @@ async def _make_kukai(
         channel_id=200,
         title="テスト句会",
         submission_close_at=_utc(7),
-        voting_close_at=_utc(14),
+        selecting_close_at=_utc(14),
     )
     kukai.entry_enabled = entry_enabled
     kukai.submission_min = submission_min
@@ -254,10 +254,10 @@ async def test_rollback_publish(db_session):
     await db_session.commit()
 
     await submission_service.publish(db_session, kukai)
-    await kukai_service.proceed(db_session, kukai)  # → voting_open
+    await kukai_service.proceed(db_session, kukai)  # → selecting_open
     await db_session.commit()
 
-    await submission_service.rollback_publish(db_session, kukai, reset_votes=False)
+    await submission_service.rollback_publish(db_session, kukai, reset_selects=False)
     await db_session.commit()
 
     from bot.repositories import submission_repo

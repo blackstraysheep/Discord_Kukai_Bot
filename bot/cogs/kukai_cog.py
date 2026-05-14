@@ -33,8 +33,10 @@ STATE_LABEL: dict[str, str] = {
     "submission_open": "投句受付中",
     "submission_closed": "投句締切",
     "waiting_publish": "投句公開待ち",
-    "voting_open": "選句受付中",
-    "voting_closed": "選句締切",
+    "selecting_open": "選句受付中",
+    "selecting_closed": "選句締切",
+    "selecting_open": "選句受付中",
+    "selecting_closed": "選句締切",
     "waiting_results": "結果公開待ち",
     "results": "結果公開中",
     "ended": "終了",
@@ -77,8 +79,8 @@ class KukaiCog(commands.Cog):
             lines = [f"状態: {state_ja}"]
             if k.submission_close_at:
                 lines.append(f"投句締切: {format_jst(k.submission_close_at)}")
-            if k.voting_close_at:
-                lines.append(f"選句締切: {format_jst(k.voting_close_at)}")
+            if k.selecting_close_at:
+                lines.append(f"選句締切: {format_jst(k.selecting_close_at)}")
             embed.add_field(
                 name=f"[{k.id}] {k.title}",
                 value="\n".join(lines),
@@ -139,7 +141,7 @@ class KukaiCog(commands.Cog):
                         embed=error_embed("この操作は句会管理者のみ実行できます。"), ephemeral=True
                     )
                     return
-                current_state = KukaiState(kukai.state)
+                current_state = KukaiState.from_value(kukai.state)
                 if current_state == KukaiState.SUBMISSION_CLOSED and kukai.publish_mode == "auto":
                     await kukai_service.jump(session, kukai, KukaiState.WAITING_PUBLISH)
                     published = await submission_service.publish(session, kukai)
@@ -331,10 +333,10 @@ class KukaiCog(commands.Cog):
                         embed=error_embed("この操作は句会管理者のみ実行できます。"), ephemeral=True
                     )
                     return
-                if KukaiState(kukai.state) not in {
+                if KukaiState.from_value(kukai.state) not in {
                     KukaiState.WAITING_PUBLISH,
-                    KukaiState.VOTING_OPEN,
-                    KukaiState.VOTING_CLOSED,
+                    KukaiState.SELECTING_OPEN,
+                    KukaiState.SELECTING_CLOSED,
                 }:
                     await interaction.response.send_message(
                         embed=error_embed("この状態ではロールバックできません。"), ephemeral=True
@@ -364,13 +366,13 @@ class KukaiCog(commands.Cog):
                 )
                 return
 
-            reset_votes = view.choice == "reset_votes"
+            reset_selects = view.choice == "reset_selects"
             async with get_session() as session:
                 kukai = await kukai_service.get_kukai(session, kukai_id, interaction.guild.id)
-                await submission_service.rollback_publish(session, kukai, reset_votes=reset_votes)
+                await submission_service.rollback_publish(session, kukai, reset_selects=reset_selects)
                 await kukai_service.jump(session, kukai, KukaiState.WAITING_PUBLISH)
 
-            extra = "（選句もリセット）" if reset_votes else "（選句は保持）"
+            extra = "（選句もリセット）" if reset_selects else "（選句は保持）"
             await interaction.edit_original_response(
                 embed=discord.Embed(
                     description=f"ロールバックしました。{extra}\n状態: **投句公開待ち**",
@@ -391,11 +393,12 @@ class KukaiCog(commands.Cog):
         theme="新しい題（空文字でクリア）",
         description="新しい説明（空文字でクリア）",
         submission_close_at="投句締切 (例: 2026-05-20 23:59 JST)",
-        voting_close_at="選句締切 (例: 2026-05-21 23:59 JST)",
+        selecting_close_at="選句締切 (例: 2026-05-21 23:59 JST)",
         submission_min="最小投句数",
         submission_max="最大投句数",
         submission_max_unlimited="最大投句数を無制限にする",
         submission_mode="投句進行モード",
+        selecting_mode="選句進行モード",
         publish_mode="投句公開モード",
         result_mode="結果公開モード",
         author_reveal="作者公開するか",
@@ -409,11 +412,12 @@ class KukaiCog(commands.Cog):
         theme: str | None = None,
         description: str | None = None,
         submission_close_at: str | None = None,
-        voting_close_at: str | None = None,
+        selecting_close_at: str | None = None,
         submission_min: int | None = None,
         submission_max: int | None = None,
         submission_max_unlimited: bool | None = None,
         submission_mode: Literal["manual", "semi_auto", "full_auto"] | None = None,
+        selecting_mode: Literal["manual", "semi_auto", "full_auto"] | None = None,
         publish_mode: Literal["manual", "auto"] | None = None,
         result_mode: Literal["manual", "auto"] | None = None,
         author_reveal: bool | None = None,
@@ -422,7 +426,7 @@ class KukaiCog(commands.Cog):
         assert interaction.guild is not None
         try:
             submission_close_dt = parse_datetime(submission_close_at) if submission_close_at else None
-            voting_close_dt = parse_datetime(voting_close_at) if voting_close_at else None
+            selecting_close_dt = parse_datetime(selecting_close_at) if selecting_close_at else None
         except ValueError as e:
             await interaction.response.send_message(embed=error_embed(str(e)), ephemeral=True)
             return
@@ -444,11 +448,12 @@ class KukaiCog(commands.Cog):
                     theme=theme,
                     description=description,
                     submission_close_at=submission_close_dt,
-                    voting_close_at=voting_close_dt,
+                    selecting_close_at=selecting_close_dt,
                     submission_min=submission_min,
                     submission_max=submission_max,
                     submission_max_unlimited=bool(submission_max_unlimited),
                     submission_mode=submission_mode,
+                    selecting_mode=selecting_mode,
                     publish_mode=publish_mode,
                     result_mode=result_mode,
                     author_reveal=author_reveal,
@@ -480,8 +485,8 @@ def _build_info_embed(kukai) -> discord.Embed:
     embed.add_field(name="状態", value=state_ja, inline=True)
     if kukai.submission_close_at:
         embed.add_field(name="投句締切", value=format_jst(kukai.submission_close_at), inline=False)
-    if kukai.voting_close_at:
-        embed.add_field(name="選句締切", value=format_jst(kukai.voting_close_at), inline=False)
+    if kukai.selecting_close_at:
+        embed.add_field(name="選句締切", value=format_jst(kukai.selecting_close_at), inline=False)
     embed.set_footer(text=f"句会ID: {kukai.id}")
     return embed
 

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from enum import StrEnum
 
 
@@ -8,8 +10,8 @@ class KukaiState(StrEnum):
     SUBMISSION_OPEN = "submission_open"
     SUBMISSION_CLOSED = "submission_closed"
     WAITING_PUBLISH = "waiting_publish"
-    VOTING_OPEN = "voting_open"
-    VOTING_CLOSED = "voting_closed"
+    SELECTING_OPEN = "selecting_open"
+    SELECTING_CLOSED = "selecting_closed"
     WAITING_RESULTS = "waiting_results"
     RESULTS = "results"
     ENDED = "ended"
@@ -17,16 +19,22 @@ class KukaiState(StrEnum):
     CANCELLED = "cancelled"
 
     @classmethod
+    def from_value(cls, raw: str | "KukaiState") -> "KukaiState":
+        if isinstance(raw, cls):
+            return raw
+        return cls(raw)
+
+    @classmethod
     def active_states(cls) -> set["KukaiState"]:
-        """States where participant operations (entry, submit, vote) may be allowed."""
+        """States where participant operations (entry, submit, select) may be allowed."""
         return {
             cls.ENTRY_OPEN,
             cls.ENTRY_CLOSED,
             cls.SUBMISSION_OPEN,
             cls.SUBMISSION_CLOSED,
             cls.WAITING_PUBLISH,
-            cls.VOTING_OPEN,
-            cls.VOTING_CLOSED,
+            cls.SELECTING_OPEN,
+            cls.SELECTING_CLOSED,
             cls.WAITING_RESULTS,
             cls.RESULTS,
         }

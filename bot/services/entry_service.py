@@ -25,19 +25,30 @@ async def enter(
     """Register a user for a kukai."""
     if not kukai.entry_enabled:
         raise InvalidStateError("この句会はエントリー制ではありません。")
-    if KukaiState(kukai.state) != KukaiState.ENTRY_OPEN:
+    if KukaiState.from_value(kukai.state) != KukaiState.ENTRY_OPEN:
         raise InvalidStateError("現在エントリーを受け付けていません。")
 
     existing = await entry_repo.get_by_user(session, kukai.id, user_id)
     if existing:
         if existing.status in ("pending", "approved"):
-            raise ValidationError("既にエントリー済みです。")
+            raise ValidationError("この句会にはすでに参加しています。")
+        if haigo:
+            conflict = await entry_repo.has_haigo_conflict(
+                session, kukai.id, haigo, exclude_user_id=user_id
+            )
+            if conflict:
+                raise ValidationError("その俳号はこの句会ですでに使われています。別の俳号を指定してください。")
         # rejected or withdrawn → reuse the row
         existing.haigo = haigo or None
         existing.status = "pending" if kukai.entry_approval else "approved"
         existing.approved_by = None
         existing.approved_at = None
         return existing
+
+    if haigo:
+        conflict = await entry_repo.has_haigo_conflict(session, kukai.id, haigo)
+        if conflict:
+            raise ValidationError("その俳号はこの句会ですでに使われています。別の俳号を指定してください。")
 
     entry = Entry(
         kukai_id=kukai.id,
@@ -52,7 +63,7 @@ async def enter(
 
 async def withdraw(session: AsyncSession, kukai, user_id: int) -> Entry:
     """Cancel own entry (only during entry_open)."""
-    if KukaiState(kukai.state) != KukaiState.ENTRY_OPEN:
+    if KukaiState.from_value(kukai.state) != KukaiState.ENTRY_OPEN:
         raise InvalidStateError("エントリーの取消は受付期間中のみ可能です。")
 
     entry = await entry_repo.get_by_user(session, kukai.id, user_id)
@@ -72,7 +83,7 @@ async def approve(
     """Admin: approve a pending entry."""
     if not kukai.entry_approval:
         raise ValidationError("この句会は承認制ではありません。")
-    if KukaiState(kukai.state) not in _APPROVAL_ALLOWED:
+    if KukaiState.from_value(kukai.state) not in _APPROVAL_ALLOWED:
         raise InvalidStateError("エントリー管理はエントリー期間中または締切後のみ可能です。")
 
     entry = await entry_repo.get_by_user(session, kukai.id, target_user_id)
@@ -92,7 +103,7 @@ async def reject(
     target_user_id: int,
 ) -> Entry:
     """Admin: reject a pending (or approved) entry."""
-    if KukaiState(kukai.state) not in _APPROVAL_ALLOWED:
+    if KukaiState.from_value(kukai.state) not in _APPROVAL_ALLOWED:
         raise InvalidStateError("エントリー管理はエントリー期間中または締切後のみ可能です。")
 
     entry = await entry_repo.get_by_user(session, kukai.id, target_user_id)
@@ -109,7 +120,7 @@ async def admin_remove(
     target_user_id: int,
 ) -> None:
     """Admin: hard-delete an entry after entry_closed."""
-    state = KukaiState(kukai.state)
+    state = KukaiState.from_value(kukai.state)
     if state == KukaiState.ENTRY_OPEN:
         raise InvalidStateError(
             "受付期間中は管理者削除できません。"

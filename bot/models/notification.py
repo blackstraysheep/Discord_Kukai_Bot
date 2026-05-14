@@ -19,7 +19,7 @@ class NotificationSchedule(Base, TimestampMixin):
     kukai_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("kukais.id", ondelete="CASCADE"), nullable=False, index=True
     )
-    # 'submission_close' | 'voting_close' | 'entry_close'
+    # 'submission_close' | 'selecting_close' | 'entry_close'
     event_type: Mapped[str] = mapped_column(String(30), nullable=False)
     # Seconds before the deadline to fire (e.g. 86400 = 24h)
     offset_secs: Mapped[int] = mapped_column(Integer, nullable=False)

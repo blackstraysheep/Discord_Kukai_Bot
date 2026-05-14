@@ -45,3 +45,27 @@ async def count_participants(
         )
     )
     return result.scalar_one()
+
+
+async def has_haigo_conflict(
+    session: AsyncSession,
+    kukai_id: int,
+    haigo: str,
+    *,
+    exclude_user_id: int | None = None,
+) -> bool:
+    normalized = haigo.strip().casefold()
+    if not normalized:
+        return False
+
+    q = select(func.count()).where(
+        Entry.kukai_id == kukai_id,
+        Entry.status.in_(["pending", "approved"]),
+        Entry.haigo.is_not(None),
+        func.lower(func.trim(Entry.haigo)) == normalized,
+    )
+    if exclude_user_id is not None:
+        q = q.where(Entry.user_id != exclude_user_id)
+
+    result = await session.execute(q)
+    return result.scalar_one() > 0

@@ -19,7 +19,7 @@ if TYPE_CHECKING:
 def _submissions_embed(kukai, subs: list[Submission]) -> discord.Embed:
     count = len(subs)
     limit = kukai.submission_max
-    over = count > limit
+    over = limit is not None and count > limit
 
     if subs:
         lines = [f"`{i + 1}.` {discord_safe(s.text)}" for i, s in enumerate(subs)]
@@ -34,7 +34,7 @@ def _submissions_embed(kukai, subs: list[Submission]) -> discord.Embed:
     )
     embed.add_field(
         name="投句数",
-        value=f"**{count}** / {limit}{'　⚠️ 上限超過' if over else ''}",
+        value=f"**{count}** / {'∞' if limit is None else limit}{'　⚠️ 上限超過' if over else ''}",
         inline=True,
     )
     embed.set_footer(text=f"句会 ID: {kukai.id}　|　最小: {kukai.submission_min}句")
@@ -71,6 +71,92 @@ class SubmitAddModal(discord.ui.Modal, title="投句（追加）"):
             if over_limit:
                 embed.description = (embed.description or "") + (
                     f"\n⚠️ 上限（{kukai.submission_max}句）を超えています。"
+                )
+            await interaction.edit_original_response(
+                embed=embed,
+                view=SubmissionView(self.kukai_id, subs, kukai),
+            )
+        except ServiceError as e:
+            await interaction.followup.send(embed=error_embed(str(e)), ephemeral=True)
+
+
+class SubmitBulkModal(discord.ui.Modal, title="投句（一括追加）"):
+    text1 = discord.ui.TextInput(
+        label="俳句1",
+        style=discord.TextStyle.paragraph,
+        max_length=500,
+        required=True,
+    )
+    text2 = discord.ui.TextInput(
+        label="俳句2",
+        style=discord.TextStyle.paragraph,
+        max_length=500,
+        required=False,
+    )
+    text3 = discord.ui.TextInput(
+        label="俳句3",
+        style=discord.TextStyle.paragraph,
+        max_length=500,
+        required=False,
+    )
+    text4 = discord.ui.TextInput(
+        label="俳句4",
+        style=discord.TextStyle.paragraph,
+        max_length=500,
+        required=False,
+    )
+    text5 = discord.ui.TextInput(
+        label="俳句5",
+        style=discord.TextStyle.paragraph,
+        max_length=500,
+        required=False,
+    )
+
+    def __init__(self, kukai_id: int) -> None:
+        super().__init__()
+        self.kukai_id = kukai_id
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        await interaction.response.defer(ephemeral=True)
+        assert interaction.guild is not None
+
+        texts = [
+            self.text1.value.strip(),
+            self.text2.value.strip(),
+            self.text3.value.strip(),
+            self.text4.value.strip(),
+            self.text5.value.strip(),
+        ]
+        poems = [text for text in texts if text]
+        if not poems:
+            await interaction.followup.send(
+                embed=error_embed("少なくとも1句は入力してください。"),
+                ephemeral=True,
+            )
+            return
+
+        accepted = 0
+        over_limit_count = 0
+        try:
+            async with get_session() as session:
+                kukai = await kukai_service.get_kukai(session, self.kukai_id, interaction.guild.id)
+                for poem in poems:
+                    _, over_limit = await submission_service.submit(
+                        session, kukai, interaction.user.id, poem
+                    )
+                    accepted += 1
+                    if over_limit:
+                        over_limit_count += 1
+                subs = await submission_service.list_user_submissions(
+                    session, kukai.id, interaction.user.id
+                )
+            embed = _submissions_embed(kukai, subs)
+            embed.description = (
+                f"{accepted}句を追加しました。\n\n{embed.description or ''}"
+            )
+            if over_limit_count:
+                embed.description += (
+                    f"\n⚠️ {over_limit_count}句は上限（{kukai.submission_max}句）超過扱いです。"
                 )
             await interaction.edit_original_response(
                 embed=embed,
@@ -197,6 +283,11 @@ class SubmissionView(discord.ui.View):
             style=discord.ButtonStyle.success,
         )
         add_btn.callback = self._on_add
+        bulk_btn = discord.ui.Button(
+            label="一括追加",
+            style=discord.ButtonStyle.success,
+        )
+        bulk_btn.callback = self._on_bulk_add
 
         edit_btn = discord.ui.Button(
             label="編集",
@@ -213,11 +304,15 @@ class SubmissionView(discord.ui.View):
         del_btn.callback = self._on_delete
 
         self.add_item(add_btn)
+        self.add_item(bulk_btn)
         self.add_item(edit_btn)
         self.add_item(del_btn)
 
     async def _on_add(self, interaction: discord.Interaction) -> None:
         await interaction.response.send_modal(SubmitAddModal(self.kukai_id))
+
+    async def _on_bulk_add(self, interaction: discord.Interaction) -> None:
+        await interaction.response.send_modal(SubmitBulkModal(self.kukai_id))
 
     async def _on_edit(self, interaction: discord.Interaction) -> None:
         if not self._subs:
@@ -275,21 +370,21 @@ class SubmissionView(discord.ui.View):
 # ── Rollback confirmation view ────────────────────────────────────────────
 
 class RollbackView(discord.ui.View):
-    """Confirm rollback with option to reset votes."""
+    """Confirm rollback with option to reset selects."""
 
     def __init__(self) -> None:
         super().__init__(timeout=60)
-        self.choice: str | None = None  # 'keep_votes' | 'reset_votes' | None (cancelled)
+        self.choice: str | None = None  # 'keep_selects' | 'reset_selects' | None (cancelled)
 
     @discord.ui.button(label="選句を保持して戻す", style=discord.ButtonStyle.primary)
-    async def keep_votes(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
-        self.choice = "keep_votes"
+    async def keep_selects(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        self.choice = "keep_selects"
         self.stop()
         await interaction.response.defer()
 
     @discord.ui.button(label="選句もリセットして戻す", style=discord.ButtonStyle.danger)
-    async def reset_votes(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
-        self.choice = "reset_votes"
+    async def reset_selects(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        self.choice = "reset_selects"
         self.stop()
         await interaction.response.defer()
 

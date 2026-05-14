@@ -10,8 +10,8 @@ if TYPE_CHECKING:
     from bot.models.entry import Entry
     from bot.models.notification import NotificationSchedule
     from bot.models.submission import Submission
-    from bot.models.vote import OverallComment, Vote
-    from bot.models.vote_rule import VoteLabel
+    from bot.models.select import OverallSelectComment, Select
+    from bot.models.select_rule import SelectLabel
     from bot.models.voice_session import VoiceSession
 
 
@@ -36,8 +36,8 @@ class Kukai(Base, TimestampMixin):
     entry_close_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     submission_open_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     submission_close_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-    voting_open_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-    voting_close_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    selecting_open_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    selecting_close_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     results_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
     # --- Entry settings ---
@@ -57,9 +57,9 @@ class Kukai(Base, TimestampMixin):
     # 'keep' | 'discard'
     submission_incomplete: Mapped[str] = mapped_column(String(10), nullable=False, default="keep")
 
-    # --- Voting settings ---
-    voting_mode: Mapped[str] = mapped_column(String(20), nullable=False, default="manual")
-    voting_incomplete: Mapped[str] = mapped_column(String(10), nullable=False, default="keep")
+    # --- Selecting settings ---
+    selecting_mode: Mapped[str] = mapped_column(String(20), nullable=False, default="manual")
+    selecting_incomplete: Mapped[str] = mapped_column(String(10), nullable=False, default="keep")
     points_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
 
     # --- Publish / result settings ---
@@ -84,9 +84,9 @@ class Kukai(Base, TimestampMixin):
     admins: Mapped[list["KukaiAdmin"]] = relationship(
         "KukaiAdmin", back_populates="kukai", cascade="all, delete-orphan"
     )
-    vote_labels: Mapped[list["VoteLabel"]] = relationship(
-        "VoteLabel", back_populates="kukai", cascade="all, delete-orphan",
-        order_by="VoteLabel.display_order",
+    select_labels: Mapped[list["SelectLabel"]] = relationship(
+        "SelectLabel", back_populates="kukai", cascade="all, delete-orphan",
+        order_by="SelectLabel.display_order",
     )
     entries: Mapped[list["Entry"]] = relationship(
         "Entry", back_populates="kukai", cascade="all, delete-orphan"
@@ -94,11 +94,11 @@ class Kukai(Base, TimestampMixin):
     submissions: Mapped[list["Submission"]] = relationship(
         "Submission", back_populates="kukai", cascade="all, delete-orphan"
     )
-    votes: Mapped[list["Vote"]] = relationship(
-        "Vote", back_populates="kukai", cascade="all, delete-orphan"
+    selects: Mapped[list["Select"]] = relationship(
+        "Select", back_populates="kukai", cascade="all, delete-orphan"
     )
-    overall_comments: Mapped[list["OverallComment"]] = relationship(
-        "OverallComment", back_populates="kukai", cascade="all, delete-orphan"
+    overall_comments: Mapped[list["OverallSelectComment"]] = relationship(
+        "OverallSelectComment", back_populates="kukai", cascade="all, delete-orphan"
     )
     notification_schedules: Mapped[list["NotificationSchedule"]] = relationship(
         "NotificationSchedule", back_populates="kukai", cascade="all, delete-orphan"
