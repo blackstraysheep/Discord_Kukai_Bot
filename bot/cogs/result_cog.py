@@ -1,5 +1,8 @@
 """Result display command: /result"""
 
+import asyncio
+import logging
+
 import discord
 from discord import app_commands
 from discord.ext import commands
@@ -8,8 +11,11 @@ from bot.database import get_session
 from bot.services import kukai_service, permission_service, result_service
 from bot.services.errors import ServiceError
 from bot.state_machine.states import KukaiState
+from bot.utils.discord_retry import send_with_retry
 from bot.utils.embed_builder import COLOR_INFO, COLOR_RESULT, error_embed
 from bot.utils.text import discord_safe
+
+logger = logging.getLogger(__name__)
 
 _PREVIEW_ALLOWED = {
     KukaiState.VOTING_CLOSED,
@@ -180,12 +186,30 @@ class ResultCog(commands.Cog):
 
             # Public in RESULTS state, ephemeral otherwise
             ephemeral = state != KukaiState.RESULTS
-            await interaction.response.send_message(embed=embeds[0], ephemeral=ephemeral)
+            await send_with_retry(
+                lambda: interaction.response.send_message(embed=embeds[0], ephemeral=ephemeral)
+            )
             for extra in embeds[1:]:
-                await interaction.followup.send(embed=extra, ephemeral=ephemeral)
+                await asyncio.sleep(0.35)
+                await send_with_retry(
+                    lambda: interaction.followup.send(embed=extra, ephemeral=ephemeral)
+                )
 
         except ServiceError as e:
             await interaction.response.send_message(embed=error_embed(str(e)), ephemeral=True)
+        except discord.Forbidden:
+            msg = "メッセージ送信権限が不足しているため、結果表示に失敗しました。"
+            if interaction.response.is_done():
+                await interaction.followup.send(embed=error_embed(msg), ephemeral=True)
+            else:
+                await interaction.response.send_message(embed=error_embed(msg), ephemeral=True)
+        except discord.HTTPException as e:
+            logger.warning("result command send failed: %s", e)
+            msg = "結果の送信中に一時的な通信エラーが発生しました。再実行してください。"
+            if interaction.response.is_done():
+                await interaction.followup.send(embed=error_embed(msg), ephemeral=True)
+            else:
+                await interaction.response.send_message(embed=error_embed(msg), ephemeral=True)
 
 
 async def setup(bot: commands.Bot) -> None:

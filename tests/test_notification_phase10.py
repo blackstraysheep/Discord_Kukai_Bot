@@ -2,6 +2,7 @@
 
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import select
@@ -59,6 +60,43 @@ class _FakeBot:
 
     def get_guild(self, guild_id: int):
         return None
+
+
+class _GuildForAdminNotify:
+    def __init__(self, member, channel) -> None:
+        self._member = member
+        self._channel = channel
+
+    def get_member(self, user_id: int):
+        return self._member if self._member.id == user_id else None
+
+    def get_channel(self, channel_id: int):
+        return self._channel if self._channel.id == channel_id else None
+
+
+class _MemberFailsDM:
+    def __init__(self, user_id: int) -> None:
+        self.id = user_id
+
+    async def send(self, message: str):
+        raise RuntimeError("dm blocked")
+
+
+class _ChannelCapture:
+    def __init__(self, channel_id: int) -> None:
+        self.id = channel_id
+        self.messages: list[str] = []
+
+    async def send(self, message: str):
+        self.messages.append(message)
+
+
+class _BotWithGuild:
+    def __init__(self, guild) -> None:
+        self._guild = guild
+
+    def get_guild(self, guild_id: int):
+        return self._guild
 
 
 @pytest.mark.asyncio
@@ -157,3 +195,17 @@ async def test_deadline_job_submission_close_semi_auto_incomplete_notifies_admin
     assert KukaiState(kukai.state) == KukaiState.SUBMISSION_OPEN
     assert called["channel"] == []
     assert called["admins"]
+
+
+@pytest.mark.asyncio
+async def test_notify_admins_fallbacks_to_channel_when_dm_fails():
+    member = _MemberFailsDM(user_id=100)
+    channel = _ChannelCapture(channel_id=200)
+    guild = _GuildForAdminNotify(member=member, channel=channel)
+    bot = _BotWithGuild(guild)
+    kukai = SimpleNamespace(guild_id=1, created_by=100, channel_id=200)
+
+    await jobs._notify_admins(bot, kukai, "通知テスト")
+
+    assert len(channel.messages) == 1
+    assert "<@100>" in channel.messages[0]

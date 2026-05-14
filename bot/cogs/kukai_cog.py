@@ -12,6 +12,7 @@ from bot.services.errors import ServiceError
 from bot.state_machine.states import KukaiState
 from bot.ui.common import ConfirmView
 from bot.ui.submission_view import RollbackView
+from bot.utils.discord_retry import send_with_retry
 from bot.utils.datetime_utils import format_jst, parse_datetime
 from bot.utils.text import discord_safe
 from bot.utils.embed_builder import (
@@ -261,7 +262,7 @@ class KukaiCog(commands.Cog):
                 channel = interaction.guild.get_channel(kukai.channel_id)
                 if isinstance(channel, discord.TextChannel):
                     try:
-                        msg = await channel.send(embed=pub_embed)
+                        msg = await send_with_retry(lambda: channel.send(embed=pub_embed))
                         msg_id = msg.id
                     except discord.Forbidden:
                         publish_warning = (

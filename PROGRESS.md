@@ -8,7 +8,7 @@
 
 Discord完結型句会管理Bot。Python 3.13 / discord.py 2.x / SQLAlchemy 2.x async / aiosqlite / APScheduler 3.x。
 
-**現在の状態**: Phase 1〜10(品質強化の一部) 完了。テスト 60件すべてパス。
+**現在の状態**: Phase 1〜10(品質強化) ほぼ完了。テスト 61件すべてパス。
 
 ---
 
@@ -121,9 +121,9 @@ tests/test_submission_service.py 15件  ✅
 tests/test_vote_service.py       11件  ✅
 tests/test_result_service.py      6件  ✅
 tests/test_phase9_services.py     4件  ✅
-tests/test_notification_phase10.py 4件 ✅
+tests/test_notification_phase10.py 5件 ✅
                               -------
-合計                            60件  全パス
+合計                            61件  全パス
 ```
 
 実行: `py -m pytest tests/ -v`
@@ -180,7 +180,7 @@ kukai_bot/
 │   │   ├── vote_cog.py       # /select
 │   │   ├── check_cog.py      # /check
 │   │   ├── result_cog.py     # /result
-│   │   └── admin_cog.py      # スタブ
+│   │   └── admin_cog.py      # /kukai_admin *, /guild settings
 │   ├── ui/
 │   │   ├── common.py         # ConfirmView, PaginatedEmbed, error_embed
 │   │   ├── submission_view.py
@@ -201,6 +201,7 @@ kukai_bot/
 │   └── utils/
 │       ├── text.py
 │       ├── datetime_utils.py
+│       ├── discord_retry.py
 │       └── embed_builder.py
 └── tests/
     ├── conftest.py
@@ -208,7 +209,9 @@ kukai_bot/
     ├── test_entry_service.py
     ├── test_submission_service.py
     ├── test_vote_service.py
-    └── test_result_service.py
+    ├── test_result_service.py
+    ├── test_phase9_services.py
+    └── test_notification_phase10.py
 ```
 
 ---
@@ -229,12 +232,13 @@ kukai_bot/
 
 **統合テスト・品質**
 - Discord UIのE2Eテストは手動確認（pytest-asyncioの範囲外）
-- サービス層のテストカバレッジ補強 ✅（一部完了）
+- サービス層のテストカバレッジ補強 ✅
   - notification_service のジョブ登録/解除テスト（APSchedulerモック）を追加
   - deadline_job の自動進行ロジック（full_auto / semi_auto不足時通知）テストを追加
+  - `_notify_admins` のDM失敗時チャンネルフォールバックテストを追加
 - エラーハンドリングの網羅確認
-  - ServiceErrorのすべてのサブクラスがCogでキャッチされているか
-  - Discordの権限不足（Forbidden）エラーのフォールバック ✅（`/kukai publish` の公開投稿失敗時）
+  - ServiceErrorのすべてのサブクラスがCogでキャッチされる構成を確認
+  - Discordの権限不足（Forbidden）エラーのフォールバック ✅（`/kukai publish` / `/result` / scheduler通知）
 
 **未実装のスタブ**
 - `bot/ui/wizard/step_vote_rule.py` — ウィザード内での投票ラベルカスタマイズ
@@ -243,13 +247,14 @@ kukai_bot/
 - `bot/models/voice_session.py` — VoiceSessionモデルは存在するがCog/Serviceが未実装
 
 **Docker検証**
-- `docker compose up` でBot起動確認
-- `alembic upgrade head` 実行確認
-- 環境変数 `.env` の設定確認（BOT_TOKEN, DATABASE_URL）
+- `docker compose up --build` 実行確認 ✅（ビルド・コンテナ起動を確認）
+- Bot本体は `.env` のダミー `BOT_TOKEN` で `401 Unauthorized`（実トークン設定が必要）
+- `alembic upgrade head` 実行確認 ✅
+- 環境変数 `.env` の設定確認（BOT_TOKEN, DATABASE_URL）✅（`.env.example` から作成）
 
 **レート制限対策**
-- 大量のフォローアップ送信時のsleep
-- embed送信失敗時のリトライ
+- 大量のフォローアップ送信時のsleep ✅（`/result` の複数ページ送信）
+- embed送信失敗時のリトライ ✅（`bot/utils/discord_retry.py` を scheduler/公開投稿へ適用）
 
 ---
 

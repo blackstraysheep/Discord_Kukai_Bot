@@ -40,6 +40,7 @@ async def notification_job(schedule_id: int) -> None:
     from bot.database import get_session
     from bot.models.notification import NotificationLog, NotificationSchedule
     from bot.models.kukai import Kukai
+    from bot.utils.discord_retry import send_with_retry
     from bot.utils.embed_builder import COLOR_INFO
     from bot.utils.datetime_utils import format_jst
 
@@ -91,9 +92,9 @@ async def notification_job(schedule_id: int) -> None:
             guild = _bot.get_guild(kukai.guild_id)
             if guild:
                 channel = guild.get_channel(channel_id)
-                if isinstance(channel, discord.TextChannel):
+                if channel and hasattr(channel, "send"):
                     try:
-                        await channel.send(embed=embed)
+                        await send_with_retry(lambda: channel.send(embed=embed))
                         sent_count = 1
                     except Exception as e:
                         error_msg = str(e)
@@ -261,16 +262,17 @@ async def _notify_channel(bot, kukai, message: str) -> None:
     if not kukai.channel_id:
         return
     import discord
+    from bot.utils.discord_retry import send_with_retry
     from bot.utils.embed_builder import COLOR_INFO
 
     guild = bot.get_guild(kukai.guild_id)
     if not guild:
         return
     channel = guild.get_channel(kukai.channel_id)
-    if isinstance(channel, discord.TextChannel):
+    if channel and hasattr(channel, "send"):
         try:
             embed = discord.Embed(description=message, color=COLOR_INFO)
-            await channel.send(embed=embed)
+            await send_with_retry(lambda: channel.send(embed=embed))
         except Exception as e:
             logger.error("_notify_channel failed: %s", e)
 
@@ -278,6 +280,7 @@ async def _notify_channel(bot, kukai, message: str) -> None:
 async def _notify_admins(bot, kukai, message: str) -> None:
     """DM the kukai creator (and admins if reachable) with a message."""
     import discord
+    from bot.utils.discord_retry import send_with_retry
 
     guild = bot.get_guild(kukai.guild_id)
     if not guild:
@@ -286,6 +289,18 @@ async def _notify_admins(bot, kukai, message: str) -> None:
     member = guild.get_member(kukai.created_by)
     if member:
         try:
-            await member.send(message)
+            await send_with_retry(lambda: member.send(message))
         except Exception as e:
             logger.warning("_notify_admins DM failed for %d: %s", kukai.created_by, e)
+            if kukai.channel_id:
+                channel = guild.get_channel(kukai.channel_id)
+                if channel and hasattr(channel, "send"):
+                    try:
+                        await send_with_retry(
+                            lambda: channel.send(
+                                f"<@{kukai.created_by}> {message}\n"
+                                "（DM送信に失敗したためチャンネル通知に切り替えました）"
+                            )
+                        )
+                    except Exception as channel_error:
+                        logger.error("_notify_admins channel fallback failed: %s", channel_error)
