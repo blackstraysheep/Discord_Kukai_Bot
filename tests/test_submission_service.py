@@ -3,8 +3,12 @@
 from datetime import timedelta, timezone, datetime
 
 import pytest
+from sqlalchemy import func, select
 
-from bot.services import kukai_service, submission_service, entry_service
+from bot.models.select import Select
+from bot.models.select_rule import SelectLabel
+from bot.models.submission import PublishedSubmission, Submission
+from bot.services import kukai_service, select_service, submission_service, entry_service
 from bot.services.errors import InvalidStateError, NotFoundError, ValidationError
 from bot.state_machine.states import KukaiState
 
@@ -263,3 +267,99 @@ async def test_rollback_publish(db_session):
     from bot.repositories import submission_repo
     published = await submission_repo.list_published(db_session, kukai.id)
     assert published == []
+
+
+async def _make_selecting_kukai(session):
+    kukai = await _make_kukai(session, entry_enabled=False)
+    await _advance_to_submission_open(session, kukai)
+    await submission_service.submit(session, kukai, user_id=1, text="春の海")
+    await submission_service.submit(session, kukai, user_id=2, text="夏の川")
+    await kukai_service.proceed(session, kukai)  # → submission_closed
+    await kukai_service.proceed(session, kukai)  # → waiting_publish
+    await session.commit()
+    published = await submission_service.publish(session, kukai)
+    await kukai_service.proceed(session, kukai)  # → selecting_open
+    label = await _first_select_label(session, kukai.id)
+    await select_service.cast_select(
+        session,
+        kukai,
+        selector_user_id=3,
+        submission_id=published[0].submission_id,
+        select_label_id=label.id,
+    )
+    await session.commit()
+    return kukai
+
+
+async def _first_select_label(session, kukai_id: int) -> SelectLabel:
+    result = await session.execute(
+        select(SelectLabel)
+        .where(SelectLabel.kukai_id == kukai_id, SelectLabel.label != "作者コメント")
+        .order_by(SelectLabel.display_order)
+    )
+    return result.scalars().first()
+
+
+async def _count(session, model, kukai_id: int) -> int:
+    result = await session.execute(select(func.count()).where(model.kukai_id == kukai_id))
+    return result.scalar_one()
+
+
+@pytest.mark.asyncio
+async def test_rollback_to_submission_open_keeps_submissions_and_selects(db_session):
+    kukai = await _make_selecting_kukai(db_session)
+
+    await submission_service.rollback_to_state(
+        db_session,
+        kukai,
+        KukaiState.SUBMISSION_OPEN,
+        keep_submissions=True,
+        keep_selects=True,
+    )
+    await db_session.commit()
+
+    assert kukai.state == KukaiState.SUBMISSION_OPEN
+    assert await _count(db_session, Submission, kukai.id) == 2
+    assert await _count(db_session, Select, kukai.id) == 1
+    assert await _count(db_session, PublishedSubmission, kukai.id) == 0
+
+
+@pytest.mark.asyncio
+async def test_rollback_to_submission_open_resets_submissions_and_selects(db_session):
+    kukai = await _make_selecting_kukai(db_session)
+
+    await submission_service.rollback_to_state(
+        db_session,
+        kukai,
+        KukaiState.SUBMISSION_OPEN,
+        keep_submissions=False,
+        keep_selects=False,
+    )
+    await db_session.commit()
+
+    assert kukai.state == KukaiState.SUBMISSION_OPEN
+    assert await _count(db_session, Submission, kukai.id) == 0
+    assert await _count(db_session, Select, kukai.id) == 0
+    assert await _count(db_session, PublishedSubmission, kukai.id) == 0
+
+
+@pytest.mark.asyncio
+async def test_rollback_to_selecting_open_keeps_published_submissions(db_session):
+    kukai = await _make_selecting_kukai(db_session)
+    await kukai_service.proceed(db_session, kukai)  # → selecting_closed
+    await kukai_service.proceed(db_session, kukai)  # → results
+    await db_session.commit()
+
+    await submission_service.rollback_to_state(
+        db_session,
+        kukai,
+        KukaiState.SELECTING_OPEN,
+        keep_submissions=True,
+        keep_selects=True,
+    )
+    await db_session.commit()
+
+    assert kukai.state == KukaiState.SELECTING_OPEN
+    assert await _count(db_session, Submission, kukai.id) == 2
+    assert await _count(db_session, Select, kukai.id) == 1
+    assert await _count(db_session, PublishedSubmission, kukai.id) == 2

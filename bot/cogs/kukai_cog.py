@@ -43,11 +43,23 @@ STATE_LABEL: dict[str, str] = {
     "waiting_publish": "投句公開待ち",
     "selecting_open": "選句受付中",
     "selecting_closed": "選句締切",
+    "waiting_results": "結果公開待ち",
     "results": "結果公開中",
     "ended": "終了",
     "paused": "一時停止",
     "cancelled": "中止",
 }
+
+ROLLBACK_TARGET_CHOICES = [
+    app_commands.Choice(name="下書き", value=KukaiState.DRAFT.value),
+    app_commands.Choice(name="エントリー受付中", value=KukaiState.ENTRY_OPEN.value),
+    app_commands.Choice(name="エントリー締切", value=KukaiState.ENTRY_CLOSED.value),
+    app_commands.Choice(name="投句受付中", value=KukaiState.SUBMISSION_OPEN.value),
+    app_commands.Choice(name="投句締切", value=KukaiState.SUBMISSION_CLOSED.value),
+    app_commands.Choice(name="投句公開待ち", value=KukaiState.WAITING_PUBLISH.value),
+    app_commands.Choice(name="選句受付中", value=KukaiState.SELECTING_OPEN.value),
+    app_commands.Choice(name="選句締切", value=KukaiState.SELECTING_CLOSED.value),
+]
 
 
 class StageActionView(discord.ui.View):
@@ -517,9 +529,15 @@ class KukaiCog(commands.Cog):
 
         return len(results), None, first_message_id
 
-    @kukai.command(name="rollback", description="【管理者】投句公開を取り消し、公開待ちに戻します")
-    @app_commands.describe(kukai_id="句会ID")
-    async def kukai_rollback(self, interaction: discord.Interaction, kukai_id: int) -> None:
+    @kukai.command(name="rollback", description="【管理者】句会を指定した前段階へ戻します")
+    @app_commands.describe(kukai_id="句会ID", target_state="戻す先の状態")
+    @app_commands.choices(target_state=ROLLBACK_TARGET_CHOICES)
+    async def kukai_rollback(
+        self,
+        interaction: discord.Interaction,
+        kukai_id: int,
+        target_state: str,
+    ) -> None:
         assert interaction.guild is not None
         try:
             async with get_session() as session:
@@ -529,24 +547,34 @@ class KukaiCog(commands.Cog):
                         embed=error_embed("この操作は句会管理者のみ実行できます。"), ephemeral=True
                     )
                     return
-                if KukaiState.from_value(kukai.state) not in {
-                    KukaiState.WAITING_PUBLISH,
-                    KukaiState.SELECTING_OPEN,
-                    KukaiState.SELECTING_CLOSED,
-                }:
+                target = KukaiState.from_value(target_state)
+                current = KukaiState.from_value(kukai.state)
+                try:
+                    submission_service.validate_rollback_target(current, target)
+                except ServiceError as e:
                     await interaction.response.send_message(
-                        embed=error_embed("この状態ではロールバックできません。"), ephemeral=True
+                        embed=error_embed(str(e)), ephemeral=True
                     )
                     return
+                allow_reset_submissions = submission_service.can_reset_submissions_on_rollback(target)
 
-            view = RollbackView()
+            current_label = STATE_LABEL.get(current.value, current.value)
+            target_label = STATE_LABEL.get(target.value, target.value)
+            reset_note = (
+                "投句内容をリセットする選択もできます。"
+                if allow_reset_submissions
+                else "この戻し先では投句内容は保持されます。"
+            )
+            view = RollbackView(allow_reset_submissions=allow_reset_submissions)
             await interaction.response.send_message(
                 embed=discord.Embed(
-                    title="⚠️ 投句公開のロールバック",
+                    title="⚠️ 句会のロールバック",
                     description=(
-                        f"句会「**{kukai.title}**」の投句公開を取り消します。\n"
-                        "投句番号割当が削除され、状態が「投句公開待ち」に戻ります。\n\n"
-                        "選句中の場合、既存の選句を保持するか選んでください。"
+                        f"句会「**{kukai.title}**」を **{current_label}** から "
+                        f"**{target_label}** へ戻します。\n\n"
+                        "戻し先が投句公開待ち以前の場合、投句番号割当は削除されます。\n"
+                        f"{reset_note}\n"
+                        "選句内容を保持するかリセットするか選んでください。"
                     ),
                     color=discord.Color.orange(),
                 ),
@@ -562,16 +590,30 @@ class KukaiCog(commands.Cog):
                 )
                 return
 
-            reset_selects = view.choice == "reset_selects"
+            keep_submissions = view.choice != "reset_all"
+            keep_selects = view.choice == "keep_all"
             async with get_session() as session:
                 kukai = await kukai_service.get_kukai(session, kukai_id, interaction.guild.id)
-                await submission_service.rollback_publish(session, kukai, reset_selects=reset_selects)
-                await kukai_service.jump(session, kukai, KukaiState.WAITING_PUBLISH)
+                await notification_service.cancel_kukai_jobs(session, kukai.id)
+                await submission_service.rollback_to_state(
+                    session,
+                    kukai,
+                    target,
+                    keep_submissions=keep_submissions,
+                    keep_selects=keep_selects,
+                )
+                await notification_service.schedule_kukai_jobs(session, kukai)
 
-            extra = "（選句もリセット）" if reset_selects else "（選句は保持）"
+            data_note = (
+                "投句・選句を保持"
+                if keep_submissions and keep_selects
+                else "投句は保持、選句はリセット"
+                if keep_submissions
+                else "投句・選句をリセット"
+            )
             await interaction.edit_original_response(
                 embed=discord.Embed(
-                    description=f"ロールバックしました。{extra}\n状態: **投句公開待ち**",
+                    description=f"ロールバックしました。\n状態: **{target_label}**\nデータ: {data_note}",
                     color=COLOR_SUCCESS,
                 ),
                 view=None,

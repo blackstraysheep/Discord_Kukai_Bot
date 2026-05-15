@@ -4,18 +4,29 @@ import random
 from collections import defaultdict
 from datetime import datetime, timezone
 
-from sqlalchemy import delete
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.models.submission import PublishedSubmission, Submission
-from bot.models.select import OverallSelectComment, Select
+from bot.models.select import OverallSelectComment, Select, SelectComment
 from bot.repositories import entry_repo, submission_repo
 from bot.services.errors import InvalidStateError, NotFoundError, ValidationError
 from bot.state_machine.states import KukaiState
 from bot.utils.text import normalize
 
 _SUBMISSION_OPEN = KukaiState.SUBMISSION_OPEN
-_ROLLBACK_ALLOWED = {KukaiState.WAITING_PUBLISH, KukaiState.SELECTING_OPEN, KukaiState.SELECTING_CLOSED}
+ROLLBACK_STATE_ORDER: tuple[KukaiState, ...] = (
+    KukaiState.DRAFT,
+    KukaiState.ENTRY_OPEN,
+    KukaiState.ENTRY_CLOSED,
+    KukaiState.SUBMISSION_OPEN,
+    KukaiState.SUBMISSION_CLOSED,
+    KukaiState.WAITING_PUBLISH,
+    KukaiState.SELECTING_OPEN,
+    KukaiState.SELECTING_CLOSED,
+    KukaiState.RESULTS,
+)
+_ROLLBACK_STATE_INDEX = {state: index for index, state in enumerate(ROLLBACK_STATE_ORDER)}
 
 
 async def submit(
@@ -145,12 +156,87 @@ async def rollback_publish(
     reset_selects: bool = False,
 ) -> None:
     """Undo publish: delete PublishedSubmission rows and optionally all selects."""
-    if KukaiState.from_value(kukai.state) not in _ROLLBACK_ALLOWED:
+    if KukaiState.from_value(kukai.state) == KukaiState.WAITING_PUBLISH:
+        await submission_repo.restore_discarded(session, kukai.id)
+        await submission_repo.delete_published(session, kukai.id)
+        if reset_selects:
+            await _delete_selects(session, kukai.id)
+        await session.flush()
+        return
+
+    await rollback_to_state(
+        session,
+        kukai,
+        KukaiState.WAITING_PUBLISH,
+        keep_submissions=True,
+        keep_selects=not reset_selects,
+    )
+
+
+def can_reset_submissions_on_rollback(target: KukaiState) -> bool:
+    target = KukaiState.from_value(target)
+    return _rollback_index(target) <= _rollback_index(KukaiState.SUBMISSION_OPEN)
+
+
+def validate_rollback_target(
+    current: KukaiState,
+    target: KukaiState,
+    *,
+    keep_submissions: bool = True,
+) -> None:
+    current = KukaiState.from_value(current)
+    target = KukaiState.from_value(target)
+
+    if current in {KukaiState.PAUSED, *KukaiState.terminal_states()}:
         raise InvalidStateError("この状態ではロールバックできません。")
+    if current not in _ROLLBACK_STATE_INDEX:
+        raise InvalidStateError("この状態ではロールバックできません。")
+    if target not in _ROLLBACK_STATE_INDEX:
+        raise InvalidStateError("指定された状態へはロールバックできません。")
+    if _rollback_index(target) >= _rollback_index(current):
+        raise InvalidStateError("現在より前の状態を指定してください。")
+    if not keep_submissions and not can_reset_submissions_on_rollback(target):
+        raise InvalidStateError("投句をリセットする場合は「投句受付中」以前に戻してください。")
 
-    await submission_repo.restore_discarded(session, kukai.id)
-    await submission_repo.delete_published(session, kukai.id)
 
-    if reset_selects:
-        await session.execute(delete(Select).where(Select.kukai_id == kukai.id))
-        await session.execute(delete(OverallSelectComment).where(OverallSelectComment.kukai_id == kukai.id))
+async def rollback_to_state(
+    session: AsyncSession,
+    kukai,
+    target: KukaiState,
+    *,
+    keep_submissions: bool = True,
+    keep_selects: bool = True,
+) -> None:
+    """Rollback kukai to a previous stage and optionally discard submission/select data."""
+    current = KukaiState.from_value(kukai.state)
+    target = KukaiState.from_value(target)
+    if not keep_submissions:
+        keep_selects = False
+    validate_rollback_target(current, target, keep_submissions=keep_submissions)
+
+    if not keep_selects:
+        await _delete_selects(session, kukai.id)
+
+    if keep_submissions:
+        if _rollback_index(target) <= _rollback_index(KukaiState.WAITING_PUBLISH):
+            await submission_repo.restore_discarded(session, kukai.id)
+            await submission_repo.delete_published(session, kukai.id)
+    else:
+        await submission_repo.delete_published(session, kukai.id)
+        await session.execute(delete(Submission).where(Submission.kukai_id == kukai.id))
+
+    kukai.state = target
+    kukai.pre_pause_state = None
+    kukai.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
+    await session.flush()
+
+
+def _rollback_index(state: KukaiState) -> int:
+    return _ROLLBACK_STATE_INDEX[KukaiState.from_value(state)]
+
+
+async def _delete_selects(session: AsyncSession, kukai_id: int) -> None:
+    select_ids = select(Select.id).where(Select.kukai_id == kukai_id)
+    await session.execute(delete(SelectComment).where(SelectComment.select_id.in_(select_ids)))
+    await session.execute(delete(Select).where(Select.kukai_id == kukai_id))
+    await session.execute(delete(OverallSelectComment).where(OverallSelectComment.kukai_id == kukai_id))

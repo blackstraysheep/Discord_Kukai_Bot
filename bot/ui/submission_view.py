@@ -332,26 +332,46 @@ class SubmissionView(discord.ui.View):
 # ── Rollback confirmation view ────────────────────────────────────────────
 
 class RollbackView(discord.ui.View):
-    """Confirm rollback with option to reset selects."""
+    """Confirm rollback with data retention options."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, allow_reset_submissions: bool) -> None:
         super().__init__(timeout=60)
-        self.choice: str | None = None  # 'keep_selects' | 'reset_selects' | None (cancelled)
+        self.choice: str | None = None
+        self._add_choice_button(
+            label="投句・選句を保持",
+            style=discord.ButtonStyle.primary,
+            choice="keep_all",
+        )
+        self._add_choice_button(
+            label="投句保持・選句リセット",
+            style=discord.ButtonStyle.danger,
+            choice="reset_selects",
+        )
+        if allow_reset_submissions:
+            self._add_choice_button(
+                label="投句・選句をリセット",
+                style=discord.ButtonStyle.danger,
+                choice="reset_all",
+            )
+        self._add_choice_button(
+            label="キャンセル",
+            style=discord.ButtonStyle.secondary,
+            choice=None,
+        )
 
-    @discord.ui.button(label="選句を保持して戻す", style=discord.ButtonStyle.primary)
-    async def keep_selects(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
-        self.choice = "keep_selects"
-        self.stop()
-        await interaction.response.defer()
+    def _add_choice_button(
+        self,
+        *,
+        label: str,
+        style: discord.ButtonStyle,
+        choice: str | None,
+    ) -> None:
+        button = discord.ui.Button(label=label, style=style)
 
-    @discord.ui.button(label="選句もリセットして戻す", style=discord.ButtonStyle.danger)
-    async def reset_selects(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
-        self.choice = "reset_selects"
-        self.stop()
-        await interaction.response.defer()
+        async def _callback(interaction: discord.Interaction) -> None:
+            self.choice = choice
+            self.stop()
+            await interaction.response.defer()
 
-    @discord.ui.button(label="キャンセル", style=discord.ButtonStyle.secondary)
-    async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
-        self.choice = None
-        self.stop()
-        await interaction.response.defer()
+        button.callback = _callback
+        self.add_item(button)
