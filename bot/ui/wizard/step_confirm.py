@@ -30,10 +30,11 @@ def build(state: WizardState) -> tuple[discord.Embed, discord.ui.View]:
     if state.description:
         embed.add_field(name="説明", value=state.description[:200], inline=False)
 
-    entry_str = format_jst(state.entry_close_at) if state.entry_close_at else "未設定"
     sub_str = format_jst(state.submission_close_at) if state.submission_close_at else "未設定"
     selecting_str = format_jst(state.selecting_close_at) if state.selecting_close_at else "未設定"
-    embed.add_field(name="エントリー締切", value=entry_str, inline=True)
+    if state.entry_enabled:
+        entry_str = format_jst(state.entry_close_at) if state.entry_close_at else "未設定"
+        embed.add_field(name="エントリー締切", value=entry_str, inline=True)
     embed.add_field(name="投句締切", value=sub_str, inline=True)
     embed.add_field(name="選句締切", value=selecting_str, inline=True)
 
@@ -262,7 +263,6 @@ class StepConfirmView(discord.ui.View):
         await interaction.edit_original_response(embed=success_embed_, view=None)
 
         # Post info embed to the new channel
-        entry_deadline = format_jst(state.entry_close_at) if state.entry_close_at else "未定"
         sub_str = format_jst(state.submission_close_at) if state.submission_close_at else "未定"
         selecting_str = format_jst(state.selecting_close_at) if state.selecting_close_at else "未定"
         info = discord.Embed(
@@ -272,7 +272,9 @@ class StepConfirmView(discord.ui.View):
         )
         if state.theme:
             info.add_field(name="題", value=state.theme, inline=True)
-        info.add_field(name="エントリー締切", value=entry_deadline, inline=False)
+        if state.entry_enabled:
+            entry_deadline = format_jst(state.entry_close_at) if state.entry_close_at else "未定"
+            info.add_field(name="エントリー締切", value=entry_deadline, inline=False)
         info.add_field(name="投句締切", value=sub_str, inline=False)
         info.add_field(name="選句締切", value=selecting_str, inline=False)
         info.set_footer(text=f"句会ID: {kukai_id}")

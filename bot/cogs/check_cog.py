@@ -20,12 +20,17 @@ class CheckCog(commands.Cog):
         self.bot = bot
 
     @app_commands.command(name="check", description="句会における自分の参加・投句・選句状況を確認します")
-    @app_commands.describe(kukai_id="句会ID")
-    async def check(self, interaction: discord.Interaction, kukai_id: int) -> None:
+    @app_commands.describe(kukai_id="句会ID（省略可: このチャンネルで1件なら自動特定）")
+    async def check(self, interaction: discord.Interaction, kukai_id: int | None = None) -> None:
         assert interaction.guild is not None
         try:
             async with get_session() as session:
-                kukai = await kukai_service.get_kukai(session, kukai_id, interaction.guild.id)
+                kukai = await kukai_service.resolve_kukai_in_channel(
+                    session,
+                    guild_id=interaction.guild.id,
+                    channel_id=interaction.channel_id,
+                    kukai_id=kukai_id,
+                )
                 user_id = interaction.user.id
                 state = KukaiState.from_value(kukai.state)
 

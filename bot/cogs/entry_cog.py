@@ -73,17 +73,33 @@ class EntryCog(commands.Cog):
     # ------------------------------------------------------------------
 
     @entry.command(name="join", description="句会にエントリーします")
-    @app_commands.describe(kukai_id="句会ID")
-    async def entry_join(self, interaction: discord.Interaction, kukai_id: int) -> None:
-        await interaction.response.send_modal(EntryHaigoModal(kukai_id))
-
-    @entry.command(name="cancel", description="エントリーを取り消します（受付期間中のみ）")
-    @app_commands.describe(kukai_id="句会ID")
-    async def entry_cancel(self, interaction: discord.Interaction, kukai_id: int) -> None:
+    @app_commands.describe(kukai_id="句会ID（省略可: このチャンネルで1件なら自動特定）")
+    async def entry_join(self, interaction: discord.Interaction, kukai_id: int | None = None) -> None:
         assert interaction.guild is not None
         try:
             async with get_session() as session:
-                kukai = await kukai_service.get_kukai(session, kukai_id, interaction.guild.id)
+                kukai = await kukai_service.resolve_kukai_in_channel(
+                    session,
+                    guild_id=interaction.guild.id,
+                    channel_id=interaction.channel_id,
+                    kukai_id=kukai_id,
+                )
+            await interaction.response.send_modal(EntryHaigoModal(kukai.id))
+        except ServiceError as e:
+            await interaction.response.send_message(embed=error_embed(str(e)), ephemeral=True)
+
+    @entry.command(name="cancel", description="エントリーを取り消します（受付期間中のみ）")
+    @app_commands.describe(kukai_id="句会ID（省略可: このチャンネルで1件なら自動特定）")
+    async def entry_cancel(self, interaction: discord.Interaction, kukai_id: int | None = None) -> None:
+        assert interaction.guild is not None
+        try:
+            async with get_session() as session:
+                kukai = await kukai_service.resolve_kukai_in_channel(
+                    session,
+                    guild_id=interaction.guild.id,
+                    channel_id=interaction.channel_id,
+                    kukai_id=kukai_id,
+                )
                 entry = await entry_service.withdraw(session, kukai, interaction.user.id)
             await interaction.response.send_message(
                 embed=success_embed(f"「{kukai.title}」のエントリーを取り消しました。"),

@@ -57,12 +57,19 @@ class StepBasicView(discord.ui.View):
             self.add_item(_ExistingChannelSelect(state))
         else:
             self.add_item(_CategorySelect(state))
+            channel_name_btn = discord.ui.Button(
+                label="📝 チャンネル名を設定",
+                style=discord.ButtonStyle.secondary,
+                row=3,
+            )
+            channel_name_btn.callback = self._set_channel_name
+            self.add_item(channel_name_btn)
 
         next_btn = discord.ui.Button(
             label="次へ ➜",
             style=discord.ButtonStyle.success,
             disabled=not filled,
-            row=3,
+            row=4,
         )
         next_btn.callback = self._next
         self.add_item(next_btn)
@@ -70,13 +77,16 @@ class StepBasicView(discord.ui.View):
         cancel_btn = discord.ui.Button(
             label="❌ キャンセル",
             style=discord.ButtonStyle.danger,
-            row=3,
+            row=4,
         )
         cancel_btn.callback = self._cancel
         self.add_item(cancel_btn)
 
     async def _fill(self, interaction: discord.Interaction) -> None:
         await interaction.response.send_modal(StepBasicModal(self.state))
+
+    async def _set_channel_name(self, interaction: discord.Interaction) -> None:
+        await interaction.response.send_modal(ChannelNameModal(self.state))
 
     async def _next(self, interaction: discord.Interaction) -> None:
         self.state.step = 2
@@ -181,12 +191,6 @@ class StepBasicModal(discord.ui.Modal, title="基本情報の入力"):
         required=False,
         max_length=1000,
     )
-    channel_name = discord.ui.TextInput(
-        label="チャンネル名（新規作成時のみ）",
-        placeholder="未入力なら題名を使用",
-        required=False,
-        max_length=100,
-    )
 
     def __init__(self, state: WizardState) -> None:
         super().__init__()
@@ -197,13 +201,30 @@ class StepBasicModal(discord.ui.Modal, title="基本情報の入力"):
             self.theme.default = state.theme
         if state.description:
             self.description.default = state.description
-        if state.channel_name:
-            self.channel_name.default = state.channel_name
-
     async def on_submit(self, interaction: discord.Interaction) -> None:
         self.state.title = self.kukai_title.value.strip()
         self.state.theme = self.theme.value.strip()
         self.state.description = self.description.value.strip()
+        set_wizard(self.state)
+        embed, view = build(self.state)
+        await interaction.response.edit_message(embed=embed, view=view)
+
+
+class ChannelNameModal(discord.ui.Modal, title="チャンネル名の設定"):
+    channel_name = discord.ui.TextInput(
+        label="チャンネル名（新規作成時）",
+        placeholder="未入力なら題名を使用",
+        required=False,
+        max_length=100,
+    )
+
+    def __init__(self, state: WizardState) -> None:
+        super().__init__()
+        self.state = state
+        if state.channel_name:
+            self.channel_name.default = state.channel_name
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
         self.state.channel_name = self.channel_name.value.strip()
         set_wizard(self.state)
         embed, view = build(self.state)

@@ -16,31 +16,36 @@ class SubmissionCog(commands.Cog):
         self.bot = bot
 
     @app_commands.command(name="submit", description="投句します（追加・編集・削除）")
-    @app_commands.describe(kukai_id="句会ID")
-    async def submit(self, interaction: discord.Interaction, kukai_id: int) -> None:
+    @app_commands.describe(kukai_id="句会ID（省略可: このチャンネルで1件なら自動特定）")
+    async def submit(self, interaction: discord.Interaction, kukai_id: int | None = None) -> None:
         assert interaction.guild is not None
         try:
             async with get_session() as session:
-                kukai = await kukai_service.get_kukai(session, kukai_id, interaction.guild.id)
+                kukai = await kukai_service.resolve_kukai_in_channel(
+                    session,
+                    guild_id=interaction.guild.id,
+                    channel_id=interaction.channel_id,
+                    kukai_id=kukai_id,
+                )
                 subs = await submission_service.list_user_submissions(
                     session, kukai.id, interaction.user.id
                 )
             embed = _submissions_embed(kukai, subs)
-            view = SubmissionView(kukai_id, subs, kukai)
+            view = SubmissionView(kukai.id, subs, kukai)
             await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
         except ServiceError as e:
             await interaction.response.send_message(embed=error_embed(str(e)), ephemeral=True)
 
     @app_commands.command(name="submit_bulk", description="複数行をまとめて投句します")
     @app_commands.describe(
-        kukai_id="句会ID",
+        kukai_id="句会ID（省略可: このチャンネルで1件なら自動特定）",
         texts="1行1句で入力（最大20句）",
     )
     async def submit_bulk(
         self,
         interaction: discord.Interaction,
-        kukai_id: int,
         texts: str,
+        kukai_id: int | None = None,
     ) -> None:
         assert interaction.guild is not None
         poems = [line.strip() for line in texts.splitlines() if line.strip()]
@@ -61,7 +66,12 @@ class SubmissionCog(commands.Cog):
         over_limit_count = 0
         try:
             async with get_session() as session:
-                kukai = await kukai_service.get_kukai(session, kukai_id, interaction.guild.id)
+                kukai = await kukai_service.resolve_kukai_in_channel(
+                    session,
+                    guild_id=interaction.guild.id,
+                    channel_id=interaction.channel_id,
+                    kukai_id=kukai_id,
+                )
                 for poem in poems:
                     _, over_limit = await submission_service.submit(
                         session, kukai, interaction.user.id, poem

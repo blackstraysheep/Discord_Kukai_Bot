@@ -118,6 +118,34 @@ async def get_kukai(
     return kukai
 
 
+async def resolve_kukai_in_channel(
+    session: AsyncSession,
+    *,
+    guild_id: int,
+    channel_id: int | None,
+    kukai_id: int | None = None,
+) -> Kukai:
+    """Resolve kukai by explicit ID or by current channel when unambiguous."""
+    if kukai_id is not None:
+        return await get_kukai(session, kukai_id, guild_id)
+
+    if channel_id is None:
+        raise ValidationError("この場所では句会を自動特定できません。kukai_id を指定してください。")
+
+    result = await session.execute(
+        select(Kukai)
+        .where(Kukai.guild_id == guild_id, Kukai.channel_id == channel_id)
+        .where(Kukai.state.notin_([KukaiState.ENDED, KukaiState.CANCELLED]))
+        .order_by(Kukai.created_at.desc())
+    )
+    rows = list(result.scalars().all())
+    if not rows:
+        raise NotFoundError("このチャンネルに進行中の句会がありません。kukai_id を指定してください。")
+    if len(rows) > 1:
+        raise ValidationError("このチャンネルには複数句会があります。kukai_id を指定してください。")
+    return rows[0]
+
+
 async def list_kukais(session: AsyncSession, guild_id: int) -> list[Kukai]:
     """Return listed kukais for a guild, newest first.
 

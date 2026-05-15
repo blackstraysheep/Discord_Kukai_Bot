@@ -17,12 +17,13 @@ def build(state: WizardState) -> tuple[discord.Embed, discord.ui.View]:
         title=f"ステップ 3/{STEP_COUNT}: 締切設定",
         color=discord.Color.blurple(),
     )
-    entry_str = format_jst(state.entry_close_at) if state.entry_close_at else "（未入力）"
     sub_str = format_jst(state.submission_close_at) if state.submission_close_at else "（未入力）"
     selecting_str = (
         format_jst(state.selecting_close_at) if state.selecting_close_at else "（未入力）"
     )
-    embed.add_field(name="エントリー締切", value=entry_str, inline=False)
+    if state.entry_enabled:
+        entry_str = format_jst(state.entry_close_at) if state.entry_close_at else "（未入力）"
+        embed.add_field(name="エントリー締切", value=entry_str, inline=False)
     embed.add_field(name="投句締切", value=sub_str, inline=False)
     embed.add_field(name="選句締切", value=selecting_str, inline=False)
     entry_note = "  ⚠️ エントリー有効のため締切必須" if state.entry_enabled and not state.entry_close_at else ""
@@ -84,41 +85,46 @@ class StepScheduleView(discord.ui.View):
 
 
 class StepScheduleModal(discord.ui.Modal, title="日程の入力"):
-    entry_close = discord.ui.TextInput(
-        label="エントリー締切（任意） (YYYY-MM-DD HH:MM)",
-        placeholder="2026-06-01 20:00",
-        required=False,
-        max_length=20,
-    )
-    submission_close = discord.ui.TextInput(
-        label="投句締切 *  (YYYY-MM-DD HH:MM)",
-        placeholder="2026-06-01 23:59",
-        max_length=20,
-    )
-    selecting_close = discord.ui.TextInput(
-        label="選句締切 *  (YYYY-MM-DD HH:MM)",
-        placeholder="2026-06-08 23:59",
-        max_length=20,
-    )
-
     def __init__(self, state: WizardState) -> None:
         super().__init__()
         self.state = state
-        if state.entry_close_at:
-            from bot.utils.datetime_utils import to_jst
-            jst = to_jst(state.entry_close_at)
-            self.entry_close.default = jst.strftime("%Y-%m-%d %H:%M")
+        from bot.utils.datetime_utils import to_jst
+
+        self.entry_close: discord.ui.TextInput | None = None
+        if state.entry_enabled:
+            self.entry_close = discord.ui.TextInput(
+                label="エントリー締切（任意） (YYYY-MM-DD HH:MM)",
+                placeholder="2026-06-01 20:00",
+                required=False,
+                max_length=20,
+            )
+            if state.entry_close_at:
+                jst = to_jst(state.entry_close_at)
+                self.entry_close.default = jst.strftime("%Y-%m-%d %H:%M")
+            self.add_item(self.entry_close)
+
+        self.submission_close = discord.ui.TextInput(
+            label="投句締切 *  (YYYY-MM-DD HH:MM)",
+            placeholder="2026-06-01 23:59",
+            max_length=20,
+        )
         if state.submission_close_at:
-            from bot.utils.datetime_utils import to_jst
             jst = to_jst(state.submission_close_at)
             self.submission_close.default = jst.strftime("%Y-%m-%d %H:%M")
+        self.add_item(self.submission_close)
+
+        self.selecting_close = discord.ui.TextInput(
+            label="選句締切 *  (YYYY-MM-DD HH:MM)",
+            placeholder="2026-06-08 23:59",
+            max_length=20,
+        )
         if state.selecting_close_at:
-            from bot.utils.datetime_utils import to_jst
             jst = to_jst(state.selecting_close_at)
             self.selecting_close.default = jst.strftime("%Y-%m-%d %H:%M")
+        self.add_item(self.selecting_close)
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
-        entry_raw = self.entry_close.value.strip()
+        entry_raw = self.entry_close.value.strip() if self.entry_close is not None else ""
         try:
             entry_close = parse_datetime(entry_raw) if entry_raw else None
             sub_close = parse_datetime(self.submission_close.value)
@@ -155,7 +161,7 @@ class StepScheduleModal(discord.ui.Modal, title="日程の入力"):
             )
             return
 
-        self.state.entry_close_at = entry_close
+        self.state.entry_close_at = entry_close if self.state.entry_enabled else None
         self.state.submission_close_at = sub_close
         self.state.selecting_close_at = selecting_close
         set_wizard(self.state)

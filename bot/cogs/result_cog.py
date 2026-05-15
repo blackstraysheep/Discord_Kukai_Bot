@@ -55,7 +55,7 @@ def _score_embed(
         label_parts = [f"{lv.label}×{lv.count}" for lv in r.label_selects]
         label_str = "　".join(label_parts) if label_parts else "（無選）"
 
-        header = f"**{r.rank}位 ({r.total_score}pt)** — No.{r.number}{author_line}"
+        header = f"**{r.rank}位 ({r.total_score}点)** — No.{r.number}{author_line}"
         body_lines = [
             f"> {discord_safe(r.text)}",
             label_str,
@@ -91,7 +91,7 @@ def _number_embed(kukai, results, guild: discord.Guild) -> list[discord.Embed]:
     lines = []
     for r in sorted_r:
         label_str = "　".join(f"{lv.label}×{lv.count}" for lv in r.label_selects) or "（無選）"
-        lines.append(f"`No.{r.number}` {discord_safe(r.text)}　— {label_str} ({r.total_score}pt)")
+        lines.append(f"`No.{r.number}` {discord_safe(r.text)}　— {label_str} ({r.total_score}点)")
     embed.description = "\n".join(lines[:40])
     if len(sorted_r) > 40:
         embed.set_footer(text=f"他 {len(sorted_r) - 40} 句　|　句会 ID: {kukai.id}")
@@ -123,9 +123,9 @@ def _author_embed(
         member = guild.get_member(user_id)
         author_name = member.display_name if member else f"UID:{user_id}"
         total = sum(r.total_score for r in subs)
-        lines = [f"`No.{r.number}` {discord_safe(r.text)} — {r.total_score}pt ({r.rank}位)" for r in subs]
+        lines = [f"`No.{r.number}` {discord_safe(r.text)} — {r.total_score}点 ({r.rank}位)" for r in subs]
         embed.add_field(
-            name=f"{discord_safe(author_name)} (合計 {total}pt)",
+            name=f"{discord_safe(author_name)} (合計 {total}点)",
             value="\n".join(lines),
             inline=False,
         )
@@ -337,7 +337,7 @@ class ResultCog(commands.Cog):
 
     @app_commands.command(name="result", description="句会の結果を表示します")
     @app_commands.describe(
-        kukai_id="句会ID",
+        kukai_id="句会ID（省略可: このチャンネルで1件なら自動特定）",
         format="表示形式 (score=点数順 / number=番号順 / author=作者別)",
     )
     @app_commands.choices(
@@ -350,13 +350,18 @@ class ResultCog(commands.Cog):
     async def result(
         self,
         interaction: discord.Interaction,
-        kukai_id: int,
+        kukai_id: int | None = None,
         format: str | None = None,
     ) -> None:
         assert interaction.guild is not None
         try:
             async with get_session() as session:
-                kukai = await kukai_service.get_kukai(session, kukai_id, interaction.guild.id)
+                kukai = await kukai_service.resolve_kukai_in_channel(
+                    session,
+                    guild_id=interaction.guild.id,
+                    channel_id=interaction.channel_id,
+                    kukai_id=kukai_id,
+                )
                 state = KukaiState.from_value(kukai.state)
 
                 # Non-RESULTS states require admin

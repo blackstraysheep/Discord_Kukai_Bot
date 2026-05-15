@@ -20,11 +20,12 @@ if TYPE_CHECKING:
     from bot.models.select import Select
 
 _AUTHOR_COMMENT_LABEL = "作者コメント"
+_OVERALL_VALUE = "__overall__"
 
 
 async def load_select_data(
     session, kukai_id: int, selector_user_id: int
-) -> tuple[list[PublishedSubmission], list[SelectLabel], dict[int, Select]]:
+) -> tuple[list[PublishedSubmission], list[SelectLabel], dict[int, Select], str]:
     pub_subs = await submission_repo.list_published(session, kukai_id)
     result = await session.execute(
         select(SelectLabel)
@@ -34,7 +35,8 @@ async def load_select_data(
     labels = list(result.scalars().all())
     selects = await select_repo.get_selects_by_selector(session, kukai_id, selector_user_id)
     selects_by_sub = {sel.submission_id: sel for sel in selects}
-    return pub_subs, labels, selects_by_sub
+    overall = await select_repo.get_overall_comment(session, kukai_id, selector_user_id)
+    return pub_subs, labels, selects_by_sub, (overall.comment if overall else "")
 
 
 class SelectCommentModal(discord.ui.Modal, title="コメント入力"):
@@ -81,7 +83,7 @@ class SelectCommentModal(discord.ui.Modal, title="コメント入力"):
                     comment=self._comment.value or None,
                     is_self_comment=self.is_self_comment,
                 )
-                pub_subs, labels, selects_by_sub = await load_select_data(
+                pub_subs, labels, selects_by_sub, overall_comment = await load_select_data(
                     session, kukai.id, self.selector_user_id
                 )
             view = SelectView(
@@ -89,6 +91,7 @@ class SelectCommentModal(discord.ui.Modal, title="コメント入力"):
                 pub_subs,
                 labels,
                 selects_by_sub,
+                overall_comment=overall_comment,
                 selector_user_id=self.selector_user_id,
                 selected_submission_id=self.selected_submission_id,
             )
@@ -138,9 +141,17 @@ class _SubmissionSelect(discord.ui.Select):
                     label=f"No.{ps.number}",
                     value=str(ps.submission_id),
                     description=(ps.submission.text[:95] or "（空）"),
-                    default=ps.submission_id == view_owner._selected_submission_id,
+                    default=(not view_owner._is_overall_selected() and ps.submission_id == view_owner._selected_submission_id),
                 )
             )
+        options.append(
+            discord.SelectOption(
+                label="総評",
+                value=_OVERALL_VALUE,
+                description="句会全体への総評を入力",
+                default=view_owner._is_overall_selected(),
+            )
+        )
         super().__init__(
             placeholder="番号+句リストから1句選択",
             options=options,
@@ -150,7 +161,8 @@ class _SubmissionSelect(discord.ui.Select):
         )
 
     async def callback(self, interaction: discord.Interaction) -> None:
-        self._view_owner._selected_submission_id = int(self.values[0])
+        selected = self.values[0]
+        self._view_owner._selected_submission_id = None if selected == _OVERALL_VALUE else int(selected)
         self._view_owner._selected_label_value = self._view_owner._default_label_value()
         self._view_owner._build_items()
         await interaction.response.edit_message(
@@ -162,6 +174,24 @@ class _SubmissionSelect(discord.ui.Select):
 class _LabelSelect(discord.ui.Select):
     def __init__(self, view_owner: "SelectView") -> None:
         self._view_owner = view_owner
+        if view_owner._is_overall_selected():
+            options = [
+                discord.SelectOption(
+                    label="総評",
+                    value="overall_comment",
+                    description="句会全体へのコメント",
+                    default=True,
+                )
+            ]
+            super().__init__(
+                placeholder="選種別を選択",
+                options=options,
+                min_values=1,
+                max_values=1,
+                row=1,
+            )
+            return
+
         ps = view_owner._selected_ps()
         is_own = ps.submission.user_id == view_owner._selector_user_id
 
@@ -180,7 +210,7 @@ class _LabelSelect(discord.ui.Select):
             for lbl in view_owner._labels:
                 if lbl.label == _AUTHOR_COMMENT_LABEL:
                     continue
-                desc = f"{lbl.point:+d}pt"
+                desc = f"{lbl.point:+d}点"
                 if lbl.max_count is not None:
                     desc += f" | 最大{lbl.max_count}票"
                 options.append(
@@ -226,6 +256,7 @@ class SelectView(discord.ui.View):
         pub_subs: list[PublishedSubmission],
         labels: list[SelectLabel],
         selects_by_sub: dict[int, Select],
+        overall_comment: str,
         *,
         selector_user_id: int,
         selected_submission_id: int | None = None,
@@ -235,6 +266,7 @@ class SelectView(discord.ui.View):
         self._pub_subs = sorted(pub_subs, key=lambda x: x.number)
         self._labels = labels
         self._selects = selects_by_sub
+        self._overall_comment = overall_comment
         self._selector_user_id = selector_user_id
         self._author_label = next((lbl for lbl in labels if lbl.label == _AUTHOR_COMMENT_LABEL), None)
         self._selected_submission_id = (
@@ -243,6 +275,9 @@ class SelectView(discord.ui.View):
         self._selected_label_value = self._default_label_value()
         self._build_items()
 
+    def _is_overall_selected(self) -> bool:
+        return self._selected_submission_id is None
+
     def _selected_ps(self) -> PublishedSubmission:
         for ps in self._pub_subs:
             if ps.submission_id == self._selected_submission_id:
@@ -250,6 +285,8 @@ class SelectView(discord.ui.View):
         return self._pub_subs[0]
 
     def _default_label_value(self) -> str:
+        if self._is_overall_selected():
+            return "overall_comment"
         ps = self._selected_ps()
         current_select = self._selects.get(ps.submission_id)
         if ps.submission.user_id == self._selector_user_id:
@@ -262,10 +299,6 @@ class SelectView(discord.ui.View):
         return "disabled"
 
     def build_embed(self) -> discord.Embed:
-        ps = self._selected_ps()
-        current_select = self._selects.get(ps.submission_id)
-        is_own = ps.submission.user_id == self._selector_user_id
-
         embed = discord.Embed(
             title=f"選句ウィザード — {self._kukai.title}",
             color=COLOR_INFO,
@@ -277,7 +310,18 @@ class SelectView(discord.ui.View):
         lines = [f"`No.{item.number}` {discord_safe(item.submission.text[:70])}" for item in self._pub_subs[:25]]
         if len(self._pub_subs) > 25:
             lines.append(f"...他 {len(self._pub_subs) - 25} 句")
+        lines.append("`総評` 句会全体へのコメント")
         embed.add_field(name="番号+句リスト", value="\n".join(lines), inline=False)
+
+        if self._is_overall_selected():
+            embed.add_field(name="選択中 総評", value=self._overall_comment[:500] or "（未入力）", inline=False)
+            embed.add_field(name="現在の状態", value="現在: **総評**", inline=False)
+            embed.set_footer(text=f"句会 ID: {self._kukai.id}")
+            return embed
+
+        ps = self._selected_ps()
+        current_select = self._selects.get(ps.submission_id)
+        is_own = ps.submission.user_id == self._selector_user_id
         embed.add_field(name=f"選択中 No.{ps.number}", value=f"```{ps.submission.text}```", inline=False)
 
         if current_select:
@@ -308,10 +352,6 @@ class SelectView(discord.ui.View):
         remove_btn.callback = self._on_remove
         self.add_item(remove_btn)
 
-        overall_btn = discord.ui.Button(label="📝 総評", style=discord.ButtonStyle.primary, row=2)
-        overall_btn.callback = self._on_overall
-        self.add_item(overall_btn)
-
         done_btn = discord.ui.Button(label="完了", style=discord.ButtonStyle.secondary, row=2)
         done_btn.callback = self._on_done
         self.add_item(done_btn)
@@ -320,12 +360,15 @@ class SelectView(discord.ui.View):
         assert interaction.guild is not None
         async with get_session() as session:
             kukai = await kukai_service.get_kukai(session, self._kukai.id, interaction.guild.id)
-            pub_subs, labels, selects_by_sub = await load_select_data(session, self._kukai.id, self._selector_user_id)
+            pub_subs, labels, selects_by_sub, overall_comment = await load_select_data(
+                session, self._kukai.id, self._selector_user_id
+            )
         view = SelectView(
             kukai,
             pub_subs,
             labels,
             selects_by_sub,
+            overall_comment=overall_comment,
             selector_user_id=self._selector_user_id,
             selected_submission_id=self._selected_submission_id,
         )
@@ -333,6 +376,9 @@ class SelectView(discord.ui.View):
 
     async def _on_decide(self, interaction: discord.Interaction) -> None:
         assert interaction.guild is not None
+        if self._is_overall_selected():
+            await self._on_overall(interaction)
+            return
         ps = self._selected_ps()
         current_select = self._selects.get(ps.submission_id)
         current_text = current_select.comment.comment if current_select and current_select.comment else ""
@@ -405,6 +451,16 @@ class SelectView(discord.ui.View):
 
     async def _on_remove(self, interaction: discord.Interaction) -> None:
         assert interaction.guild is not None
+        if self._is_overall_selected():
+            await interaction.response.defer(ephemeral=True)
+            async with get_session() as session:
+                overall = await select_repo.get_overall_comment(
+                    session, self._kukai.id, self._selector_user_id
+                )
+                if overall:
+                    await session.delete(overall)
+            await self._refresh(interaction)
+            return
         ps = self._selected_ps()
         await interaction.response.defer(ephemeral=True)
         try:
@@ -418,13 +474,8 @@ class SelectView(discord.ui.View):
             await interaction.followup.send(embed=error_embed(str(e)), ephemeral=True)
 
     async def _on_overall(self, interaction: discord.Interaction) -> None:
-        async with get_session() as session:
-            oc = await select_repo.get_overall_comment(
-                session, self._kukai.id, self._selector_user_id
-            )
-            current_text = oc.comment if oc else ""
         await interaction.response.send_modal(
-            OverallSelectCommentModal(self._kukai.id, self._selector_user_id, current_text)
+            OverallSelectCommentModal(self._kukai.id, self._selector_user_id, self._overall_comment)
         )
 
     async def _on_done(self, interaction: discord.Interaction) -> None:
@@ -447,6 +498,8 @@ class SelectView(discord.ui.View):
                 if selected.comment:
                     comment_part = f" — {discord_safe(selected.comment.comment[:40])}"
                 lines.append(f"No.{ps.number} **{label_name}**{comment_part}")
+            if self._overall_comment:
+                lines.append(f"総評 — {discord_safe(self._overall_comment[:80])}")
             desc = "\n".join(lines[:40])
 
         embed = discord.Embed(

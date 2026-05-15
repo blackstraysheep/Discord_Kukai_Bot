@@ -41,7 +41,7 @@ def build(state: WizardState) -> tuple[discord.Embed, discord.ui.View]:
         if spec["label"] == select_rule_service.AUTHOR_COMMENT_LABEL:
             continue
         lines.append(
-            f"**{spec['label']}** {spec['point']:+d}pt  "
+            f"**{spec['label']}** {spec['point']:+d}点  "
             f"{spec['min_count']}〜{_max_label(spec)}句  "
             f"コメント:{spec['comment_mode']}"
         )

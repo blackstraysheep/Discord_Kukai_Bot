@@ -51,6 +51,40 @@ STATE_LABEL: dict[str, str] = {
 }
 
 
+class StageActionView(discord.ui.View):
+    def __init__(self, kukai_id: int, state: KukaiState) -> None:
+        super().__init__(timeout=86400)
+        label_map = {
+            KukaiState.ENTRY_OPEN: "エントリーする",
+            KukaiState.SUBMISSION_OPEN: "投句する",
+            KukaiState.SELECTING_OPEN: "選句する",
+            KukaiState.RESULTS: "結果を見る",
+        }
+        command_map = {
+            KukaiState.ENTRY_OPEN: f"/entry join kukai_id:{kukai_id}",
+            KukaiState.SUBMISSION_OPEN: f"/submit kukai_id:{kukai_id}",
+            KukaiState.SELECTING_OPEN: f"/select kukai_id:{kukai_id}",
+            KukaiState.RESULTS: f"/result kukai_id:{kukai_id}",
+        }
+        button_label = label_map.get(state)
+        command = command_map.get(state)
+        if not button_label or not command:
+            return
+        button = discord.ui.Button(label=button_label, style=discord.ButtonStyle.primary, row=0)
+
+        async def _callback(interaction: discord.Interaction) -> None:
+            await interaction.response.send_message(
+                embed=discord.Embed(
+                    description=f"このチャンネルでは次を実行してください:\n`{command}`",
+                    color=COLOR_INFO,
+                ),
+                ephemeral=True,
+            )
+
+        button.callback = _callback
+        self.add_item(button)
+
+
 
 
 class KukaiCog(commands.Cog):
@@ -327,13 +361,38 @@ class KukaiCog(commands.Cog):
             return
         description = f"句会「**{kukai.title}**」の **{stage}** を開始しました。"
         embed = discord.Embed(description=description, color=COLOR_INFO)
-        if kukai.entry_close_at:
+        if state == KukaiState.ENTRY_OPEN and kukai.entry_enabled and kukai.entry_close_at:
+            embed.add_field(name="エントリー締切", value=format_jst(kukai.entry_close_at), inline=False)
+        elif state == KukaiState.SUBMISSION_OPEN and kukai.submission_close_at:
+            embed.add_field(name="投句締切", value=format_jst(kukai.submission_close_at), inline=False)
+        elif state == KukaiState.SELECTING_OPEN and kukai.selecting_close_at:
+            embed.add_field(name="選句締切", value=format_jst(kukai.selecting_close_at), inline=False)
+        embed.set_footer(text=f"句会ID: {kukai.id}")
+        view = StageActionView(kukai.id, state)
+        try:
+            await send_with_retry(lambda: channel.send(embed=embed, view=view))
+        except Exception:
+            pass
+
+    async def _announce_settings_updated(self, guild: discord.Guild, kukai, *, deadlines_changed: bool) -> None:
+        if not kukai.channel_id:
+            return
+        channel = guild.get_channel(kukai.channel_id)
+        if not isinstance(channel, discord.TextChannel):
+            return
+        embed = discord.Embed(
+            title="⚙️ 句会設定を更新しました",
+            description=f"句会「**{kukai.title}**」の設定が更新されました。",
+            color=COLOR_INFO,
+        )
+        if kukai.entry_enabled and kukai.entry_close_at:
             embed.add_field(name="エントリー締切", value=format_jst(kukai.entry_close_at), inline=False)
         if kukai.submission_close_at:
             embed.add_field(name="投句締切", value=format_jst(kukai.submission_close_at), inline=False)
         if kukai.selecting_close_at:
             embed.add_field(name="選句締切", value=format_jst(kukai.selecting_close_at), inline=False)
-        embed.set_footer(text=f"句会ID: {kukai.id}")
+        if deadlines_changed:
+            embed.set_footer(text="締切変更に合わせて通知ジョブを再登録済み")
         try:
             await send_with_retry(lambda: channel.send(embed=embed))
         except Exception:
@@ -519,6 +578,7 @@ class KukaiCog(commands.Cog):
                 embed=success_embed(f"句会「{kukai.title}」の設定を更新しました。{extra}"),
                 ephemeral=True,
             )
+            await self._announce_settings_updated(interaction.guild, kukai, deadlines_changed=deadlines_changed)
         except ServiceError as e:
             await interaction.response.send_message(embed=error_embed(str(e)), ephemeral=True)
 

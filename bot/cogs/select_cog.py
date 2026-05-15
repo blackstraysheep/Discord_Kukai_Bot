@@ -18,19 +18,24 @@ class SelectCog(commands.Cog):
         self.bot = bot
 
     @app_commands.command(name="select", description="選句します（投句を一覧表示して選句）")
-    @app_commands.describe(kukai_id="句会ID")
-    async def select(self, interaction: discord.Interaction, kukai_id: int) -> None:
+    @app_commands.describe(kukai_id="句会ID（省略可: このチャンネルで1件なら自動特定）")
+    async def select(self, interaction: discord.Interaction, kukai_id: int | None = None) -> None:
         assert interaction.guild is not None
         try:
             async with get_session() as session:
-                kukai = await kukai_service.get_kukai(session, kukai_id, interaction.guild.id)
+                kukai = await kukai_service.resolve_kukai_in_channel(
+                    session,
+                    guild_id=interaction.guild.id,
+                    channel_id=interaction.channel_id,
+                    kukai_id=kukai_id,
+                )
                 if KukaiState.from_value(kukai.state) != KukaiState.SELECTING_OPEN:
                     await interaction.response.send_message(
                         embed=error_embed("現在選句を受け付けていません。"), ephemeral=True
                     )
                     return
 
-                pub_subs, labels, selects_by_sub = await load_select_data(
+                pub_subs, labels, selects_by_sub, overall_comment = await load_select_data(
                     session, kukai.id, interaction.user.id
                 )
                 if not any(lbl.label == "作者コメント" for lbl in labels):
@@ -48,7 +53,7 @@ class SelectCog(commands.Cog):
                         )
                     )
                     await session.flush()
-                    pub_subs, labels, selects_by_sub = await load_select_data(
+                    pub_subs, labels, selects_by_sub, overall_comment = await load_select_data(
                         session, kukai.id, interaction.user.id
                     )
 
@@ -74,6 +79,7 @@ class SelectCog(commands.Cog):
                 pub_subs,
                 labels,
                 selects_by_sub,
+                overall_comment=overall_comment,
                 selector_user_id=interaction.user.id,
             )
             await interaction.response.send_message(
