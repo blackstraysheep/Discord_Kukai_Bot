@@ -49,6 +49,15 @@ def _submissions_embed(kukai, subs: list[Submission]) -> discord.Embed:
     return embed
 
 
+def _submission_snapshot(subs: list[Submission]) -> str:
+    if not subs:
+        return "（未登録）"
+    lines = [f"`{i + 1}.` {discord_safe(s.text[:80])}" for i, s in enumerate(subs[:10])]
+    if len(subs) > 10:
+        lines.append(f"...他 {len(subs) - 10} 句")
+    return "\n".join(lines)
+
+
 class SubmitBulkModal(discord.ui.Modal):
     def __init__(self, kukai_id: int, slots: int) -> None:
         super().__init__(title="投句（追加）")
@@ -103,6 +112,14 @@ class SubmitBulkModal(discord.ui.Modal):
             await interaction.edit_original_response(
                 embed=embed,
                 view=SubmissionView(self.kukai_id, subs, kukai),
+            )
+            await interaction.followup.send(
+                embed=discord.Embed(
+                    title="✅ 投句を登録しました",
+                    description=_submission_snapshot(subs),
+                    color=COLOR_INFO,
+                ),
+                ephemeral=True,
             )
         except ServiceError as e:
             await interaction.followup.send(embed=error_embed(str(e)), ephemeral=True)

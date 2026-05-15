@@ -59,7 +59,6 @@ class StageActionView(discord.ui.View):
             KukaiState.ENTRY_OPEN: "エントリーする",
             KukaiState.SUBMISSION_OPEN: "投句する",
             KukaiState.SELECTING_OPEN: "選句する",
-            KukaiState.RESULTS: "結果を見る",
         }
         button_label = label_map.get(state)
         if not button_label:
@@ -156,36 +155,6 @@ class StageActionView(discord.ui.View):
                         )
                         return
 
-                    if self.state == KukaiState.RESULTS:
-                        if current not in {KukaiState.RESULTS, KukaiState.ENDED, KukaiState.SELECTING_CLOSED}:
-                            await interaction.response.send_message(
-                                embed=error_embed("現在は結果を表示できません。"),
-                                ephemeral=True,
-                            )
-                            return
-                        from bot.cogs.result_cog import ResultSwitchView, _resolve_initial_format
-
-                        results = await result_service.compute_results(session, kukai)
-                        overall_comments = await select_repo.list_overall_comments(session, kukai.id)
-                        if not results:
-                            await interaction.response.send_message(
-                                embed=discord.Embed(description="集計対象の投句がありません。", color=COLOR_INFO),
-                                ephemeral=True,
-                            )
-                            return
-                        view = ResultSwitchView(
-                            kukai,
-                            results,
-                            overall_comments,
-                            interaction.guild,
-                            initial_format=_resolve_initial_format(kukai, None),
-                        )
-                        await interaction.response.send_message(
-                            embed=view.current_embed(),
-                            view=view,
-                            ephemeral=(current != KukaiState.RESULTS),
-                        )
-                        return
             except ServiceError as e:
                 await interaction.response.send_message(embed=error_embed(str(e)), ephemeral=True)
 
@@ -314,6 +283,7 @@ class KukaiCog(commands.Cog):
                         )
                         if result_message_id is not None:
                             kukai.result_message_id = result_message_id
+                await notification_service.schedule_kukai_jobs(session, kukai)
             state_ja = STATE_LABEL.get(str(new_state), str(new_state))
             description = f"句会「{kukai.title}」を **{state_ja}** へ進めました。"
             if published_count is not None:
@@ -478,7 +448,10 @@ class KukaiCog(commands.Cog):
         embed.set_footer(text=f"句会ID: {kukai.id}")
         view = StageActionView(kukai.id, state)
         try:
-            await send_with_retry(lambda: channel.send(embed=embed, view=view))
+            if view.children:
+                await send_with_retry(lambda: channel.send(embed=embed, view=view))
+            else:
+                await send_with_retry(lambda: channel.send(embed=embed))
         except Exception:
             pass
 
@@ -497,17 +470,11 @@ class KukaiCog(commands.Cog):
             return
         embed = discord.Embed(
             title="⚙️ 句会設定を更新しました",
-            description=f"句会「**{kukai.title}**」の設定が更新されました。",
+            description=f"句会「**{kukai.title}**」",
             color=COLOR_INFO,
         )
         if changed_lines:
             embed.add_field(name="更新内容", value="\n".join(changed_lines[:20]), inline=False)
-        if kukai.entry_enabled and kukai.entry_close_at:
-            embed.add_field(name="エントリー締切", value=format_jst(kukai.entry_close_at), inline=False)
-        if kukai.submission_close_at:
-            embed.add_field(name="投句締切", value=format_jst(kukai.submission_close_at), inline=False)
-        if kukai.selecting_close_at:
-            embed.add_field(name="選句締切", value=format_jst(kukai.selecting_close_at), inline=False)
         if deadlines_changed:
             embed.set_footer(text="締切変更に合わせて通知ジョブを再登録済み")
         try:

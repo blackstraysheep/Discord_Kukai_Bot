@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.models.notification import NotificationSchedule
 from bot.scheduler.setup import get_scheduler, has_scheduler
+from bot.state_machine.states import KukaiState
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +22,29 @@ _DEFAULT_OFFSETS: list[tuple[str, int]] = [
     ("submission_close", 86400),
     ("selecting_close", 86400),
 ]
+
+_EVENT_ORDER = {
+    "entry_close": 1,
+    "submission_close": 2,
+    "selecting_close": 3,
+}
+
+
+def _stage_order(kukai) -> int:
+    state = KukaiState.from_value(kukai.state)
+    if state in {KukaiState.DRAFT, KukaiState.PAUSED}:
+        return 0
+    if state in {KukaiState.ENTRY_OPEN, KukaiState.ENTRY_CLOSED}:
+        return 1
+    if state in {KukaiState.SUBMISSION_OPEN, KukaiState.SUBMISSION_CLOSED, KukaiState.WAITING_PUBLISH}:
+        return 2
+    if state in {KukaiState.SELECTING_OPEN, KukaiState.SELECTING_CLOSED}:
+        return 3
+    return 4
+
+
+def _is_past_event(kukai, event_type: str) -> bool:
+    return _EVENT_ORDER.get(event_type, 99) < _stage_order(kukai)
 
 
 def _get_deadline_dt(kukai, event_type: str) -> datetime | None:
@@ -66,6 +90,8 @@ async def schedule_kukai_jobs(session: AsyncSession, kukai) -> None:
     await session.flush()
 
     # Schedule notification jobs for all unfired schedules
+    from apscheduler.jobstores.base import JobLookupError
+
     ns_result = await session.execute(
         select(NotificationSchedule).where(
             NotificationSchedule.kukai_id == kukai.id,
@@ -73,6 +99,21 @@ async def schedule_kukai_jobs(session: AsyncSession, kukai) -> None:
         )
     )
     for ns in ns_result.scalars().all():
+        if _is_past_event(kukai, ns.event_type):
+            if ns.job_id:
+                try:
+                    scheduler.remove_job(ns.job_id)
+                except JobLookupError:
+                    pass
+            ns.job_id = None
+            ns.fired = True
+            logger.info(
+                "Cancelled past-stage notification schedule id=%s (kukai_id=%s event=%s)",
+                ns.id,
+                kukai.id,
+                ns.event_type,
+            )
+            continue
         deadline_dt = _get_deadline_dt(kukai, ns.event_type)
         if deadline_dt is None:
             continue

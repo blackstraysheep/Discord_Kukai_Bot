@@ -124,7 +124,7 @@ async def deadline_job(kukai_id: int, event_type: str) -> None:
     await _bot.wait_until_ready()
 
     from bot.database import get_session
-    from bot.services import kukai_service
+    from bot.services import kukai_service, notification_service
     from bot.services.errors import ServiceError
     from bot.state_machine.states import KukaiState
     from bot.utils.embed_builder import COLOR_INFO
@@ -161,6 +161,7 @@ async def deadline_job(kukai_id: int, event_type: str) -> None:
                     )
                     await _auto_publish_submission_list(session, kukai)
                     await kukai_service.proceed(session, kukai)
+                    await notification_service.schedule_kukai_jobs(session, kukai)
                     logger.info(
                         "deadline_job: auto-published and advanced kukai %d to SELECTING_OPEN",
                         kukai_id,
@@ -192,6 +193,7 @@ async def deadline_job(kukai_id: int, event_type: str) -> None:
                 if should_advance:
                     await kukai_service.proceed(session, kukai)
                     await kukai_service.proceed(session, kukai)
+                    await notification_service.schedule_kukai_jobs(session, kukai)
                     logger.info(
                         "deadline_job: auto-advanced kukai %d to RESULTS (selecting_close)", kukai_id
                     )

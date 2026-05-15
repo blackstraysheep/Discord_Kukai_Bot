@@ -41,6 +41,28 @@ async def load_select_data(
     return pub_subs, labels, selects_by_sub, (overall.comment if overall else "")
 
 
+def _select_snapshot(pub_subs: list[PublishedSubmission], selects_by_sub: dict[int, Select], overall_comment: str) -> str:
+    rows: list[str] = []
+    for item in sorted(pub_subs, key=lambda x: x.number):
+        selected = selects_by_sub.get(item.submission_id)
+        if not selected:
+            continue
+        label_name = "作者コメント" if selected.is_self_comment else (
+            selected.select_label.label if selected.select_label else "?"
+        )
+        comment_part = ""
+        if selected.comment:
+            comment_part = f" — {discord_safe(selected.comment.comment[:40])}"
+        rows.append(f"No.{item.number} **{label_name}**{comment_part}")
+    if overall_comment:
+        rows.append(f"総評 — {discord_safe(overall_comment[:80])}")
+    if not rows:
+        return "（未登録）"
+    if len(rows) > 10:
+        return "\n".join(rows[:10] + [f"...他 {len(rows) - 10} 件"])
+    return "\n".join(rows)
+
+
 class SelectCommentModal(discord.ui.Modal, title="コメント入力"):
     def __init__(
         self,
@@ -98,6 +120,14 @@ class SelectCommentModal(discord.ui.Modal, title="コメント入力"):
                 selected_submission_id=self.selected_submission_id,
             )
             await interaction.edit_original_response(embed=view.build_embed(), view=view)
+            await interaction.followup.send(
+                embed=discord.Embed(
+                    title="✅ 選評を登録しました",
+                    description=_select_snapshot(pub_subs, selects_by_sub, overall_comment),
+                    color=COLOR_SUCCESS,
+                ),
+                ephemeral=True,
+            )
         except ServiceError as e:
             await interaction.followup.send(embed=error_embed(str(e)), ephemeral=True)
         except Exception:
@@ -132,7 +162,11 @@ class OverallSelectCommentModal(discord.ui.Modal, title="総評を入力"):
                     session, kukai, self.selector_user_id, self._comment.value
                 )
             await interaction.followup.send(
-                embed=discord.Embed(description="総評を保存しました。", color=COLOR_SUCCESS),
+                embed=discord.Embed(
+                    title="✅ 総評を保存しました",
+                    description=discord_safe(self._comment.value[:200]),
+                    color=COLOR_SUCCESS,
+                ),
                 ephemeral=True,
             )
         except ServiceError as e:
@@ -459,7 +493,18 @@ class SelectView(discord.ui.View):
                     ps.submission_id,
                     label.id,
                 )
+                pub_subs, labels, selects_by_sub, overall_comment = await load_select_data(
+                    session, self._kukai.id, self._selector_user_id
+                )
             await self._refresh(interaction)
+            await interaction.followup.send(
+                embed=discord.Embed(
+                    title="✅ 選評を登録しました",
+                    description=_select_snapshot(pub_subs, selects_by_sub, overall_comment),
+                    color=COLOR_SUCCESS,
+                ),
+                ephemeral=True,
+            )
         except ServiceError as e:
             await interaction.followup.send(embed=error_embed(str(e)), ephemeral=True)
         except Exception:
