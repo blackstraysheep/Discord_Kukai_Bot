@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING
 
 import discord
@@ -21,6 +22,7 @@ if TYPE_CHECKING:
 
 _AUTHOR_COMMENT_LABEL = "作者コメント"
 _OVERALL_VALUE = "__overall__"
+logger = logging.getLogger(__name__)
 
 
 async def load_select_data(
@@ -98,6 +100,12 @@ class SelectCommentModal(discord.ui.Modal, title="コメント入力"):
             await interaction.edit_original_response(embed=view.build_embed(), view=view)
         except ServiceError as e:
             await interaction.followup.send(embed=error_embed(str(e)), ephemeral=True)
+        except Exception:
+            logger.exception("SelectCommentModal.on_submit failed")
+            await interaction.followup.send(
+                embed=error_embed("選句保存中に内部エラーが発生しました。ログを確認してください。"),
+                ephemeral=True,
+            )
 
 
 class OverallSelectCommentModal(discord.ui.Modal, title="総評を入力"):
@@ -129,6 +137,12 @@ class OverallSelectCommentModal(discord.ui.Modal, title="総評を入力"):
             )
         except ServiceError as e:
             await interaction.followup.send(embed=error_embed(str(e)), ephemeral=True)
+        except Exception:
+            logger.exception("OverallSelectCommentModal.on_submit failed")
+            await interaction.followup.send(
+                embed=error_embed("総評保存中に内部エラーが発生しました。ログを確認してください。"),
+                ephemeral=True,
+            )
 
 
 class _SubmissionSelect(discord.ui.Select):
@@ -448,6 +462,12 @@ class SelectView(discord.ui.View):
             await self._refresh(interaction)
         except ServiceError as e:
             await interaction.followup.send(embed=error_embed(str(e)), ephemeral=True)
+        except Exception:
+            logger.exception("SelectView._on_decide failed")
+            await interaction.followup.send(
+                embed=error_embed("選句保存中に内部エラーが発生しました。ログを確認してください。"),
+                ephemeral=True,
+            )
 
     async def _on_remove(self, interaction: discord.Interaction) -> None:
         assert interaction.guild is not None
@@ -472,6 +492,12 @@ class SelectView(discord.ui.View):
             await self._refresh(interaction)
         except ServiceError as e:
             await interaction.followup.send(embed=error_embed(str(e)), ephemeral=True)
+        except Exception:
+            logger.exception("SelectView._on_remove failed")
+            await interaction.followup.send(
+                embed=error_embed("選句取消中に内部エラーが発生しました。ログを確認してください。"),
+                ephemeral=True,
+            )
 
     async def _on_overall(self, interaction: discord.Interaction) -> None:
         await interaction.response.send_modal(
