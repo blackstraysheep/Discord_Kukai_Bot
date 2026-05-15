@@ -63,20 +63,21 @@ class KukaiBot(commands.Bot):
         if self.settings.dev_guild_id_list or self._guild_sync_done:
             return
 
-        # Global-sync mode: clear accidental guild-scoped copies to avoid duplicates.
-        cleaned = 0
+        # Global-sync mode: keep immediate availability by syncing guild-scoped mirrors.
+        synced = 0
         failed = 0
         for guild in self.guilds:
             try:
                 self.tree.clear_commands(guild=guild)
+                self.tree.copy_global_to(guild=guild)
                 await self.tree.sync(guild=guild)
-                cleaned += 1
+                synced += 1
             except Exception:
                 failed += 1
-                logger.exception("Failed to clean guild commands for guild %d", guild.id)
+                logger.exception("Failed to sync guild commands for guild %d", guild.id)
 
         self._guild_sync_done = True
-        logger.info("Cleaned guild-scoped commands: success=%d failed=%d", cleaned, failed)
+        logger.info("Synced commands to connected guilds: success=%d failed=%d", synced, failed)
 
     async def on_app_command_error(
         self, interaction: discord.Interaction, error: Exception

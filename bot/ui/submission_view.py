@@ -29,6 +29,9 @@ def _submissions_embed(kukai, subs: list[Submission]) -> discord.Embed:
     else:
         desc = "まだ投句していません。"
 
+    if kukai.submission_max is None or kukai.submission_max > GUI_BULK_LIMIT:
+        desc += f"\n\n*注: GUIでは一度に{GUI_BULK_LIMIT}句まで投句できます。*"
+
     embed = discord.Embed(
         title=f"📝 投句 — {kukai.title}",
         description=desc,

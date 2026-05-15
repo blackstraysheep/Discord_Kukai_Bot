@@ -91,7 +91,11 @@ def _number_embed(kukai, results, guild: discord.Guild) -> list[discord.Embed]:
     lines = []
     for r in sorted_r:
         label_str = "　".join(f"{lv.label}×{lv.count}" for lv in r.label_selects) or "（無選）"
-        lines.append(f"`No.{r.number}` {discord_safe(r.text)}　— {label_str} ({r.total_score}点)")
+        line = f"`No.{r.number}` {discord_safe(r.text)}　— {label_str} ({r.total_score}点)"
+        author_comments = [c for lv in r.label_selects if lv.label == "作者コメント" for c in lv.comments[:1]]
+        if author_comments:
+            line += f"\n　🖊 作者コメント: {discord_safe(author_comments[0][:80])}"
+        lines.append(line)
     embed.description = "\n".join(lines[:40])
     if len(sorted_r) > 40:
         embed.set_footer(text=f"他 {len(sorted_r) - 40} 句　|　句会 ID: {kukai.id}")
@@ -123,7 +127,13 @@ def _author_embed(
         member = guild.get_member(user_id)
         author_name = member.display_name if member else f"UID:{user_id}"
         total = sum(r.total_score for r in subs)
-        lines = [f"`No.{r.number}` {discord_safe(r.text)} — {r.total_score}点 ({r.rank}位)" for r in subs]
+        lines = []
+        for r in subs:
+            line = f"`No.{r.number}` {discord_safe(r.text)} — {r.total_score}点 ({r.rank}位)"
+            author_comments = [c for lv in r.label_selects if lv.label == "作者コメント" for c in lv.comments[:1]]
+            if author_comments:
+                line += f"\n　🖊 作者コメント: {discord_safe(author_comments[0][:80])}"
+            lines.append(line)
         embed.add_field(
             name=f"{discord_safe(author_name)} (合計 {total}点)",
             value="\n".join(lines),

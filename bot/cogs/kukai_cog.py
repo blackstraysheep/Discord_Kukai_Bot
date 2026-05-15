@@ -32,7 +32,6 @@ from bot.utils.embed_builder import (
     error_embed,
     success_embed,
 )
-from bot.utils.result_publish import build_result_publish_embeds
 
 # Japanese labels for each state
 STATE_LABEL: dict[str, str] = {
@@ -54,32 +53,141 @@ STATE_LABEL: dict[str, str] = {
 class StageActionView(discord.ui.View):
     def __init__(self, kukai_id: int, state: KukaiState) -> None:
         super().__init__(timeout=86400)
+        self.kukai_id = kukai_id
+        self.state = state
         label_map = {
             KukaiState.ENTRY_OPEN: "エントリーする",
             KukaiState.SUBMISSION_OPEN: "投句する",
             KukaiState.SELECTING_OPEN: "選句する",
             KukaiState.RESULTS: "結果を見る",
         }
-        command_map = {
-            KukaiState.ENTRY_OPEN: f"/entry join kukai_id:{kukai_id}",
-            KukaiState.SUBMISSION_OPEN: f"/submit kukai_id:{kukai_id}",
-            KukaiState.SELECTING_OPEN: f"/select kukai_id:{kukai_id}",
-            KukaiState.RESULTS: f"/result kukai_id:{kukai_id}",
-        }
         button_label = label_map.get(state)
-        command = command_map.get(state)
-        if not button_label or not command:
+        if not button_label:
             return
         button = discord.ui.Button(label=button_label, style=discord.ButtonStyle.primary, row=0)
 
         async def _callback(interaction: discord.Interaction) -> None:
-            await interaction.response.send_message(
-                embed=discord.Embed(
-                    description=f"このチャンネルでは次を実行してください:\n`{command}`",
-                    color=COLOR_INFO,
-                ),
-                ephemeral=True,
-            )
+            assert interaction.guild is not None
+            try:
+                async with get_session() as session:
+                    kukai = await kukai_service.get_kukai(session, self.kukai_id, interaction.guild.id)
+                    current = KukaiState.from_value(kukai.state)
+
+                    if self.state == KukaiState.ENTRY_OPEN:
+                        if current != KukaiState.ENTRY_OPEN:
+                            await interaction.response.send_message(
+                                embed=error_embed("現在はエントリー受付中ではありません。"),
+                                ephemeral=True,
+                            )
+                            return
+                        from bot.cogs.entry_cog import EntryHaigoModal
+
+                        await interaction.response.send_modal(EntryHaigoModal(kukai.id))
+                        return
+
+                    if self.state == KukaiState.SUBMISSION_OPEN:
+                        if current != KukaiState.SUBMISSION_OPEN:
+                            await interaction.response.send_message(
+                                embed=error_embed("現在は投句受付中ではありません。"),
+                                ephemeral=True,
+                            )
+                            return
+                        subs = await submission_service.list_user_submissions(
+                            session, kukai.id, interaction.user.id
+                        )
+                        from bot.ui.submission_view import SubmissionView, _submissions_embed
+
+                        await interaction.response.send_message(
+                            embed=_submissions_embed(kukai, subs),
+                            view=SubmissionView(kukai.id, subs, kukai),
+                            ephemeral=True,
+                        )
+                        return
+
+                    if self.state == KukaiState.SELECTING_OPEN:
+                        if current != KukaiState.SELECTING_OPEN:
+                            await interaction.response.send_message(
+                                embed=error_embed("現在は選句受付中ではありません。"),
+                                ephemeral=True,
+                            )
+                            return
+                        from bot.models.select_rule import SelectLabel
+                        from bot.ui.select_view import SelectView, load_select_data
+
+                        pub_subs, labels, selects_by_sub, overall_comment = await load_select_data(
+                            session, kukai.id, interaction.user.id
+                        )
+                        if not any(lbl.label == "作者コメント" for lbl in labels):
+                            session.add(
+                                SelectLabel(
+                                    kukai_id=kukai.id,
+                                    template_id=None,
+                                    display_order=999,
+                                    label="作者コメント",
+                                    point=0,
+                                    rank_priority=999,
+                                    min_count=0,
+                                    max_count=None,
+                                    comment_mode="required",
+                                )
+                            )
+                            await session.flush()
+                            pub_subs, labels, selects_by_sub, overall_comment = await load_select_data(
+                                session, kukai.id, interaction.user.id
+                            )
+                        if not pub_subs:
+                            await interaction.response.send_message(
+                                embed=discord.Embed(description="公開済みの投句がありません。", color=COLOR_INFO),
+                                ephemeral=True,
+                            )
+                            return
+                        view = SelectView(
+                            kukai,
+                            pub_subs,
+                            labels,
+                            selects_by_sub,
+                            overall_comment=overall_comment,
+                            selector_user_id=interaction.user.id,
+                        )
+                        await interaction.response.send_message(
+                            embed=view.build_embed(),
+                            view=view,
+                            ephemeral=True,
+                        )
+                        return
+
+                    if self.state == KukaiState.RESULTS:
+                        if current not in {KukaiState.RESULTS, KukaiState.ENDED, KukaiState.SELECTING_CLOSED}:
+                            await interaction.response.send_message(
+                                embed=error_embed("現在は結果を表示できません。"),
+                                ephemeral=True,
+                            )
+                            return
+                        from bot.cogs.result_cog import ResultSwitchView, _resolve_initial_format
+
+                        results = await result_service.compute_results(session, kukai)
+                        overall_comments = await select_repo.list_overall_comments(session, kukai.id)
+                        if not results:
+                            await interaction.response.send_message(
+                                embed=discord.Embed(description="集計対象の投句がありません。", color=COLOR_INFO),
+                                ephemeral=True,
+                            )
+                            return
+                        view = ResultSwitchView(
+                            kukai,
+                            results,
+                            overall_comments,
+                            interaction.guild,
+                            initial_format=_resolve_initial_format(kukai, None),
+                        )
+                        await interaction.response.send_message(
+                            embed=view.current_embed(),
+                            view=view,
+                            ephemeral=(current != KukaiState.RESULTS),
+                        )
+                        return
+            except ServiceError as e:
+                await interaction.response.send_message(embed=error_embed(str(e)), ephemeral=True)
 
         button.callback = _callback
         self.add_item(button)
@@ -374,7 +482,14 @@ class KukaiCog(commands.Cog):
         except Exception:
             pass
 
-    async def _announce_settings_updated(self, guild: discord.Guild, kukai, *, deadlines_changed: bool) -> None:
+    async def _announce_settings_updated(
+        self,
+        guild: discord.Guild,
+        kukai,
+        *,
+        deadlines_changed: bool,
+        changed_lines: list[str],
+    ) -> None:
         if not kukai.channel_id:
             return
         channel = guild.get_channel(kukai.channel_id)
@@ -385,6 +500,8 @@ class KukaiCog(commands.Cog):
             description=f"句会「**{kukai.title}**」の設定が更新されました。",
             color=COLOR_INFO,
         )
+        if changed_lines:
+            embed.add_field(name="更新内容", value="\n".join(changed_lines[:20]), inline=False)
         if kukai.entry_enabled and kukai.entry_close_at:
             embed.add_field(name="エントリー締切", value=format_jst(kukai.entry_close_at), inline=False)
         if kukai.submission_close_at:
@@ -415,16 +532,19 @@ class KukaiCog(commands.Cog):
         if not results:
             return 0, "集計対象の投句がないため、結果投稿をスキップしました。", None
         overall_comments = await select_repo.list_overall_comments(session, kukai.id)
-        embeds = build_result_publish_embeds(kukai, results, overall_comments, guild)
+        from bot.cogs.result_cog import ResultSwitchView, _resolve_initial_format
 
+        view = ResultSwitchView(
+            kukai,
+            results,
+            overall_comments,
+            guild,
+            initial_format=_resolve_initial_format(kukai, None),
+        )
         first_message_id: int | None = None
         try:
-            for index, embed in enumerate(embeds):
-                sent = await send_with_retry(lambda e=embed: channel.send(embed=e))
-                if index == 0:
-                    first_message_id = sent.id
-                if index < len(embeds) - 1:
-                    await asyncio.sleep(0.35)
+            sent = await send_with_retry(lambda: channel.send(embed=view.current_embed(), view=view))
+            first_message_id = sent.id
         except discord.Forbidden:
             return len(results), "公開チャンネルへの送信権限がないため、結果を投稿できません。", None
 
@@ -550,6 +670,23 @@ class KukaiCog(commands.Cog):
                     )
                     return
 
+                mode_labels = {"manual": "手動", "semi_auto": "半自動", "full_auto": "全自動", "auto": "自動"}
+                before = {
+                    "title": kukai.title,
+                    "theme": kukai.theme,
+                    "description": kukai.description,
+                    "submission_close_at": kukai.submission_close_at,
+                    "selecting_close_at": kukai.selecting_close_at,
+                    "submission_min": kukai.submission_min,
+                    "submission_max": kukai.submission_max,
+                    "submission_mode": kukai.submission_mode,
+                    "selecting_mode": kukai.selecting_mode,
+                    "publish_mode": kukai.publish_mode,
+                    "result_mode": kukai.result_mode,
+                    "author_reveal": kukai.author_reveal,
+                    "author_reveal_zero": kukai.author_reveal_zero,
+                }
+
                 deadlines_changed = await kukai_service.edit_kukai(
                     session,
                     kukai,
@@ -573,12 +710,85 @@ class KukaiCog(commands.Cog):
                     await notification_service.cancel_kukai_jobs(session, kukai.id)
                     await notification_service.schedule_kukai_jobs(session, kukai)
 
+                after = {
+                    "title": kukai.title,
+                    "theme": kukai.theme,
+                    "description": kukai.description,
+                    "submission_close_at": kukai.submission_close_at,
+                    "selecting_close_at": kukai.selecting_close_at,
+                    "submission_min": kukai.submission_min,
+                    "submission_max": kukai.submission_max,
+                    "submission_mode": kukai.submission_mode,
+                    "selecting_mode": kukai.selecting_mode,
+                    "publish_mode": kukai.publish_mode,
+                    "result_mode": kukai.result_mode,
+                    "author_reveal": kukai.author_reveal,
+                    "author_reveal_zero": kukai.author_reveal_zero,
+                }
+                changed_lines: list[str] = []
+                if before["title"] != after["title"]:
+                    changed_lines.append(f"題名: {before['title']} → {after['title']}")
+                if before["theme"] != after["theme"]:
+                    changed_lines.append(f"題: {(before['theme'] or '未設定')} → {(after['theme'] or '未設定')}")
+                if before["description"] != after["description"]:
+                    changed_lines.append("説明: 更新")
+                if before["submission_min"] != after["submission_min"]:
+                    changed_lines.append(f"最小投句数: {before['submission_min']} → {after['submission_min']}")
+                if before["submission_max"] != after["submission_max"]:
+                    old_max = "∞" if before["submission_max"] is None else str(before["submission_max"])
+                    new_max = "∞" if after["submission_max"] is None else str(after["submission_max"])
+                    changed_lines.append(f"最大投句数: {old_max} → {new_max}")
+                if before["submission_mode"] != after["submission_mode"]:
+                    changed_lines.append(
+                        f"投句進行モード: {mode_labels.get(str(before['submission_mode']), str(before['submission_mode']))}"
+                        f" → {mode_labels.get(str(after['submission_mode']), str(after['submission_mode']))}"
+                    )
+                if before["selecting_mode"] != after["selecting_mode"]:
+                    changed_lines.append(
+                        f"選句進行モード: {mode_labels.get(str(before['selecting_mode']), str(before['selecting_mode']))}"
+                        f" → {mode_labels.get(str(after['selecting_mode']), str(after['selecting_mode']))}"
+                    )
+                if before["publish_mode"] != after["publish_mode"]:
+                    changed_lines.append(
+                        f"投句公開モード: {mode_labels.get(str(before['publish_mode']), str(before['publish_mode']))}"
+                        f" → {mode_labels.get(str(after['publish_mode']), str(after['publish_mode']))}"
+                    )
+                if before["result_mode"] != after["result_mode"]:
+                    changed_lines.append(
+                        f"結果公開モード: {mode_labels.get(str(before['result_mode']), str(before['result_mode']))}"
+                        f" → {mode_labels.get(str(after['result_mode']), str(after['result_mode']))}"
+                    )
+                if before["author_reveal"] != after["author_reveal"]:
+                    changed_lines.append(
+                        f"作者公開: {'公開' if before['author_reveal'] else '非公開'} → {'公開' if after['author_reveal'] else '非公開'}"
+                    )
+                if before["author_reveal_zero"] != after["author_reveal_zero"]:
+                    changed_lines.append(
+                        f"0点以下作者公開: {'公開' if before['author_reveal_zero'] else '非公開'}"
+                        f" → {'公開' if after['author_reveal_zero'] else '非公開'}"
+                    )
+                if before["submission_close_at"] != after["submission_close_at"]:
+                    changed_lines.append(
+                        f"投句締切: {format_jst(before['submission_close_at']) if before['submission_close_at'] else '未設定'}"
+                        f" → {format_jst(after['submission_close_at']) if after['submission_close_at'] else '未設定'}"
+                    )
+                if before["selecting_close_at"] != after["selecting_close_at"]:
+                    changed_lines.append(
+                        f"選句締切: {format_jst(before['selecting_close_at']) if before['selecting_close_at'] else '未設定'}"
+                        f" → {format_jst(after['selecting_close_at']) if after['selecting_close_at'] else '未設定'}"
+                    )
+
             extra = "\n締切変更に合わせて通知ジョブを再登録しました。" if deadlines_changed else ""
             await interaction.response.send_message(
                 embed=success_embed(f"句会「{kukai.title}」の設定を更新しました。{extra}"),
                 ephemeral=True,
             )
-            await self._announce_settings_updated(interaction.guild, kukai, deadlines_changed=deadlines_changed)
+            await self._announce_settings_updated(
+                interaction.guild,
+                kukai,
+                deadlines_changed=deadlines_changed,
+                changed_lines=changed_lines,
+            )
         except ServiceError as e:
             await interaction.response.send_message(embed=error_embed(str(e)), ephemeral=True)
 

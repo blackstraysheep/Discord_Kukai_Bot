@@ -389,7 +389,7 @@ async def _auto_publish_result_list(session, kukai) -> tuple[int | None, str | N
     from bot.services import result_service
     from bot.state_machine.states import KukaiState
     from bot.utils.discord_retry import send_with_retry
-    from bot.utils.result_publish import build_result_publish_embeds
+    from bot.cogs.result_cog import ResultSwitchView, _resolve_initial_format
 
     if KukaiState.from_value(kukai.state) != KukaiState.RESULTS:
         return None, "句会状態が結果公開中ではないため、結果投稿をスキップしました。"
@@ -424,15 +424,17 @@ async def _auto_publish_result_list(session, kukai) -> tuple[int | None, str | N
         )
         return len(results), "公開先テキストチャンネルが見つかりません。"
 
-    embeds = build_result_publish_embeds(kukai, results, overall_comments, guild)
     first_message_id: int | None = None
+    view = ResultSwitchView(
+        kukai,
+        results,
+        overall_comments,
+        guild,
+        initial_format=_resolve_initial_format(kukai, None),
+    )
     try:
-        for index, embed in enumerate(embeds):
-            sent = await send_with_retry(lambda e=embed: channel.send(embed=e))
-            if index == 0:
-                first_message_id = sent.id
-            if index < len(embeds) - 1:
-                await asyncio.sleep(0.35)
+        sent = await send_with_retry(lambda: channel.send(embed=view.current_embed(), view=view))
+        first_message_id = sent.id
     except Exception as error:
         logger.warning(
             "_auto_publish_result_list: failed to post result (kukai_id=%d): %s",
