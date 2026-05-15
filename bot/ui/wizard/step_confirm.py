@@ -206,6 +206,7 @@ class StepConfirmView(discord.ui.View):
                     submission_mode=state.submission_mode,
                     selecting_mode=state.selecting_mode,
                     submission_overflow=state.submission_overflow,
+                    points_enabled=state.select_points_enabled,
                     publish_mode="manual",
                     result_mode=state.result_mode,
                     author_reveal=state.author_reveal,

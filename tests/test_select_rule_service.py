@@ -41,6 +41,7 @@ async def test_add_or_update_template_label(db_session):
     assert len(specs) == 1
     assert specs[0]["point"] == 3
     assert specs[0]["comment_mode"] == "optional"
+    assert specs[0]["rank_priority"] == 1
 
 
 @pytest.mark.asyncio
@@ -82,6 +83,50 @@ async def test_build_kukai_specs_from_template_appends_author_comment(db_session
     assert "特選" in labels
     assert "並選" in labels
     assert "作者コメント" in labels
+
+
+@pytest.mark.asyncio
+async def test_template_rank_priority_is_preserved(db_session):
+    template = await select_rule_service.add_or_update_template_label(
+        db_session,
+        guild_id=1,
+        created_by=100,
+        template_name="rank指定",
+        label="並選",
+        point=1,
+        min_count=0,
+        max_count=3,
+        comment_mode="none",
+        rank_priority=1,
+    )
+    template = await select_rule_service.add_or_update_template_label(
+        db_session,
+        guild_id=1,
+        created_by=100,
+        template_name="rank指定",
+        label="特選",
+        point=2,
+        min_count=0,
+        max_count=1,
+        comment_mode="none",
+        rank_priority=2,
+    )
+
+    specs = select_rule_service.build_kukai_specs_from_template(template)
+    ranks = {row["label"]: row["rank_priority"] for row in specs}
+    assert ranks["並選"] == 1
+    assert ranks["特選"] == 2
+    assert ranks["作者コメント"] == 999
+
+
+def test_normalize_template_specs_rejects_duplicate_rank():
+    with pytest.raises(ValidationError):
+        select_rule_service.normalize_template_specs(
+            [
+                {"label": "特選", "point": 2, "rank_priority": 1},
+                {"label": "並選", "point": 1, "rank_priority": 1},
+            ]
+        )
 
 
 def test_normalize_kukai_specs_requires_non_author():

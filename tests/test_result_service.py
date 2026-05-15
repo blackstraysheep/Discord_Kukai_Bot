@@ -111,6 +111,61 @@ async def test_compute_results_tie_breaking(db_session):
 
 
 @pytest.mark.asyncio
+async def test_compute_results_uses_custom_rank_priority_for_ties(db_session):
+    kukai = await kukai_service.create_kukai(
+        db_session,
+        guild_id=1,
+        created_by=100,
+        channel_id=200,
+        title="rankテスト",
+        submission_close_at=_utc(7),
+        selecting_close_at=_utc(14),
+        entry_enabled=False,
+        select_label_specs=[
+            {"label": "低優先", "point": 1, "rank_priority": 2},
+            {"label": "高優先", "point": 1, "rank_priority": 1},
+        ],
+    )
+    labels = {label.label: label for label in kukai.select_labels}
+
+    while KukaiState(kukai.state) != KukaiState.SUBMISSION_OPEN:
+        await kukai_service.proceed(db_session, kukai)
+
+    await submission_service.submit(db_session, kukai, user_id=2, text="低優先の句")
+    await submission_service.submit(db_session, kukai, user_id=3, text="高優先の句")
+    await kukai_service.proceed(db_session, kukai)
+    await kukai_service.proceed(db_session, kukai)
+    await submission_service.publish(db_session, kukai)
+    await kukai_service.proceed(db_session, kukai)
+
+    from bot.repositories import submission_repo
+
+    pub = await submission_repo.list_published(db_session, kukai.id)
+    by_author = {ps.submission.user_id: ps.submission_id for ps in pub}
+    await select_service.cast_select(
+        db_session,
+        kukai,
+        selector_user_id=10,
+        submission_id=by_author[2],
+        select_label_id=labels["低優先"].id,
+    )
+    await select_service.cast_select(
+        db_session,
+        kukai,
+        selector_user_id=11,
+        submission_id=by_author[3],
+        select_label_id=labels["高優先"].id,
+    )
+    await kukai_service.proceed(db_session, kukai)
+    await kukai_service.proceed(db_session, kukai)
+    await kukai_service.proceed(db_session, kukai)
+
+    results = await result_service.compute_results(db_session, kukai)
+    assert [result.author_user_id for result in results] == [3, 2]
+    assert [result.rank for result in results] == [1, 2]
+
+
+@pytest.mark.asyncio
 async def test_compute_results_exact_tie_same_rank(db_session):
     """Exactly tied submissions get the same rank."""
     # user 2 and user 3 both get 特選(2pt) from different selectors

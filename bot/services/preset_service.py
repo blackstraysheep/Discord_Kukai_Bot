@@ -13,6 +13,7 @@ from bot.services import select_rule_service
 class PresetLabelView:
     label: str
     point: int
+    rank_priority: int
     min_count: int
     max_count: int | None
     comment_mode: str
@@ -33,6 +34,7 @@ def _to_view(template) -> PresetView:
         PresetLabelView(
             label=spec["label"],
             point=spec["point"],
+            rank_priority=spec.get("rank_priority", 0),
             min_count=spec.get("min_count", 0),
             max_count=spec.get("max_count"),
             comment_mode=spec.get("comment_mode", "none"),
@@ -199,6 +201,7 @@ async def replace_labels(
             {
                 "label": label,
                 "point": 0 if not points_enabled else point,
+                "rank_priority": row.get("rank_priority", row.get("rank")),
                 "min_count": int(row.get("min_count", 0)),
                 "max_count": row.get("max_count"),
                 "comment_mode": str(row.get("comment_mode", "optional")),

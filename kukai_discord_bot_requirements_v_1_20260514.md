@@ -661,6 +661,23 @@ Modal:
 - 削除
 - 一覧確認
 
+一括投句:
+
+```text
+/submit_bulk
+```
+
+入力:
+
+```text
+1行1句
+```
+
+補足:
+
+- 句会ID省略時は同一チャンネルの進行中句会から自動特定
+- 通常投句と同じ受付状態・参加承認・投句上限制約を適用
+
 ---
 
 ### 選句
@@ -683,6 +700,26 @@ Modal:
 - コメント入力
 - 総評入力
 - 一覧確認
+
+一括選句:
+
+```text
+/select_bulk
+```
+
+入力:
+
+```text
+番号=ラベル|コメント
+overall=総評
+番号=clear
+```
+
+補足:
+
+- 番号は公開済み投句番号
+- ラベルは句会内の選句種別名
+- 作者コメントは自句のみ可
 
 ---
 
@@ -756,6 +793,29 @@ author
 - 進行設定
 - ボイス設定
 
+一括作成:
+
+```text
+/kukai create_bulk
+```
+
+入力:
+
+```text
+title=春の句会
+channel=current
+entry_enabled=false
+submission_close_at=2026-05-20 23:59
+selecting_close_at=2026-05-22 23:59
+preset_id=1
+```
+
+補足:
+
+- `channel=current/new/<#channel_id>` を指定可能
+- `preset_id` で選句プリセットを適用
+- `label=名前,点数,rank,最小数,最大数,コメントモード` で句会専用ラベルを直接指定可能
+
 ---
 
 ### 編集
@@ -777,6 +837,43 @@ author
 - 選句ルール
 - 管理者
 - 通知
+
+### 選句プリセット
+
+```text
+/preset
+```
+
+機能:
+
+- 一覧
+- GUI編集
+- 作成
+- ラベル追加・編集・削除
+- 既定プリセット設定
+
+一括登録:
+
+```text
+/preset bulk
+```
+
+入力:
+
+```text
+name=標準
+points_enabled=true
+set_default=true
+label=特選,2,1,0,1,none
+label=並選,1,2,0,5,optional
+label=予選,0,3,0,∞,none
+```
+
+補足:
+
+- `rank` は小さいほど結果同点時の優先度が高い
+- `rank` 省略時は定義順で自動採番
+- `作者コメント` はプリセットには登録せず、句会作成時に最後尾として補完
 
 ---
 
@@ -1173,4 +1270,3 @@ SQLiteバックアップ:
 
 - DBスキーマ詳細
 - Docker構成詳細
-

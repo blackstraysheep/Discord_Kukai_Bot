@@ -122,6 +122,15 @@ def _normalize_common(
             "comment_mode": comment_mode,
             "template_id": template_id if template_id is not None else raw.get("template_id"),
         }
+        rank_raw = raw.get("rank_priority", raw.get("rank"))
+        if rank_raw not in (None, ""):
+            try:
+                rank_priority = int(rank_raw)
+            except (TypeError, ValueError):
+                raise ValidationError(f"「{label}」のrankは整数で指定してください。") from None
+            if rank_priority < 1:
+                raise ValidationError(f"「{label}」のrankは1以上にしてください。")
+            spec["rank_priority"] = rank_priority
         normalized.append(spec)
 
     non_author = [s for s in normalized if s["label"] != AUTHOR_COMMENT_LABEL]
@@ -151,6 +160,26 @@ def _normalize_common(
         author["max_count"] = None
         author["comment_mode"] = "required"
 
+    used_ranks = {
+        int(spec["rank_priority"])
+        for spec in non_author
+        if spec.get("rank_priority") not in (None, "")
+    }
+    if len(used_ranks) != len(
+        [spec for spec in non_author if spec.get("rank_priority") not in (None, "")]
+    ):
+        raise ValidationError("選句種別のrankが重複しています。")
+
+    next_rank = 1
+    for spec in non_author:
+        if spec.get("rank_priority") not in (None, ""):
+            continue
+        while next_rank in used_ranks:
+            next_rank += 1
+        spec["rank_priority"] = next_rank
+        used_ranks.add(next_rank)
+        next_rank += 1
+
     ordered = non_author + author_specs
     for i, spec in enumerate(ordered, start=1):
         if spec["label"] == AUTHOR_COMMENT_LABEL:
@@ -158,7 +187,6 @@ def _normalize_common(
             spec["rank_priority"] = 999
         else:
             spec["display_order"] = i
-            spec["rank_priority"] = i
     return ordered
 
 
@@ -188,6 +216,7 @@ def serialize_template_specs(
             {
                 "label": spec["label"],
                 "point": spec["point"],
+                "rank_priority": spec["rank_priority"],
                 "min_count": spec["min_count"],
                 "max_count": spec["max_count"],
                 "comment_mode": spec["comment_mode"],
@@ -269,6 +298,7 @@ async def add_or_update_template_label(
     min_count: int,
     max_count: int | None,
     comment_mode: str,
+    rank_priority: int | None = None,
     set_default: bool = False,
 ) -> SelectRuleTemplate:
     template_name = template_name.strip()
@@ -302,6 +332,8 @@ async def add_or_update_template_label(
     for spec in specs:
         if spec["label"] == label.strip():
             spec["point"] = point
+            if rank_priority is not None:
+                spec["rank_priority"] = rank_priority
             spec["min_count"] = min_count
             spec["max_count"] = max_count
             spec["comment_mode"] = comment_mode
@@ -312,6 +344,7 @@ async def add_or_update_template_label(
             {
                 "label": label.strip(),
                 "point": point,
+                "rank_priority": rank_priority,
                 "min_count": min_count,
                 "max_count": max_count,
                 "comment_mode": comment_mode,

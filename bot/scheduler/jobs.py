@@ -159,17 +159,28 @@ async def deadline_job(kukai_id: int, event_type: str) -> None:
                     logger.info(
                         "deadline_job: auto-advanced kukai %d to submission_closed", kukai_id
                     )
-                    await _auto_publish_submission_list(session, kukai)
-                    await kukai_service.proceed(session, kukai)
-                    await notification_service.schedule_kukai_jobs(session, kukai)
-                    logger.info(
-                        "deadline_job: auto-published and advanced kukai %d to SELECTING_OPEN",
-                        kukai_id,
-                    )
-                    await _notify_channel(
-                        _bot, kukai,
-                        "投句期間が終了したため、投句一覧を番号付きで公開して選句を開始しました。",
-                    )
+                    try:
+                        await _auto_publish_submission_list(session, kukai)
+                    except ServiceError as e:
+                        kukai.state = KukaiState.SUBMISSION_CLOSED
+                        await notification_service.schedule_kukai_jobs(session, kukai)
+                        logger.error("deadline_job publish skipped (kukai_id=%d): %s", kukai_id, e)
+                        await _notify_channel(
+                            _bot, kukai,
+                            "投句期間が終了しましたが、公開対象の投句がありません。",
+                        )
+                        return
+                    else:
+                        await kukai_service.proceed(session, kukai)
+                        await notification_service.schedule_kukai_jobs(session, kukai)
+                        logger.info(
+                            "deadline_job: auto-published and advanced kukai %d to SELECTING_OPEN",
+                            kukai_id,
+                        )
+                        await _notify_channel(
+                            _bot, kukai,
+                            "投句期間が終了したため、投句一覧を番号付きで公開して選句を開始しました。",
+                        )
                 else:
                     await _notify_admins(
                         _bot, kukai,

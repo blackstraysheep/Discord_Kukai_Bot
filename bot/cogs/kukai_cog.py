@@ -1,6 +1,7 @@
 """Kukai management commands: /kukai *"""
 
 import asyncio
+import re
 
 from typing import Literal
 
@@ -22,6 +23,18 @@ from bot.services.errors import ServiceError
 from bot.state_machine.states import KukaiState
 from bot.ui.common import ConfirmView
 from bot.ui.submission_view import RollbackView
+from bot.utils.bulk_parser import (
+    BulkParseError,
+    first_value,
+    parse_bool,
+    parse_datetime_field,
+    parse_fields,
+    parse_int,
+    parse_label_spec,
+    parse_optional_int,
+    reject_unknown_keys,
+    values_for,
+)
 from bot.utils.discord_retry import send_with_retry
 from bot.utils.datetime_utils import format_jst, parse_datetime
 from bot.utils.submission_publish import build_submission_publish_embeds
@@ -259,6 +272,255 @@ class KukaiCog(commands.Cog):
         state.selected_select_label = "特選"
         set_wizard(state)
         await goto_step(interaction, state, first_send=True)
+
+    @kukai.command(name="create_bulk", description="【管理者】行形式で新しい句会を一括作成します")
+    @app_commands.describe(config="title=... / submission_close_at=... / selecting_close_at=... / label=...")
+    async def kukai_create_bulk(self, interaction: discord.Interaction, config: str) -> None:
+        assert interaction.guild is not None
+        try:
+            fields = parse_fields(config)
+            reject_unknown_keys(
+                fields,
+                {
+                    "title",
+                    "theme",
+                    "description",
+                    "channel",
+                    "channel_name",
+                    "category_id",
+                    "entry_enabled",
+                    "entry_approval",
+                    "min_participants",
+                    "entry_close_at",
+                    "submission_close_at",
+                    "selecting_close_at",
+                    "submission_min",
+                    "submission_max",
+                    "submission_overflow",
+                    "submission_mode",
+                    "selecting_mode",
+                    "publish_mode",
+                    "result_mode",
+                    "author_reveal",
+                    "author_reveal_zero",
+                    "preset_id",
+                    "label",
+                },
+            )
+            title = first_value(fields, "title")
+            if not title:
+                raise BulkParseError("title は必須です。")
+            submission_close_raw = first_value(fields, "submission_close_at")
+            selecting_close_raw = first_value(fields, "selecting_close_at")
+            if not submission_close_raw or not selecting_close_raw:
+                raise BulkParseError("submission_close_at と selecting_close_at は必須です。")
+
+            entry_enabled = parse_bool(
+                first_value(fields, "entry_enabled", "true") or "true",
+                name="entry_enabled",
+            )
+            entry_close_at = None
+            entry_close_raw = first_value(fields, "entry_close_at")
+            if entry_enabled:
+                if not entry_close_raw:
+                    raise BulkParseError("entry_enabled=true の場合 entry_close_at は必須です。")
+                entry_close_at = parse_datetime_field(entry_close_raw, name="entry_close_at")
+
+            submission_close_at = parse_datetime_field(submission_close_raw, name="submission_close_at")
+            selecting_close_at = parse_datetime_field(selecting_close_raw, name="selecting_close_at")
+            submission_min = parse_int(
+                first_value(fields, "submission_min", "1") or "1",
+                name="submission_min",
+                min_value=1,
+            )
+            submission_max = parse_optional_int(
+                first_value(fields, "submission_max", "3") or "3",
+                name="submission_max",
+                min_value=1,
+            )
+            if submission_max is not None and submission_max < submission_min:
+                raise BulkParseError("submission_max は submission_min 以上にしてください。")
+            min_participants = parse_int(
+                first_value(fields, "min_participants", "0") or "0",
+                name="min_participants",
+                min_value=0,
+            )
+            category_id_raw = first_value(fields, "category_id")
+            category_id = (
+                parse_int(category_id_raw, name="category_id", min_value=1)
+                if category_id_raw
+                else None
+            )
+            preset_id_raw = first_value(fields, "preset_id")
+            preset_id = parse_int(preset_id_raw, name="preset_id", min_value=1) if preset_id_raw else None
+
+            label_specs = [
+                parse_label_spec(field.value, line_no=field.line_no)
+                for field in values_for(fields, "label")
+            ]
+            submission_mode = first_value(fields, "submission_mode", "manual") or "manual"
+            selecting_mode = first_value(fields, "selecting_mode", "manual") or "manual"
+            publish_mode = first_value(fields, "publish_mode", "manual") or "manual"
+            result_mode = first_value(fields, "result_mode", "manual") or "manual"
+            for name, value, allowed in (
+                ("submission_mode", submission_mode, {"manual", "semi_auto", "full_auto"}),
+                ("selecting_mode", selecting_mode, {"manual", "semi_auto", "full_auto"}),
+                ("publish_mode", publish_mode, {"manual", "auto"}),
+                ("result_mode", result_mode, {"manual", "auto"}),
+            ):
+                if value not in allowed:
+                    raise BulkParseError(f"{name} は {('/'.join(sorted(allowed)))} で指定してください。")
+        except BulkParseError as e:
+            await interaction.response.send_message(embed=error_embed(str(e)), ephemeral=True)
+            return
+
+        async with get_session() as session:
+            allowed = await permission_service.can_create_kukai(
+                session, interaction.guild.id, interaction.user  # type: ignore[arg-type]
+            )
+        if not allowed:
+            await interaction.response.send_message(
+                embed=error_embed("句会の作成権限がありません。"), ephemeral=True
+            )
+            return
+
+        await interaction.response.defer(ephemeral=True)
+
+        channel_setting = (first_value(fields, "channel", "current") or "current").strip().lower()
+        channel: discord.TextChannel | None = None
+        created_new_channel = False
+        name_collision_warning: str | None = None
+        try:
+            if channel_setting == "current":
+                if not isinstance(interaction.channel, discord.TextChannel):
+                    raise BulkParseError("channel=current はテキストチャンネルで実行してください。")
+                channel = interaction.channel
+            elif channel_setting == "new":
+                ch_name = _sanitize_channel_name(first_value(fields, "channel_name") or title)
+                existing_same_name = [ch for ch in interaction.guild.text_channels if ch.name == ch_name]
+                if existing_same_name:
+                    name_collision_warning = f"同名チャンネル「{ch_name}」が既に存在します。"
+                category = None
+                if category_id:
+                    candidate = interaction.guild.get_channel(category_id)
+                    if isinstance(candidate, discord.CategoryChannel):
+                        category = candidate
+                channel = await interaction.guild.create_text_channel(ch_name, category=category)
+                created_new_channel = True
+            else:
+                channel_id_match = re.fullmatch(r"<?#?(\d+)>?", channel_setting)
+                if not channel_id_match:
+                    raise BulkParseError("channel は current/new/<#チャンネルID> のいずれかで指定してください。")
+                candidate = interaction.guild.get_channel(int(channel_id_match.group(1)))
+                if not isinstance(candidate, discord.TextChannel):
+                    raise BulkParseError("指定された channel が見つからないか、テキストチャンネルではありません。")
+                channel = candidate
+        except discord.Forbidden:
+            await interaction.edit_original_response(
+                embed=error_embed("チャンネルを作成する権限がありません。Botにチャンネル管理権限を付与してください。")
+            )
+            return
+        except BulkParseError as e:
+            await interaction.edit_original_response(embed=error_embed(str(e)))
+            return
+
+        async def _safe_delete_channel() -> None:
+            if created_new_channel and channel is not None:
+                try:
+                    await channel.delete()
+                except Exception:
+                    pass
+
+        try:
+            select_label_specs = label_specs
+            points_enabled = True
+            async with get_session() as session:
+                if not select_label_specs and preset_id is not None:
+                    template = await select_rule_service.get_template(
+                        session, interaction.guild.id, preset_id
+                    )
+                    points_enabled, _ = select_rule_service.deserialize_template_payload(
+                        template.definition_json
+                    )
+                    select_label_specs = select_rule_service.build_kukai_specs_from_template(template)
+                elif not select_label_specs:
+                    select_label_specs = select_rule_service.default_kukai_specs()
+
+                kukai = await kukai_service.create_kukai(
+                    session,
+                    guild_id=interaction.guild.id,
+                    created_by=interaction.user.id,
+                    channel_id=channel.id,
+                    title=title,
+                    theme=first_value(fields, "theme") or None,
+                    description=first_value(fields, "description") or None,
+                    entry_close_at=entry_close_at,
+                    submission_close_at=submission_close_at,
+                    selecting_close_at=selecting_close_at,
+                    entry_enabled=entry_enabled,
+                    entry_approval=parse_bool(
+                        first_value(fields, "entry_approval", "false") or "false",
+                        name="entry_approval",
+                    ),
+                    min_participants=min_participants,
+                    submission_min=submission_min,
+                    submission_max=submission_max,
+                    submission_mode=submission_mode,
+                    selecting_mode=selecting_mode,
+                    submission_overflow=parse_bool(
+                        first_value(fields, "submission_overflow", "false") or "false",
+                        name="submission_overflow",
+                    ),
+                    points_enabled=points_enabled,
+                    publish_mode=publish_mode,
+                    result_mode=result_mode,
+                    author_reveal=parse_bool(
+                        first_value(fields, "author_reveal", "true") or "true",
+                        name="author_reveal",
+                    ),
+                    author_reveal_zero=parse_bool(
+                        first_value(fields, "author_reveal_zero", "true") or "true",
+                        name="author_reveal_zero",
+                    ),
+                    select_label_specs=select_label_specs,
+                )
+                kukai_id = kukai.id
+                kukai_title = kukai.title
+                await notification_service.schedule_kukai_jobs(session, kukai)
+        except (BulkParseError, ServiceError) as e:
+            await _safe_delete_channel()
+            await interaction.edit_original_response(embed=error_embed(str(e)))
+            return
+        except Exception:
+            await _safe_delete_channel()
+            await interaction.edit_original_response(embed=error_embed("句会作成中に内部エラーが発生しました。"))
+            raise
+
+        info = discord.Embed(
+            title=f"📋 {kukai_title}",
+            description=first_value(fields, "description") or "",
+            color=COLOR_INFO,
+        )
+        if first_value(fields, "theme"):
+            info.add_field(name="題", value=first_value(fields, "theme"), inline=True)
+        if entry_enabled and entry_close_at:
+            info.add_field(name="エントリー締切", value=format_jst(entry_close_at), inline=False)
+        info.add_field(name="投句締切", value=format_jst(submission_close_at), inline=False)
+        info.add_field(name="選句締切", value=format_jst(selecting_close_at), inline=False)
+        info.set_footer(text=f"句会ID: {kukai_id}")
+        try:
+            await channel.send(embed=info)
+        except discord.Forbidden:
+            name_collision_warning = (name_collision_warning or "") + "\n開催チャンネルへの投稿権限がありません。"
+
+        message = (
+            f"句会「**{kukai_title}**」を作成しました。\n"
+            f"チャンネル: {channel.mention}\n"
+            f"句会ID: `{kukai_id}`"
+        )
+        if name_collision_warning:
+            message += f"\n\n⚠️ {name_collision_warning.strip()}"
+        await interaction.edit_original_response(embed=success_embed(message))
 
     @kukai.command(name="proceed", description="【管理者】句会を次の状態へ進めます")
     @app_commands.describe(kukai_id="句会ID")
@@ -800,6 +1062,12 @@ class KukaiCog(commands.Cog):
             )
         except ServiceError as e:
             await interaction.response.send_message(embed=error_embed(str(e)), ephemeral=True)
+
+
+def _sanitize_channel_name(title: str) -> str:
+    name = title.replace(" ", "-").replace("　", "-")
+    name = re.sub(r'[<>"\'\\|]', "", name)
+    return name[:100].strip("-") or "kukai"
 
 
 def _build_info_embed(kukai) -> discord.Embed:

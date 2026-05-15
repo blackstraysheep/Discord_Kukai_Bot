@@ -8,7 +8,7 @@
 
 Discord完結型句会管理Bot。Python 3.13 / discord.py 2.x / SQLAlchemy 2.x async / aiosqlite / APScheduler 3.x。
 
-**現在の状態**: Phase 1〜10(品質強化) ほぼ完了。テスト 61件すべてパス。
+**現在の状態**: Phase 1〜10(品質強化) 完了。一括入力コマンド対応を追加済み。テスト 90件すべてパス。
 
 ---
 
@@ -55,7 +55,7 @@ Discord完結型句会管理Bot。Python 3.13 / discord.py 2.x / SQLAlchemy 2.x 
 - `bot/services/select_service.py` — cast_select/remove_select/set_overall_comment/list_selects_for_selector
   - cast_select: 自句禁止・max_count制限・comment_mode対応・既存票の上書き（upsert）
 - `bot/ui/select_view.py` — SelectView（1句ずつ表示、ラベルSelect、コメントModal、前後ナビ）
-- `bot/cogs/select_cog.py` — `/select kukai_id`
+- `bot/cogs/select_cog.py` — `/select kukai_id`, `/select_bulk selections [kukai_id]`
 - `bot/cogs/check_cog.py` — `/check kukai_id`（エントリー/投句/選句の状況一覧）
 - **テスト**: `test_select_service.py`（11件）
 
@@ -63,6 +63,7 @@ Discord完結型句会管理Bot。Python 3.13 / discord.py 2.x / SQLAlchemy 2.x 
 - `bot/services/result_service.py` — compute_results()
   - SubmissionResult / LabelSelects データクラス
   - スコア降順ソート、タイブレーク（rank_priority順のラベル数比較）、同点同順位
+- 選句プリセットの `rank_priority` を結果同点判定へ反映
 - `bot/cogs/result_cog.py` — `/result kukai_id [format:score/number/author]`
   - RESULTS状態で公開（非ephemeral）、それ以前は管理者のみプレビュー（ephemeral）
   - 6000文字上限によるページ分割
@@ -110,23 +111,49 @@ Discord完結型句会管理Bot。Python 3.13 / discord.py 2.x / SQLAlchemy 2.x 
 - `bot/cogs/kukai_cog.py` 実装
   - `/kukai edit` を実装（権限チェック、JST日時パース、更新、締切変更時のジョブ再登録）
 
+### 一括入力コマンド対応
+- `bot/utils/bulk_parser.py` 追加
+  - 行形式 `key=value` パーサ
+  - bool / int / 無制限値 / JST日時 / 選句ラベル定義の正規化
+  - エラー時は原因行を明示
+- `bot/cogs/preset_cog.py`
+  - `/preset bulk config` を追加
+  - `label=名前,点数,rank,最小数,最大数,コメントモード` に対応
+  - `rank` 省略時は定義順で自動採番
+- `bot/services/select_rule_service.py`
+  - プリセットJSONに `rank_priority` を保存
+  - 既存JSONの `rank_priority` 未設定データは読み込み時に補完
+  - `作者コメント` は句会展開時に `rank_priority=999` 固定
+- `bot/cogs/kukai_cog.py`
+  - `/kukai create_bulk config` を追加
+  - `channel=current/new/<#channel_id>`、`preset_id`、`label=` に対応
+- `bot/cogs/select_cog.py`
+  - `/select_bulk selections [kukai_id]` を追加
+  - `番号=ラベル|コメント`, `overall=...`, `番号=clear` に対応
+- `bot/scheduler/jobs.py`
+  - 自動投句締切時に公開対象0件で `waiting_publish` に残らないよう補正
+
 ---
 
 ## テスト状況
 
 ```
-tests/test_kukai_service.py       8件  ✅
+tests/test_bulk_parser.py          5件  ✅
 tests/test_entry_service.py      12件  ✅
-tests/test_submission_service.py 15件  ✅
-tests/test_select_service.py       11件  ✅
-tests/test_result_service.py      6件  ✅
-tests/test_phase9_services.py     4件  ✅
+tests/test_kukai_service.py       9件  ✅
 tests/test_notification_phase10.py 5件 ✅
+tests/test_phase9_services.py     5件  ✅
+tests/test_preset_service.py      6件  ✅
+tests/test_result_cog.py          5件  ✅
+tests/test_result_service.py      7件  ✅
+tests/test_select_rule_service.py 5件  ✅
+tests/test_select_service.py      12件  ✅
+tests/test_submission_service.py 19件  ✅
                               -------
-合計                            61件  全パス
+合計                            90件  全パス
 ```
 
-実行: `py -m pytest tests/ -v`
+実行: `py -m pytest`
 
 ---
 
@@ -176,8 +203,9 @@ kukai_bot/
 │   ├── cogs/
 │   │   ├── kukai_cog.py      # /kukai *
 │   │   ├── entry_cog.py      # /entry *
-│   │   ├── submission_cog.py # /submit
-│   │   ├── select_cog.py       # /select
+│   │   ├── preset_cog.py     # /preset *, /preset bulk
+│   │   ├── submission_cog.py # /submit, /submit_bulk
+│   │   ├── select_cog.py     # /select, /select_bulk
 │   │   ├── check_cog.py      # /check
 │   │   ├── result_cog.py     # /result
 │   │   └── admin_cog.py      # /kukai_admin *, /guild settings
@@ -199,17 +227,22 @@ kukai_bot/
 │   │       ├── step_notify.py     # スタブ
 │   │       └── step_voice.py      # スタブ
 │   └── utils/
+│       ├── bulk_parser.py
 │       ├── text.py
 │       ├── datetime_utils.py
 │       ├── discord_retry.py
 │       └── embed_builder.py
 └── tests/
     ├── conftest.py
+    ├── test_bulk_parser.py
     ├── test_kukai_service.py
     ├── test_entry_service.py
     ├── test_submission_service.py
     ├── test_select_service.py
     ├── test_result_service.py
+    ├── test_preset_service.py
+    ├── test_select_rule_service.py
+    ├── test_result_cog.py
     ├── test_phase9_services.py
     └── test_notification_phase10.py
 ```
@@ -306,12 +339,15 @@ py -m pytest tests/ -v
 
 # 5. Discord動作確認順序
 /kukai create          → ウィザード（6ステップ）で句会作成
+/kukai create_bulk ... → 行形式で句会を一括作成
 /kukai list            → 作成した句会を確認
 /kukai proceed ...     → 状態を進める
 /entry apply ...       → エントリー（entry_enabled=trueの場合）
 /submit ...            → 投句
+/submit_bulk ...       → 複数行を一括投句
 /kukai publish ...     → 投句公開（publish_mode=manualの場合）
 /select ...            → 選句
+/select_bulk ...       → 番号=ラベル|コメント 形式で一括選句
 /kukai proceed ...     → 選句締切→結果へ
 /result ...            → 結果表示
 ```

@@ -15,6 +15,15 @@ from bot.database import get_session
 from bot.services import permission_service, preset_service
 from bot.services.errors import ServiceError
 from bot.ui.preset_wizard import open_preset_wizard
+from bot.utils.bulk_parser import (
+    BulkParseError,
+    first_value,
+    parse_bool,
+    parse_fields,
+    parse_label_spec,
+    reject_unknown_keys,
+    values_for,
+)
 from bot.utils.embed_builder import COLOR_INFO, error_embed, success_embed
 
 
@@ -59,7 +68,7 @@ class PresetCog(commands.Cog):
 
         embed = discord.Embed(title="選句プリセット一覧", color=COLOR_INFO)
         for t in templates[:10]:
-            label_strs = [f"{s.label} ({s.point:+d}pt)" for s in t.labels[:5]]
+            label_strs = [f"{s.label} ({s.point:+d}pt/rank{s.rank_priority})" for s in t.labels[:5]]
             default_mark = "（既定）" if t.is_default else ""
             pts_str = "点数あり" if t.points_enabled else "点数なし"
             embed.add_field(
@@ -76,6 +85,68 @@ class PresetCog(commands.Cog):
         if not await _check_admin(interaction):
             return
         await open_preset_wizard(interaction)
+
+    @preset.command(name="bulk", description="【管理者】行形式で選句プリセットを一括登録・更新します")
+    @app_commands.describe(config="name=... / label=名前,点数,rank,最小数,最大数,コメントモード")
+    async def preset_bulk(self, interaction: discord.Interaction, config: str) -> None:
+        if not await _check_admin(interaction):
+            return
+        assert interaction.guild is not None
+        try:
+            fields = parse_fields(config)
+            reject_unknown_keys(fields, {"name", "points_enabled", "set_default", "label"})
+            name = first_value(fields, "name")
+            if not name:
+                raise BulkParseError("name は必須です。")
+            points_enabled = parse_bool(
+                first_value(fields, "points_enabled", "true") or "true",
+                name="points_enabled",
+            )
+            set_default = parse_bool(
+                first_value(fields, "set_default", "false") or "false",
+                name="set_default",
+            )
+            labels = [
+                parse_label_spec(field.value, line_no=field.line_no)
+                for field in values_for(fields, "label")
+            ]
+        except BulkParseError as e:
+            await interaction.response.send_message(embed=error_embed(str(e)), ephemeral=True)
+            return
+
+        try:
+            async with get_session() as session:
+                preset = await preset_service.create_preset(
+                    session,
+                    guild_id=interaction.guild.id,
+                    created_by=interaction.user.id,
+                    name=name,
+                    points_enabled=points_enabled,
+                    set_default=set_default,
+                )
+                if labels:
+                    preset = await preset_service.replace_labels(
+                        session,
+                        guild_id=interaction.guild.id,
+                        preset_id=preset.id,
+                        labels=labels,
+                    )
+        except ServiceError as e:
+            await interaction.response.send_message(embed=error_embed(str(e)), ephemeral=True)
+            return
+
+        label_lines = [
+            f"{row.label} ({row.point:+d}pt / rank {row.rank_priority})"
+            for row in preset.labels[:10]
+        ]
+        await interaction.response.send_message(
+            embed=success_embed(
+                f"プリセット「**{preset.name}**」を一括登録しました。\n"
+                f"ID: `{preset.id}`  ラベル数: {len(preset.labels)}\n"
+                + ("\n".join(label_lines) if label_lines else "ラベル未設定")
+            ),
+            ephemeral=True,
+        )
 
     @preset.command(name="add", description="【管理者】新しいプリセットを追加します")
     @app_commands.describe(
@@ -241,7 +312,7 @@ class PresetCog(commands.Cog):
             color=COLOR_INFO,
         )
         if template.labels:
-            lines = [f"**{s.label}** {s.point:+d}pt" for s in template.labels]
+            lines = [f"**{s.label}** {s.point:+d}pt / rank {s.rank_priority}" for s in template.labels]
             embed.add_field(name="ラベル", value="\n".join(lines), inline=False)
         else:
             embed.description = (embed.description or "") + "\n（ラベル未設定）"

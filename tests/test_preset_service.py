@@ -87,6 +87,7 @@ async def test_replace_labels_with_optional_fields(db_session):
     first = updated.labels[0]
     assert first.label == "特選"
     assert first.point == 2
+    assert first.rank_priority == 1
     assert first.min_count == 1
     assert first.max_count == 2
     assert first.comment_mode == "required"
@@ -134,3 +135,27 @@ async def test_replace_labels_default_comment_mode_optional(db_session):
     )
     assert len(updated.labels) == 1
     assert updated.labels[0].comment_mode == "optional"
+
+
+@pytest.mark.asyncio
+async def test_replace_labels_preserves_rank_priority(db_session):
+    preset = await preset_service.create_preset(
+        db_session,
+        guild_id=1,
+        created_by=100,
+        name="rank設定",
+        points_enabled=True,
+        set_default=False,
+    )
+    updated = await preset_service.replace_labels(
+        db_session,
+        guild_id=1,
+        preset_id=preset.id,
+        labels=[
+            {"label": "並選", "point": 1, "rank_priority": 1},
+            {"label": "特選", "point": 2, "rank_priority": 2},
+        ],
+    )
+
+    ranks = {label.label: label.rank_priority for label in updated.labels}
+    assert ranks == {"並選": 1, "特選": 2}

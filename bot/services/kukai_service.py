@@ -57,6 +57,7 @@ async def create_kukai(
     submission_mode: str = "manual",
     selecting_mode: str = "manual",
     submission_overflow: bool = False,
+    points_enabled: bool = True,
     publish_mode: str = "manual",
     result_mode: str = "manual",
     author_reveal: bool = True,
@@ -91,6 +92,7 @@ async def create_kukai(
         submission_overflow=submission_overflow,
         publish_mode=publish_mode,
         result_mode=result_mode,
+        points_enabled=points_enabled,
         author_reveal=author_reveal,
         author_reveal_zero=author_reveal_zero,
     )
