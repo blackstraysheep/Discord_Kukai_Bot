@@ -52,6 +52,15 @@ class WizardState:
     author_reveal: bool = True
     author_reveal_zero: bool = True
 
+    # Step 7: Voice session
+    voice_enabled: bool = False
+    voice_channel_id: Optional[int] = None
+    voice_start_at: Optional[datetime] = None
+    voice_end_at: Optional[datetime] = None
+
+    # Step 8: Notifications
+    notification_specs: list[dict[str, Any]] = field(default_factory=list)
+
     # Step 1 extras
     category_id: Optional[int] = None
     channel_name: str = ""
@@ -67,6 +76,8 @@ class WizardState:
         if self.entry_enabled and self.entry_close_at is None:
             return False
         if self.use_existing_channel and self.existing_channel_id is None:
+            return False
+        if self.voice_enabled and not (self.voice_channel_id and self.voice_start_at):
             return False
         return True
 

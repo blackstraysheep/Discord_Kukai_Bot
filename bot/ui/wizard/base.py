@@ -6,7 +6,7 @@ import discord
 
 from bot.ui.wizard.wizard_state import WizardState, clear_wizard
 
-STEP_COUNT = 7
+STEP_COUNT = 9
 STEP_NAMES = {
     1: "基本情報",
     2: "エントリー設定",
@@ -14,7 +14,9 @@ STEP_NAMES = {
     4: "投句設定",
     5: "選句設定",
     6: "公開・結果設定",
-    7: "確認",
+    7: "ボイス句会設定",
+    8: "通知設定",
+    9: "確認",
 }
 
 
@@ -51,6 +53,10 @@ def _make_step(state: WizardState) -> tuple[discord.Embed, discord.ui.View]:
     elif state.step == 6:
         from bot.ui.wizard.step_publish import build
     elif state.step == 7:
+        from bot.ui.wizard.step_voice import build
+    elif state.step == 8:
+        from bot.ui.wizard.step_notify import build
+    elif state.step == 9:
         from bot.ui.wizard.step_confirm import build
     else:
         raise ValueError(f"Unknown wizard step: {state.step}")

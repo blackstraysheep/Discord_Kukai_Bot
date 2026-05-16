@@ -8,11 +8,13 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.models.notification import NotificationSchedule
+from bot.models.voice_session import VoiceSession
 from bot.scheduler.setup import get_scheduler, has_scheduler
+from bot.services.errors import ValidationError
 from bot.state_machine.states import KukaiState
 
 logger = logging.getLogger(__name__)
@@ -27,6 +29,7 @@ _EVENT_ORDER = {
     "entry_close": 1,
     "submission_close": 2,
     "selecting_close": 3,
+    "voice_start": 4,
 }
 
 
@@ -54,7 +57,35 @@ def _get_deadline_dt(kukai, event_type: str) -> datetime | None:
         return kukai.selecting_close_at
     if event_type == "entry_close":
         return getattr(kukai, "entry_close_at", None)
+    if event_type == "voice_start":
+        voice_session = kukai.__dict__.get("voice_session")
+        if voice_session is not None:
+            return voice_session.start_at
     return None
+
+
+async def replace_notification_schedules(
+    session: AsyncSession,
+    kukai,
+    schedules: list[dict[str, object]],
+) -> None:
+    """Replace all reminder notification schedules for a kukai."""
+    await session.execute(delete(NotificationSchedule).where(NotificationSchedule.kukai_id == kukai.id))
+    for row in schedules:
+        event_type = str(row["event_type"])
+        if _get_deadline_dt(kukai, event_type) is None:
+            raise ValidationError(f"{event_type} の通知対象日時が未設定です。")
+        session.add(
+            NotificationSchedule(
+                kukai_id=kukai.id,
+                event_type=event_type,
+                offset_secs=int(row["offset_secs"]),
+                target=str(row.get("target", "all")),
+                channel_id=row.get("channel_id"),  # type: ignore[arg-type]
+                mention=bool(row.get("mention", False)),
+            )
+        )
+    await session.flush()
 
 
 async def _ensure_default_schedules(session: AsyncSession, kukai) -> None:
@@ -85,6 +116,12 @@ async def schedule_kukai_jobs(session: AsyncSession, kukai) -> None:
 
     scheduler = get_scheduler()
     now = datetime.now(timezone.utc).replace(tzinfo=None)
+
+    if kukai.__dict__.get("voice_session") is None:
+        voice_result = await session.execute(
+            select(VoiceSession).where(VoiceSession.kukai_id == kukai.id)
+        )
+        kukai.__dict__["voice_session"] = voice_result.scalar_one_or_none()
 
     await _ensure_default_schedules(session, kukai)
     await session.flush()

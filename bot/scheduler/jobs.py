@@ -64,12 +64,23 @@ async def notification_job(schedule_id: int) -> None:
             "submission_close": "投句締切",
             "selecting_close": "選句締切",
             "entry_close": "エントリー締切",
+            "voice_start": "ボイス句会開始",
         }
         event_ja = EVENT_JA.get(ns.event_type, ns.event_type)
+        voice_session = None
+        if ns.event_type == "voice_start":
+            from bot.models.voice_session import VoiceSession
+
+            voice_session = (
+                await session.execute(
+                    select(VoiceSession).where(VoiceSession.kukai_id == kukai.id)
+                )
+            ).scalar_one_or_none()
         deadline_map = {
             "submission_close": kukai.submission_close_at,
             "selecting_close": kukai.selecting_close_at,
             "entry_close": kukai.entry_close_at if hasattr(kukai, "entry_close_at") else None,
+            "voice_start": voice_session.start_at if voice_session else None,
         }
         deadline_dt = deadline_map.get(ns.event_type)
         hours_left = round(ns.offset_secs / 3600)
@@ -79,27 +90,47 @@ async def notification_job(schedule_id: int) -> None:
             f"⏰ 「**{kukai.title}**」の **{event_ja}** まで約 **{hours_left}時間** です。\n"
             f"締切: {time_str}"
         )
+        if voice_session is not None:
+            embed_desc += f"\n場所: <#{voice_session.vc_channel_id}>"
 
         import discord
         embed = discord.Embed(description=embed_desc, color=COLOR_INFO)
         embed.set_footer(text=f"句会 ID: {kukai.id}")
 
-        # Determine channel
-        channel_id = ns.channel_id if ns.channel_id else kukai.channel_id
+        target_user_ids = await _notification_target_user_ids(session, kukai, ns.event_type, ns.target)
+        mention_text = " ".join(f"<@{user_id}>" for user_id in target_user_ids) if ns.mention else ""
         sent_count = 0
         error_msg = None
 
-        if channel_id and channel_id > 0:
+        if ns.channel_id == -1:
             guild = _bot.get_guild(kukai.guild_id)
             if guild:
-                channel = guild.get_channel(channel_id)
-                if channel and hasattr(channel, "send"):
+                for user_id in target_user_ids:
+                    member = guild.get_member(user_id)
+                    if not member:
+                        continue
                     try:
-                        await send_with_retry(lambda: channel.send(embed=embed))
-                        sent_count = 1
+                        await send_with_retry(lambda m=member: m.send(embed=embed))
+                        sent_count += 1
                     except Exception as e:
                         error_msg = str(e)
-                        logger.error("notification_job send failed: %s", e)
+                        logger.error("notification_job DM failed: %s", e)
+        else:
+            channel_id = ns.channel_id if ns.channel_id else kukai.channel_id
+            if channel_id and channel_id > 0:
+                guild = _bot.get_guild(kukai.guild_id)
+                if guild:
+                    channel = guild.get_channel(channel_id)
+                    if channel and hasattr(channel, "send"):
+                        try:
+                            if mention_text:
+                                await send_with_retry(lambda: channel.send(content=mention_text, embed=embed))
+                            else:
+                                await send_with_retry(lambda: channel.send(embed=embed))
+                            sent_count = max(1, len(target_user_ids) if ns.mention else 1)
+                        except Exception as e:
+                            error_msg = str(e)
+                            logger.error("notification_job send failed: %s", e)
 
         ns.fired = True
         now = datetime.now(timezone.utc).replace(tzinfo=None)
@@ -392,6 +423,45 @@ async def _auto_publish_submission_list(session, kukai) -> None:
 
     if first_message_id is not None:
         kukai.submission_message_id = first_message_id
+
+
+async def _notification_target_user_ids(session, kukai, event_type: str, target: str) -> list[int]:
+    from sqlalchemy import select
+    from bot.models.entry import Entry
+    from bot.models.kukai import KukaiAdmin
+    from bot.repositories import select_repo, submission_repo
+
+    if target == "admin":
+        result = await session.execute(select(KukaiAdmin).where(KukaiAdmin.kukai_id == kukai.id))
+        ids = [kukai.created_by] + [row.user_id for row in result.scalars().all()]
+        return list(dict.fromkeys(ids))
+
+    if target == "incomplete":
+        if not kukai.entry_enabled:
+            return []
+        result = await session.execute(
+            select(Entry).where(Entry.kukai_id == kukai.id, Entry.status == "approved")
+        )
+        entries = list(result.scalars().all())
+        incomplete: list[int] = []
+        if event_type in {"submission_close", "entry_close"}:
+            for entry in entries:
+                count = await submission_repo.count_user_submissions(kukai_id=kukai.id, session=session, user_id=entry.user_id)
+                if count < kukai.submission_min:
+                    incomplete.append(entry.user_id)
+        elif event_type == "selecting_close":
+            for entry in entries:
+                selects = await select_repo.get_selects_by_selector(session, kukai.id, entry.user_id)
+                if not selects:
+                    incomplete.append(entry.user_id)
+        return incomplete
+
+    if kukai.entry_enabled:
+        result = await session.execute(
+            select(Entry).where(Entry.kukai_id == kukai.id, Entry.status == "approved")
+        )
+        return [entry.user_id for entry in result.scalars().all()]
+    return [kukai.created_by]
 
 
 async def _auto_publish_result_list(session, kukai) -> tuple[int | None, str | None]:

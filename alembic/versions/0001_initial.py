@@ -206,6 +206,7 @@ def upgrade() -> None:
         sa.Column("offset_secs", sa.Integer(), nullable=False),
         sa.Column("target", sa.String(20), nullable=False, server_default="all"),
         sa.Column("channel_id", sa.BigInteger(), nullable=True),
+        sa.Column("mention", sa.Boolean(), nullable=False, server_default="0"),
         sa.Column("fired", sa.Boolean(), nullable=False, server_default="0"),
         sa.Column("job_id", sa.String(100), nullable=True),
         sa.Column("created_at", sa.DateTime(), nullable=False),

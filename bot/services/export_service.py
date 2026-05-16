@@ -18,6 +18,7 @@ from bot.models.notification import NotificationLog, NotificationSchedule
 from bot.models.submission import PublishedSubmission, Submission
 from bot.models.select import OverallSelectComment, Select, SelectComment
 from bot.models.select_rule import SelectLabel
+from bot.models.voice_session import VoiceSession
 from bot.services import result_service
 from bot.services.errors import InvalidStateError, NotFoundError, ValidationError
 
@@ -72,6 +73,7 @@ async def export_payload(
             selectinload(Kukai.selects).selectinload(Select.comment),
             selectinload(Kukai.overall_comments),
             selectinload(Kukai.notification_schedules).selectinload(NotificationSchedule.logs),
+            selectinload(Kukai.voice_session),
         )
     )
     if kukai_id is not None:
@@ -240,6 +242,7 @@ async def export_payload(
                     "offset_secs": row.offset_secs,
                     "target": row.target,
                     "channel_id": row.channel_id,
+                    "mention": row.mention,
                     "fired": row.fired,
                     "job_id": row.job_id,
                     "created_at": _dt_to_str(row.created_at),
@@ -258,6 +261,19 @@ async def export_payload(
                 for row in sorted(kukai.notification_schedules, key=lambda x: x.id)
                 for log in sorted(row.logs, key=lambda x: x.id)
             ],
+            "voice_session": (
+                {
+                    "id": kukai.voice_session.id,
+                    "kukai_id": kukai.voice_session.kukai_id,
+                    "vc_channel_id": kukai.voice_session.vc_channel_id,
+                    "start_at": _dt_to_str(kukai.voice_session.start_at),
+                    "end_at": _dt_to_str(kukai.voice_session.end_at),
+                    "created_at": _dt_to_str(kukai.voice_session.created_at),
+                    "updated_at": _dt_to_str(kukai.voice_session.updated_at),
+                }
+                if kukai.voice_session is not None
+                else None
+            ),
             "results": results_data,
         }
         bundles.append(bundle)
@@ -299,6 +315,10 @@ def payload_to_csv(payload: dict[str, Any]) -> str:
         ):
             for row in bundle.get(section, []):
                 writer.writerow([kukai_id, section, json.dumps(row, ensure_ascii=False)])
+        if bundle.get("voice_session") is not None:
+            writer.writerow(
+                [kukai_id, "voice_session", json.dumps(bundle["voice_session"], ensure_ascii=False)]
+            )
 
     return output.getvalue()
 
@@ -502,6 +522,17 @@ async def import_payload(
                 )
             )
 
+        voice_row = bundle.get("voice_session")
+        if isinstance(voice_row, dict):
+            session.add(
+                VoiceSession(
+                    kukai_id=kukai.id,
+                    vc_channel_id=int(voice_row["vc_channel_id"]),
+                    start_at=_str_to_dt(voice_row.get("start_at")),
+                    end_at=_str_to_dt(voice_row.get("end_at")),
+                )
+            )
+
         for row in _require_list(bundle.get("notification_schedules"), "notification_schedules"):
             schedule = NotificationSchedule(
                 kukai_id=kukai.id,
@@ -509,6 +540,7 @@ async def import_payload(
                 offset_secs=int(row.get("offset_secs", 86400)),
                 target=row.get("target") or "all",
                 channel_id=row.get("channel_id"),
+                mention=bool(row.get("mention", False)),
                 fired=bool(row.get("fired", False)),
                 job_id=None,
             )

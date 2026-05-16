@@ -1,7 +1,10 @@
 {
   "permissions": {
     "allow": [
-      "Bash(python3 -m py_compile bot/ui/wizard/wizard_state.py bot/ui/wizard/step_basic.py bot/ui/wizard/step_confirm.py bot/ui/wizard/step_select_rule.py bot/ui/wizard/step_schedule.py bot/services/select_rule_service.py bot/cogs/preset_cog.py bot/cogs/kukai_cog.py bot/main.py)"
+      "Bash(python3 -m py_compile bot/ui/wizard/wizard_state.py bot/ui/wizard/step_basic.py bot/ui/wizard/step_confirm.py bot/ui/wizard/step_select_rule.py bot/ui/wizard/step_schedule.py bot/services/select_rule_service.py bot/cogs/preset_cog.py bot/cogs/kukai_cog.py bot/main.py)",
+      "Bash(Get-ChildItem -Path C:\\\\Users\\\\kengo\\\\Documents\\\\GitHub\\\\kukai_bot -Recurse -Directory)",
+      "Bash(Select-Object -First 30)",
+      "WebSearch"
     ]
   }
 }

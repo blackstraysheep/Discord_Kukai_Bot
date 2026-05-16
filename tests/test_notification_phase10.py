@@ -10,7 +10,7 @@ from sqlalchemy import select
 import bot.database as database_mod
 from bot.models.notification import NotificationSchedule
 from bot.scheduler import jobs
-from bot.services import entry_service, kukai_service, notification_service
+from bot.services import entry_service, kukai_service, notification_service, voice_service
 from bot.state_machine.states import KukaiState
 
 
@@ -120,6 +120,54 @@ async def test_schedule_kukai_jobs_registers_notification_and_deadline_jobs(db_s
     assert any(job_id.startswith("notify_") for job_id in added_ids)
     assert f"deadline_{kukai.id}_submission_close" in added_ids
     assert f"deadline_{kukai.id}_selecting_close" in added_ids
+
+
+@pytest.mark.asyncio
+async def test_custom_voice_notification_schedule_registers_job(db_session, monkeypatch):
+    kukai = await _make_kukai(db_session)
+    await voice_service.upsert_voice_session(
+        db_session,
+        kukai,
+        vc_channel_id=300,
+        start_at=_utc(21),
+        end_at=_utc(22),
+    )
+    await notification_service.replace_notification_schedules(
+        db_session,
+        kukai,
+        [
+            {
+                "event_type": "voice_start",
+                "offset_secs": 1800,
+                "channel_id": -1,
+                "target": "all",
+                "mention": False,
+            },
+            {
+                "event_type": "selecting_close",
+                "offset_secs": 3600,
+                "channel_id": 250,
+                "target": "incomplete",
+                "mention": True,
+            },
+        ],
+    )
+    scheduler = _FakeScheduler()
+    monkeypatch.setattr(notification_service, "has_scheduler", lambda: True)
+    monkeypatch.setattr(notification_service, "get_scheduler", lambda: scheduler)
+
+    await notification_service.schedule_kukai_jobs(db_session, kukai)
+
+    schedules = (
+        await db_session.execute(
+            select(NotificationSchedule).where(NotificationSchedule.kukai_id == kukai.id)
+        )
+    ).scalars().all()
+    assert len(schedules) == 2
+    assert {s.event_type for s in schedules} == {"voice_start", "selecting_close"}
+    assert any(s.channel_id == -1 for s in schedules)
+    assert any(s.mention for s in schedules)
+    assert sum(1 for item in scheduler.added if item["id"].startswith("notify_")) == 2
 
 
 @pytest.mark.asyncio

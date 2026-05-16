@@ -8,6 +8,7 @@ from bot.utils.bulk_parser import (
     parse_fields,
     parse_label_spec,
     parse_optional_int,
+    parse_reminder_spec,
 )
 
 
@@ -58,3 +59,15 @@ def test_parse_label_spec_without_rank():
     assert "rank_priority" not in spec
     assert spec["min_count"] == 0
     assert spec["max_count"] == 5
+
+
+def test_parse_reminder_spec_with_mention_destination():
+    spec = parse_reminder_spec("selecting_close,30m,mention,incomplete,true")
+
+    assert spec == {
+        "event_type": "selecting_close",
+        "offset_secs": 1800,
+        "channel_id": None,
+        "target": "incomplete",
+        "mention": True,
+    }

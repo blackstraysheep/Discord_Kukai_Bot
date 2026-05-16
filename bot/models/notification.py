@@ -27,6 +27,7 @@ class NotificationSchedule(Base, TimestampMixin):
     target: Mapped[str] = mapped_column(String(20), nullable=False, default="all")
     # NULL = kukai channel, -1 = DM, positive int = specific channel ID
     channel_id: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
+    mention: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     fired: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     # APScheduler job id for cancellation
     job_id: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)

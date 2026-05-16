@@ -18,6 +18,7 @@ from bot.services import (
     result_service,
     select_rule_service,
     submission_service,
+    voice_service,
 )
 from bot.services.errors import ServiceError
 from bot.state_machine.states import KukaiState
@@ -32,6 +33,7 @@ from bot.utils.bulk_parser import (
     parse_int,
     parse_label_spec,
     parse_optional_int,
+    parse_reminder_spec,
     reject_unknown_keys,
     values_for,
 )
@@ -305,6 +307,11 @@ class KukaiCog(commands.Cog):
                     "author_reveal_zero",
                     "preset_id",
                     "label",
+                    "voice_enabled",
+                    "voice_channel",
+                    "voice_start_at",
+                    "voice_end_at",
+                    "reminder",
                 },
             )
             title = first_value(fields, "title")
@@ -357,6 +364,32 @@ class KukaiCog(commands.Cog):
             label_specs = [
                 parse_label_spec(field.value, line_no=field.line_no)
                 for field in values_for(fields, "label")
+            ]
+            voice_enabled = parse_bool(
+                first_value(fields, "voice_enabled", "false") or "false",
+                name="voice_enabled",
+            )
+            voice_channel_raw = first_value(fields, "voice_channel")
+            voice_start_raw = first_value(fields, "voice_start_at")
+            voice_end_raw = first_value(fields, "voice_end_at")
+            if voice_enabled and (not voice_channel_raw or not voice_start_raw):
+                raise BulkParseError("voice_enabled=true の場合 voice_channel と voice_start_at は必須です。")
+            voice_channel_id: int | None = None
+            voice_start_at = None
+            voice_end_at = None
+            if voice_enabled:
+                voice_match = re.fullmatch(r"<?#?(\d+)>?", voice_channel_raw or "")
+                if not voice_match:
+                    raise BulkParseError("voice_channel は <#ボイスチャンネルID> または ID で指定してください。")
+                voice_channel_id = int(voice_match.group(1))
+                voice_start_at = parse_datetime_field(voice_start_raw or "", name="voice_start_at")
+                if voice_end_raw:
+                    voice_end_at = parse_datetime_field(voice_end_raw, name="voice_end_at")
+                if voice_end_at is not None and voice_end_at <= voice_start_at:
+                    raise BulkParseError("voice_end_at は voice_start_at より後にしてください。")
+            reminder_specs = [
+                parse_reminder_spec(field.value, line_no=field.line_no)
+                for field in values_for(fields, "reminder")
             ]
             submission_mode = first_value(fields, "submission_mode", "manual") or "manual"
             selecting_mode = first_value(fields, "selecting_mode", "manual") or "manual"
@@ -424,6 +457,14 @@ class KukaiCog(commands.Cog):
             await interaction.edit_original_response(embed=error_embed(str(e)))
             return
 
+        if voice_enabled and voice_channel_id is not None:
+            voice_channel = interaction.guild.get_channel(voice_channel_id)
+            if not isinstance(voice_channel, (discord.VoiceChannel, discord.StageChannel)):
+                await interaction.edit_original_response(
+                    embed=error_embed("voice_channel が見つからないか、ボイス/ステージチャンネルではありません。")
+                )
+                return
+
         async def _safe_delete_channel() -> None:
             if created_new_channel and channel is not None:
                 try:
@@ -484,6 +525,18 @@ class KukaiCog(commands.Cog):
                     ),
                     select_label_specs=select_label_specs,
                 )
+                if voice_enabled and voice_channel_id is not None:
+                    await voice_service.upsert_voice_session(
+                        session,
+                        kukai,
+                        vc_channel_id=voice_channel_id,
+                        start_at=voice_start_at,
+                        end_at=voice_end_at,
+                    )
+                if reminder_specs:
+                    await notification_service.replace_notification_schedules(
+                        session, kukai, reminder_specs
+                    )
                 kukai_id = kukai.id
                 kukai_title = kukai.title
                 await notification_service.schedule_kukai_jobs(session, kukai)
@@ -507,6 +560,11 @@ class KukaiCog(commands.Cog):
             info.add_field(name="エントリー締切", value=format_jst(entry_close_at), inline=False)
         info.add_field(name="投句締切", value=format_jst(submission_close_at), inline=False)
         info.add_field(name="選句締切", value=format_jst(selecting_close_at), inline=False)
+        if voice_enabled and voice_channel_id is not None and voice_start_at is not None:
+            voice_value = f"開始: {format_jst(voice_start_at)}\n場所: <#{voice_channel_id}>"
+            if voice_end_at is not None:
+                voice_value += f"\n終了: {format_jst(voice_end_at)}"
+            info.add_field(name="ボイス句会", value=voice_value, inline=False)
         info.set_footer(text=f"句会ID: {kukai_id}")
         try:
             await channel.send(embed=info)

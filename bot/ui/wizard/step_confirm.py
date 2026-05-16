@@ -8,7 +8,7 @@ import re
 import discord
 
 from bot.database import get_session
-from bot.services import kukai_service, notification_service
+from bot.services import kukai_service, notification_service, voice_service
 from bot.services.errors import ServiceError
 from bot.ui.wizard.base import STEP_COUNT, cancel_wizard, goto_step
 from bot.ui.wizard.wizard_state import WizardState, clear_wizard
@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 def build(state: WizardState) -> tuple[discord.Embed, discord.ui.View]:
     embed = discord.Embed(
-        title=f"ステップ 7/{STEP_COUNT}: 確認",
+        title=f"ステップ 9/{STEP_COUNT}: 確認",
         description="以下の設定で句会を作成します。よろしければ「作成」を押してください。",
         color=discord.Color.green(),
     )
@@ -84,6 +84,20 @@ def build(state: WizardState) -> tuple[discord.Embed, discord.ui.View]:
         ),
         inline=False,
     )
+    if state.voice_enabled:
+        voice_lines = [
+            f"場所: <#{state.voice_channel_id}>" if state.voice_channel_id else "場所: 未選択",
+            f"開始: {format_jst(state.voice_start_at)}" if state.voice_start_at else "開始: 未設定",
+        ]
+        if state.voice_end_at:
+            voice_lines.append(f"終了: {format_jst(state.voice_end_at)}")
+        embed.add_field(name="ボイス句会", value="\n".join(voice_lines), inline=False)
+    notify_value = (
+        f"カスタム {len(state.notification_specs)}件"
+        if state.notification_specs
+        else "デフォルト（投句・選句24時間前）"
+    )
+    embed.add_field(name="通知", value=notify_value, inline=False)
     return embed, StepConfirmView(state)
 
 
@@ -121,7 +135,7 @@ class StepConfirmView(discord.ui.View):
         self.add_item(cancel_btn)
 
     async def _back(self, interaction: discord.Interaction) -> None:
-        self.state.step = 6
+        self.state.step = 8
         await goto_step(interaction, self.state)
 
     async def _cancel(self, interaction: discord.Interaction) -> None:
@@ -213,6 +227,20 @@ class StepConfirmView(discord.ui.View):
                     author_reveal_zero=state.author_reveal_zero,
                     select_label_specs=state.select_label_specs,
                 )
+                if state.voice_enabled and state.voice_channel_id and state.voice_start_at:
+                    await voice_service.upsert_voice_session(
+                        session,
+                        kukai,
+                        vc_channel_id=state.voice_channel_id,
+                        start_at=state.voice_start_at,
+                        end_at=state.voice_end_at,
+                    )
+                if state.notification_specs:
+                    await notification_service.replace_notification_schedules(
+                        session,
+                        kukai,
+                        state.notification_specs,
+                    )
                 kukai_id = kukai.id
                 kukai_title = kukai.title
         except ServiceError as e:
@@ -278,6 +306,11 @@ class StepConfirmView(discord.ui.View):
             info.add_field(name="エントリー締切", value=entry_deadline, inline=False)
         info.add_field(name="投句締切", value=sub_str, inline=False)
         info.add_field(name="選句締切", value=selecting_str, inline=False)
+        if state.voice_enabled and state.voice_channel_id and state.voice_start_at:
+            voice_value = f"開始: {format_jst(state.voice_start_at)}\n場所: <#{state.voice_channel_id}>"
+            if state.voice_end_at:
+                voice_value += f"\n終了: {format_jst(state.voice_end_at)}"
+            info.add_field(name="ボイス句会", value=voice_value, inline=False)
         info.set_footer(text=f"句会ID: {kukai_id}")
         await channel.send(embed=info)
 

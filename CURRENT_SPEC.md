@@ -43,6 +43,11 @@
   - `preset_id` 指定時は選句プリセットを句会ラベルへ展開
   - `label=` 行がある場合は `preset_id` より優先
   - `channel=current/new/<#channel_id>` に対応
+  - `voice_enabled`, `voice_channel`, `voice_start_at`, `voice_end_at` でボイス句会イベントを作成
+  - `reminder=` 行で通知回ごとの時刻・通知先・対象・mention有無を指定
+- GUIウィザード:
+  - ボイス句会設定ステップでボイス/ステージチャンネル、開始日時、終了日時を設定
+  - 通知設定ステップで `event,offset,destination,target,mention` 形式の通知を複数登録
 
 ## 4. 進行通知
 - ステージ開始時に開催チャンネルへ Embed 通知
@@ -138,6 +143,14 @@
   - 日時は既存のJST入力形式（例: `2026-05-20 23:59`）
   - 無制限は `∞`, `unlimited`, `none`, `null` を受理
   - エラー時は原因行を表示
+  - 通知先は `kukai`, `dm`, `mention`, `<#channel_id>` を受理
+  - 通知対象は `all`, `incomplete`, `admin`
+- `reminder` 書式:
+  - `reminder=event,offset,destination,target,mention`
+  - `event`: `entry_close`, `submission_close`, `selecting_close`, `voice_start`
+  - `offset`: `24h`, `30m`, `1d6h` など
+  - `destination=dm` は対象者へDM送信
+  - `destination=mention` は句会チャンネルへ対象者mention付きで通知
 - `/preset bulk` 例:
 ```text
 name=標準
@@ -158,6 +171,13 @@ selecting_close_at=2026-05-22 23:59
 submission_min=1
 submission_max=3
 preset_id=1
+voice_enabled=true
+voice_channel=<#123456789012345678>
+voice_start_at=2026-05-23 21:00
+voice_end_at=2026-05-23 22:00
+reminder=submission_close,24h,kukai,all,false
+reminder=selecting_close,1h,mention,incomplete,true
+reminder=voice_start,30m,dm,all,false
 ```
 - `/select_bulk` 例:
 ```text

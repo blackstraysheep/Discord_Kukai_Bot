@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from bot.utils.datetime_utils import parse_datetime
+from bot.utils.datetime_utils import parse_offset
 
 
 class BulkParseError(ValueError):
@@ -142,3 +143,57 @@ def parse_label_spec(value: str, *, line_no: int | None = None) -> dict[str, obj
     if rank_priority is not None:
         spec["rank_priority"] = rank_priority
     return spec
+
+
+def parse_channel_destination(value: str, *, name: str = "通知先") -> tuple[int | None, bool]:
+    normalized = value.strip().lower()
+    if normalized in {"", "kukai", "channel", "default"}:
+        return None, False
+    if normalized == "dm":
+        return -1, False
+    if normalized == "mention":
+        return None, True
+    if normalized.startswith("<#") and normalized.endswith(">"):
+        normalized = normalized[2:-1]
+    try:
+        return int(normalized), False
+    except ValueError:
+        raise BulkParseError(f"{name} は kukai/dm/mention/<#channel_id> で指定してください。") from None
+
+
+def parse_reminder_spec(value: str, *, line_no: int | None = None) -> dict[str, object]:
+    parts = [part.strip() for part in value.split(",")]
+    prefix = f"{line_no}行目: " if line_no is not None else ""
+    if len(parts) < 2 or len(parts) > 5:
+        raise BulkParseError(
+            f"{prefix}reminder は `event,offset,destination,target,mention` で指定してください。"
+        )
+
+    event_type = parts[0].lower()
+    if event_type not in {"entry_close", "submission_close", "selecting_close", "voice_start"}:
+        raise BulkParseError(
+            f"{prefix}event は entry_close/submission_close/selecting_close/voice_start で指定してください。"
+        )
+    try:
+        offset_secs = parse_offset(parts[1])
+    except ValueError as exc:
+        raise BulkParseError(f"{prefix}{exc}") from None
+
+    channel_id, destination_mentions = parse_channel_destination(
+        parts[2] if len(parts) >= 3 else "kukai",
+        name=f"{prefix}destination",
+    )
+    target = parts[3].lower() if len(parts) >= 4 and parts[3] else "all"
+    if target not in {"all", "incomplete", "admin"}:
+        raise BulkParseError(f"{prefix}target は all/incomplete/admin で指定してください。")
+    mention = destination_mentions
+    if len(parts) >= 5 and parts[4]:
+        mention = parse_bool(parts[4], name=f"{prefix}mention")
+
+    return {
+        "event_type": event_type,
+        "offset_secs": offset_secs,
+        "channel_id": channel_id,
+        "target": target,
+        "mention": mention,
+    }

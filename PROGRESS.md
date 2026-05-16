@@ -8,7 +8,7 @@
 
 Discord完結型句会管理Bot。Python 3.13 / discord.py 2.x / SQLAlchemy 2.x async / aiosqlite / APScheduler 3.x。
 
-**現在の状態**: Phase 1〜10(品質強化) 完了。一括入力コマンド対応を追加済み。テスト 90件すべてパス。
+**現在の状態**: Phase 1〜10(品質強化) 完了。一括入力コマンド対応を追加済み。テスト 92件すべてパス。
 
 ---
 
@@ -73,24 +73,29 @@ Discord完結型句会管理Bot。Python 3.13 / discord.py 2.x / SQLAlchemy 2.x 
 - `bot/scheduler/setup.py` — init_scheduler / get_scheduler / has_scheduler
 - `bot/scheduler/jobs.py` — notification_job / deadline_job / _all_submitted / _all_selected / _notify_channel / _notify_admins
   - `notification_job(schedule_id)`: NotificationScheduleを取得しリマインダー送信
+  - 通知回ごとに `channel_id` と `mention` を持ち、DM/チャンネル/mention付き通知を切替可能
+  - `voice_start` 通知イベントに対応
   - `deadline_job(kukai_id, event_type)`: manual/semi_auto/full_autoに応じた自動進行
 - `bot/repositories/notification_repo.py`
 - `bot/services/notification_service.py` — schedule_kukai_jobs / cancel_kukai_jobs
   - 句会作成時にデフォルトスケジュール（24h前通知 × 2）を自動生成
+  - `replace_notification_schedules()` でカスタム通知を一括置換
   - APSchedulerの`date`トリガーでジョブ登録
 - `bot/main.py` 更新: setup_hookでinit_scheduler + set_bot + scheduler.start()
 - `bot/cogs/kukai_cog.py` 更新: create/pause/resume/cancelにスケジューラ連携
 
 ### Phase 8 — 句会作成ウィザード
 - `bot/ui/wizard/wizard_state.py` — WizardState dataclass（TTL 15分）+ インメモリレジストリ（get/set/clear_wizard）
-- `bot/ui/wizard/base.py` — goto_step() ディスパッチャ（STEP_COUNT=6）、cancel_wizard()
+- `bot/ui/wizard/base.py` — goto_step() ディスパッチャ（STEP_COUNT=9）、cancel_wizard()
 - `bot/ui/wizard/step_basic.py` — Step 1: 題名/題/説明（Modal）
-- `bot/ui/wizard/step_schedule.py` — Step 2: 投句締切/選句締切（Modal + JST検証）
-- `bot/ui/wizard/step_entry.py` — Step 3: エントリー設定（Select × 2）
+- `bot/ui/wizard/step_entry.py` — Step 2: エントリー設定（Select × 2）
+- `bot/ui/wizard/step_schedule.py` — Step 3: 投句締切/選句締切（Modal + JST検証）
 - `bot/ui/wizard/step_submission.py` — Step 4: 投句設定（Select + 詳細Modalで最低/最大投句数）
-- `bot/ui/wizard/step_publish.py` — Step 5: 公開/結果/作者設定（Select × 3）
-- `bot/ui/wizard/step_confirm.py` — Step 6: 確認・作成（チャンネル作成 → create_kukai → schedule_kukai_jobs）
-- `bot/ui/wizard/step_select_rule.py` / `step_notify.py` / `step_voice.py` — 将来用スタブ
+- `bot/ui/wizard/step_select_rule.py` — Step 5: 選句プリセット選択と句会ごとの選句数・コメント設定
+- `bot/ui/wizard/step_publish.py` — Step 6: 公開/結果/作者設定（Select × 3）
+- `bot/ui/wizard/step_voice.py` — Step 7: ボイス句会の時間・場所設定
+- `bot/ui/wizard/step_notify.py` — Step 8: 通知回ごとの時間・通知先・対象・mention設定
+- `bot/ui/wizard/step_confirm.py` — Step 9: 確認・作成（チャンネル作成 → create_kukai → schedule_kukai_jobs）
 - `bot/services/kukai_service.py` 更新: create_kukai()にウィザード設定パラメータ追加
 - `/kukai create` をウィザード起動に差し替え（権限チェック後、step 1を送信）
 
@@ -115,6 +120,7 @@ Discord完結型句会管理Bot。Python 3.13 / discord.py 2.x / SQLAlchemy 2.x 
 - `bot/utils/bulk_parser.py` 追加
   - 行形式 `key=value` パーサ
   - bool / int / 無制限値 / JST日時 / 選句ラベル定義の正規化
+  - `reminder=event,offset,destination,target,mention` の正規化
   - エラー時は原因行を明示
 - `bot/cogs/preset_cog.py`
   - `/preset bulk config` を追加
@@ -127,6 +133,8 @@ Discord完結型句会管理Bot。Python 3.13 / discord.py 2.x / SQLAlchemy 2.x 
 - `bot/cogs/kukai_cog.py`
   - `/kukai create_bulk config` を追加
   - `channel=current/new/<#channel_id>`、`preset_id`、`label=` に対応
+  - `voice_enabled` / `voice_channel` / `voice_start_at` / `voice_end_at` に対応
+  - `reminder=` による通知カスタマイズに対応
 - `bot/cogs/select_cog.py`
   - `/select_bulk selections [kukai_id]` を追加
   - `番号=ラベル|コメント`, `overall=...`, `番号=clear` に対応
@@ -138,10 +146,10 @@ Discord完結型句会管理Bot。Python 3.13 / discord.py 2.x / SQLAlchemy 2.x 
 ## テスト状況
 
 ```
-tests/test_bulk_parser.py          5件  ✅
+tests/test_bulk_parser.py          6件  ✅
 tests/test_entry_service.py      12件  ✅
 tests/test_kukai_service.py       9件  ✅
-tests/test_notification_phase10.py 5件 ✅
+tests/test_notification_phase10.py 6件 ✅
 tests/test_phase9_services.py     5件  ✅
 tests/test_preset_service.py      6件  ✅
 tests/test_result_cog.py          5件  ✅
@@ -150,7 +158,7 @@ tests/test_select_rule_service.py 5件  ✅
 tests/test_select_service.py      12件  ✅
 tests/test_submission_service.py 19件  ✅
                               -------
-合計                            90件  全パス
+合計                            92件  全パス
 ```
 
 実行: `py -m pytest`
@@ -223,9 +231,11 @@ kukai_bot/
 │   │       ├── step_submission.py
 │   │       ├── step_publish.py
 │   │       ├── step_confirm.py
-│   │       ├── step_select_rule.py  # スタブ
-│   │       ├── step_notify.py     # スタブ
-│   │       └── step_voice.py      # スタブ
+│   │       ├── step_select_rule.py
+│   │       ├── step_publish.py
+│   │       ├── step_voice.py
+│   │       ├── step_notify.py
+│   │       └── step_confirm.py
 │   └── utils/
 │       ├── bulk_parser.py
 │       ├── text.py
@@ -273,11 +283,8 @@ kukai_bot/
   - ServiceErrorのすべてのサブクラスがCogでキャッチされる構成を確認
   - Discordの権限不足（Forbidden）エラーのフォールバック ✅（`/kukai publish` / `/result` / scheduler通知）
 
-**未実装のスタブ**
-- `bot/ui/wizard/step_select_rule.py` — ウィザード内での投票ラベルカスタマイズ
-- `bot/ui/wizard/step_notify.py` — ウィザード内での通知チャンネル設定
-- `bot/ui/wizard/step_voice.py` — ボイスセッション連携（VoiceSessionモデルはあるが未活用）
-- `bot/models/voice_session.py` — VoiceSessionモデルは存在するがCog/Serviceが未実装
+**未実装/将来拡張**
+- `bot/models/voice_session.py` — 句会イベントの時間・場所保存は実装済み。ボイス入退室ログやVC内進行支援は未実装。
 
 **Docker検証**
 - `docker compose up --build` 実行確認 ✅（ビルド・コンテナ起動を確認）
@@ -338,8 +345,9 @@ python -m bot.main
 py -m pytest tests/ -v
 
 # 5. Discord動作確認順序
-/kukai create          → ウィザード（6ステップ）で句会作成
+/kukai create          → ウィザード（9ステップ）で句会作成
 /kukai create_bulk ... → 行形式で句会を一括作成
+  voice_enabled=true / voice_channel=<#...> / reminder=... でボイス句会・通知も設定可能
 /kukai list            → 作成した句会を確認
 /kukai proceed ...     → 状態を進める
 /entry apply ...       → エントリー（entry_enabled=trueの場合）
