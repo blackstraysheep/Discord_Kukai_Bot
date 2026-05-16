@@ -4,6 +4,20 @@
 
 Discord句会botで、句会結果・投句一覧・選評などをLuaLaTeXでPDF化する。
 
+**運用モデル**: セルフホスト。導入者が各自の環境（Oracle Free Tier など）でbotを運用する。
+Dockerイメージで配布し、導入者は `git clone → .env 設定 → docker compose up` で起動できる。
+
+## 技術スタック
+
+| 要素 | 選択 |
+|-----|------|
+| TeXエンジン | LuaLaTeX |
+| 文書クラス | jlreq（縦書きモード） |
+| フォント | Noto Serif CJK JP |
+| テンプレート | Jinja2 (.tex.j2) |
+| コンテナ | Docker（ローカル＝本番の同一イメージ） |
+| PDF公開 | Caddy（Discord 25MB 超過時のみ） |
+
 ## 基本構成
 
 Discord Bot
@@ -94,3 +108,38 @@ timeoutを設定する
 同時実行数を制限する
 
 フォント指定もゆくゆくはできれば。
+
+## Discordコマンド設計
+
+```
+/pdf submission [kukai_id] [show_author]   ← 投句一覧PDF（管理者限定、publish後から）
+/pdf result     [kukai_id] [show_author]   ← 結果PDF（管理者限定、selecting後から）
+```
+
+- `kukai_id` 省略時はチャンネルから自動解決
+- `show_author`（bool, default=True）: 投句一覧・結果で独立して俳号表示を制御
+- `LUALATEX_BIN` が未設定の場合は「有効化されていません」エラーを返す
+
+## 環境切り替え対応
+
+```bash
+# .env.example
+LUALATEX_BIN=/usr/bin/lualatex   # 空にするとPDF機能を無効化
+PDF_SERVE_BASE_URL=               # Caddy公開URL（省略時はサイズ超過でエラー）
+PDF_SERVE_DIR=/srv/pdfs
+```
+
+ローカル開発時は `LUALATEX_BIN=` で無効化し、Docker環境でのみ有効にする運用が基本。
+同一Dockerイメージをローカル・クラウドで共用するため環境差分ゼロ。
+
+## 新規ファイル一覧
+
+| ファイル | 役割 |
+|---------|------|
+| `Dockerfile` | LuaLaTeX込みのbotイメージ |
+| `docker-compose.yml` | ローカル開発・本番共用 |
+| `bot/cogs/pdf_cog.py` | コマンド定義 |
+| `bot/services/pdf_service.py` | コンパイル・ファイル公開ロジック |
+| `bot/templates/pdf/submission_list.tex.j2` | 投句一覧テンプレート |
+| `bot/templates/pdf/result.tex.j2` | 結果テンプレート |
+| `tests/test_pdf_service.py` | TeX生成・エスケープのテスト |
