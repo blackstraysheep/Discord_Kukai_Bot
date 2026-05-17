@@ -286,6 +286,34 @@ class PresetCog(commands.Cog):
             ephemeral=True,
         )
 
+    @preset.command(name="summary", description="【管理者】プリセットの句数表示テキストを設定・削除します")
+    @app_commands.describe(
+        preset_id="プリセットID",
+        text="句会情報に表示する句数説明（例: 3～5句出し、特1並2～3）。空文字で削除して自動生成に戻す",
+    )
+    async def preset_summary(
+        self,
+        interaction: discord.Interaction,
+        preset_id: int,
+        text: str = "",
+    ) -> None:
+        if not await _check_admin(interaction):
+            return
+        assert interaction.guild is not None
+        try:
+            async with get_session() as session:
+                template = await preset_service.set_summary_text(
+                    session, interaction.guild.id, preset_id, text.strip() or None
+                )
+        except ServiceError as e:
+            await interaction.response.send_message(embed=error_embed(str(e)), ephemeral=True)
+            return
+        if text.strip():
+            msg = f"プリセット「**{template.name}**」の句数表示テキストを設定しました。\n> {text.strip()}"
+        else:
+            msg = f"プリセット「**{template.name}**」の句数表示テキストを削除しました（自動生成に戻ります）。"
+        await interaction.response.send_message(embed=success_embed(msg), ephemeral=True)
+
     # ── Label management ─────────────────────────────────────────────────────
 
     @label.command(name="list", description="プリセットのラベル一覧を表示します")

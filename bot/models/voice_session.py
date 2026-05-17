@@ -22,5 +22,6 @@ class VoiceSession(Base, TimestampMixin):
     vc_channel_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
     start_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     end_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    discord_event_id: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
 
     kukai: Mapped["Kukai"] = relationship("Kukai", back_populates="voice_session")

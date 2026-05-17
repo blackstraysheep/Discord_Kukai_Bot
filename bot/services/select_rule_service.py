@@ -209,6 +209,7 @@ def serialize_template_specs(
     specs: list[dict[str, Any]],
     *,
     points_enabled: bool = True,
+    info_text: str | None = None,
 ) -> str:
     compact = []
     for spec in normalize_template_specs(specs):
@@ -222,10 +223,10 @@ def serialize_template_specs(
                 "comment_mode": spec["comment_mode"],
             }
         )
-    return json.dumps(
-        {"points_enabled": bool(points_enabled), "labels": compact},
-        ensure_ascii=False,
-    )
+    payload: dict[str, Any] = {"points_enabled": bool(points_enabled), "labels": compact}
+    if info_text:
+        payload["info_text"] = info_text
+    return json.dumps(payload, ensure_ascii=False)
 
 
 def deserialize_template_payload(definition_json: str | None) -> tuple[bool, list[dict[str, Any]]]:
@@ -257,6 +258,35 @@ def deserialize_template_payload(definition_json: str | None) -> tuple[bool, lis
 def deserialize_template_specs(definition_json: str | None) -> list[dict[str, Any]]:
     _, specs = deserialize_template_payload(definition_json)
     return specs
+
+
+def get_template_info_text(definition_json: str | None) -> str | None:
+    """Return the custom info_text stored in a template's definition_json, or None."""
+    if not definition_json:
+        return None
+    try:
+        raw = json.loads(definition_json)
+    except json.JSONDecodeError:
+        return None
+    if isinstance(raw, dict):
+        return raw.get("info_text") or None
+    return None
+
+
+async def set_template_info_text(
+    session: AsyncSession,
+    guild_id: int,
+    template_id: int,
+    info_text: str | None,
+) -> SelectRuleTemplate:
+    """Set (or clear) the custom info_text on a preset template."""
+    template = await get_template(session, guild_id, template_id)
+    points_enabled, specs = deserialize_template_payload(template.definition_json)
+    template.definition_json = serialize_template_specs(
+        specs, points_enabled=points_enabled, info_text=info_text or None
+    )
+    await session.flush()
+    return template
 
 
 def build_kukai_specs_from_template(template: SelectRuleTemplate) -> list[dict[str, Any]]:

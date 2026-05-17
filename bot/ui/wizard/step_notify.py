@@ -135,9 +135,24 @@ class NotificationModal(discord.ui.Modal, title="通知設定"):
             try:
                 specs.append(parse_reminder_spec(line, line_no=line_no))
             except BulkParseError as e:
-                await interaction.response.send_message(str(e), ephemeral=True)
+                if not interaction.response.is_done():
+                    await interaction.response.send_message(str(e), ephemeral=True)
                 return
         self.state.notification_specs = specs
         set_wizard(self.state)
         embed, view = build(self.state)
-        await interaction.response.edit_message(embed=embed, view=view)
+        try:
+            await interaction.response.edit_message(embed=embed, view=view)
+        except discord.InteractionResponded:
+            await interaction.edit_original_response(embed=embed, view=view)
+        except discord.HTTPException as exc:
+            if not interaction.response.is_done():
+                await interaction.response.send_message(
+                    f"通知設定を保存しましたが表示の更新に失敗しました: {exc}", ephemeral=True
+                )
+
+    async def on_error(self, interaction: discord.Interaction, error: Exception) -> None:
+        if not interaction.response.is_done():
+            await interaction.response.send_message(
+                "通知設定の処理中にエラーが発生しました。もう一度お試しください。", ephemeral=True
+            )

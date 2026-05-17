@@ -183,6 +183,19 @@ async def remove_label(
     return _to_view(template)
 
 
+async def set_summary_text(
+    session: AsyncSession,
+    guild_id: int,
+    preset_id: int,
+    summary_text: str | None,
+) -> PresetView:
+    """Set (or clear) the custom summary text shown in kukai info for a preset."""
+    template = await select_rule_service.set_template_info_text(
+        session, guild_id, preset_id, summary_text or None
+    )
+    return _to_view(template)
+
+
 async def replace_labels(
     session: AsyncSession,
     *,

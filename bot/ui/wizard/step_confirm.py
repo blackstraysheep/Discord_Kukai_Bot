@@ -10,10 +10,11 @@ import discord
 from bot.database import get_session
 from bot.services import kukai_service, notification_service, voice_service
 from bot.services.errors import ServiceError
+from bot.models.voice_session import VoiceSession
 from bot.ui.wizard.base import STEP_COUNT, cancel_wizard, goto_step
 from bot.ui.wizard.wizard_state import WizardState, clear_wizard
 from bot.utils.datetime_utils import format_jst
-from bot.utils.embed_builder import COLOR_INFO, COLOR_SUCCESS, error_embed
+from bot.utils.embed_builder import COLOR_INFO, COLOR_SUCCESS, build_select_summary, error_embed
 
 logger = logging.getLogger(__name__)
 
@@ -199,6 +200,7 @@ class StepConfirmView(discord.ui.View):
             except Exception:
                 logger.exception("Failed to delete temporary channel after wizard error")
 
+        voice_sess: VoiceSession | None = None
         try:
             async with get_session() as session:
                 kukai = await kukai_service.create_kukai(
@@ -228,7 +230,7 @@ class StepConfirmView(discord.ui.View):
                     select_label_specs=state.select_label_specs,
                 )
                 if state.voice_enabled and state.voice_channel_id and state.voice_start_at:
-                    await voice_service.upsert_voice_session(
+                    voice_sess = await voice_service.upsert_voice_session(
                         session,
                         kukai,
                         vc_channel_id=state.voice_channel_id,
@@ -243,6 +245,19 @@ class StepConfirmView(discord.ui.View):
                     )
                 kukai_id = kukai.id
                 kukai_title = kukai.title
+                # Resolve preset custom summary text if a template was used
+                summary_override: str | None = None
+                from bot.services import select_rule_service as _srs
+                template_id_used = next(
+                    (s.get("template_id") for s in state.select_label_specs if s.get("template_id")),
+                    None,
+                )
+                if template_id_used:
+                    try:
+                        tmpl = await _srs.get_template(session, guild.id, template_id_used)
+                        summary_override = _srs.get_template_info_text(tmpl.definition_json)
+                    except Exception:
+                        pass
         except ServiceError as e:
             await _safe_delete_channel()
             await interaction.edit_original_response(embed=error_embed(str(e)), view=None)
@@ -258,6 +273,19 @@ class StepConfirmView(discord.ui.View):
                 view=None,
             )
             return
+
+        # Create Discord scheduled event (after DB commit succeeds)
+        if voice_sess is not None:
+            event_id = await voice_service.create_discord_event(guild, kukai, voice_sess)
+            if event_id is not None:
+                async with get_session() as sess2:
+                    from sqlalchemy import select as sa_select
+                    res = await sess2.execute(
+                        sa_select(VoiceSession).where(VoiceSession.kukai_id == kukai_id)
+                    )
+                    vs = res.scalar_one_or_none()
+                    if vs is not None:
+                        vs.discord_event_id = event_id
 
         schedule_warning: str | None = None
         try:
@@ -301,6 +329,11 @@ class StepConfirmView(discord.ui.View):
         )
         if state.theme:
             info.add_field(name="題", value=state.theme, inline=True)
+        summary = build_select_summary(
+            state.submission_min, state.submission_max, state.select_label_specs,
+            override_text=summary_override,
+        )
+        info.add_field(name="句数", value=summary, inline=False)
         if state.entry_enabled:
             entry_deadline = format_jst(state.entry_close_at) if state.entry_close_at else "未定"
             info.add_field(name="エントリー締切", value=entry_deadline, inline=False)

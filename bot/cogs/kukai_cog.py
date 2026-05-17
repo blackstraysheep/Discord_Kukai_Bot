@@ -44,6 +44,7 @@ from bot.utils.embed_builder import (
     COLOR_INFO,
     COLOR_RESULT,
     COLOR_SUCCESS,
+    build_select_summary,
     error_embed,
     success_embed,
 )
@@ -240,9 +241,23 @@ class KukaiCog(commands.Cog):
     async def kukai_info(self, interaction: discord.Interaction, kukai_id: int) -> None:
         assert interaction.guild is not None
         try:
+            from sqlalchemy import select as _sa_select
+            from sqlalchemy.orm import selectinload
+            from bot.models.kukai import Kukai as _Kukai
             async with get_session() as session:
-                kukai = await kukai_service.get_kukai(session, kukai_id, interaction.guild.id)
-            embed = _build_info_embed(kukai)
+                result = await session.execute(
+                    _sa_select(_Kukai)
+                    .where(_Kukai.id == kukai_id, _Kukai.guild_id == interaction.guild.id)
+                    .options(selectinload(_Kukai.select_labels))
+                )
+                kukai = result.scalar_one_or_none()
+                if kukai is None:
+                    await interaction.response.send_message(
+                        embed=error_embed(f"句会 ID {kukai_id} が見つかりません。"), ephemeral=True
+                    )
+                    return
+                select_labels = list(kukai.select_labels)
+            embed = _build_info_embed(kukai, select_labels=select_labels)
             await interaction.response.send_message(embed=embed, ephemeral=True)
         except ServiceError as e:
             await interaction.response.send_message(embed=error_embed(str(e)), ephemeral=True)
@@ -475,12 +490,16 @@ class KukaiCog(commands.Cog):
         try:
             select_label_specs = label_specs
             points_enabled = True
+            bulk_summary_override: str | None = None
             async with get_session() as session:
                 if not select_label_specs and preset_id is not None:
                     template = await select_rule_service.get_template(
                         session, interaction.guild.id, preset_id
                     )
                     points_enabled, _ = select_rule_service.deserialize_template_payload(
+                        template.definition_json
+                    )
+                    bulk_summary_override = select_rule_service.get_template_info_text(
                         template.definition_json
                     )
                     select_label_specs = select_rule_service.build_kukai_specs_from_template(template)
@@ -525,8 +544,9 @@ class KukaiCog(commands.Cog):
                     ),
                     select_label_specs=select_label_specs,
                 )
+                bulk_voice_sess = None
                 if voice_enabled and voice_channel_id is not None:
-                    await voice_service.upsert_voice_session(
+                    bulk_voice_sess = await voice_service.upsert_voice_session(
                         session,
                         kukai,
                         vc_channel_id=voice_channel_id,
@@ -549,6 +569,20 @@ class KukaiCog(commands.Cog):
             await interaction.edit_original_response(embed=error_embed("句会作成中に内部エラーが発生しました。"))
             raise
 
+        # Create Discord scheduled event after successful DB commit
+        if bulk_voice_sess is not None:
+            from bot.models.voice_session import VoiceSession as _VoiceSession
+            event_id = await voice_service.create_discord_event(interaction.guild, kukai, bulk_voice_sess)
+            if event_id is not None:
+                async with get_session() as sess2:
+                    from sqlalchemy import select as _sa_select
+                    res = await sess2.execute(
+                        _sa_select(_VoiceSession).where(_VoiceSession.kukai_id == kukai_id)
+                    )
+                    vs = res.scalar_one_or_none()
+                    if vs is not None:
+                        vs.discord_event_id = event_id
+
         info = discord.Embed(
             title=f"📋 {kukai_title}",
             description=first_value(fields, "description") or "",
@@ -556,6 +590,14 @@ class KukaiCog(commands.Cog):
         )
         if first_value(fields, "theme"):
             info.add_field(name="題", value=first_value(fields, "theme"), inline=True)
+        info.add_field(
+            name="句数",
+            value=build_select_summary(
+                submission_min, submission_max, select_label_specs,
+                override_text=bulk_summary_override,
+            ),
+            inline=False,
+        )
         if entry_enabled and entry_close_at:
             info.add_field(name="エントリー締切", value=format_jst(entry_close_at), inline=False)
         info.add_field(name="投句締切", value=format_jst(submission_close_at), inline=False)
@@ -1128,7 +1170,7 @@ def _sanitize_channel_name(title: str) -> str:
     return name[:100].strip("-") or "kukai"
 
 
-def _build_info_embed(kukai) -> discord.Embed:
+def _build_info_embed(kukai, *, select_labels: list | None = None) -> discord.Embed:
     state_ja = STATE_LABEL.get(kukai.state, kukai.state)
     embed = discord.Embed(
         title=f"📋 {kukai.title}",
@@ -1138,6 +1180,9 @@ def _build_info_embed(kukai) -> discord.Embed:
     if kukai.theme:
         embed.add_field(name="題", value=kukai.theme, inline=True)
     embed.add_field(name="状態", value=state_ja, inline=True)
+    if select_labels is not None:
+        summary = build_select_summary(kukai.submission_min, kukai.submission_max, select_labels)
+        embed.add_field(name="句数", value=summary, inline=False)
     if kukai.submission_close_at:
         embed.add_field(name="投句締切", value=format_jst(kukai.submission_close_at), inline=False)
     if kukai.selecting_close_at:
