@@ -87,7 +87,7 @@ Discord完結型句会管理Bot。Python 3.13 / discord.py 2.x / SQLAlchemy 2.x 
 ### Phase 8 — 句会作成ウィザード
 - `bot/ui/wizard/wizard_state.py` — WizardState dataclass（TTL 15分）+ インメモリレジストリ（get/set/clear_wizard）
 - `bot/ui/wizard/base.py` — goto_step() ディスパッチャ（STEP_COUNT=9）、cancel_wizard()
-- `bot/ui/wizard/step_basic.py` — Step 1: 題名/題/説明（Modal）
+- `bot/ui/wizard/step_basic.py` — Step 1:句会名/題/説明（Modal）
 - `bot/ui/wizard/step_entry.py` — Step 2: エントリー設定（Select × 2）
 - `bot/ui/wizard/step_schedule.py` — Step 3: 投句締切/選句締切（Modal + JST検証）
 - `bot/ui/wizard/step_submission.py` — Step 4: 投句設定（Select + 詳細Modalで最低/最大投句数）

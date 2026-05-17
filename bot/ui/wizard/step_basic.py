@@ -15,9 +15,9 @@ def build(state: WizardState) -> tuple[discord.Embed, discord.ui.View]:
         title=f"ステップ 1/{STEP_COUNT}: 基本情報",
         color=discord.Color.blurple(),
     )
-    embed.add_field(name="題名", value=state.title or "（未入力）", inline=False)
+    embed.add_field(name="句会名", value=state.title or "（未入力）", inline=False)
     if state.theme:
-        embed.add_field(name="題（お題）", value=state.theme, inline=True)
+        embed.add_field(name="題", value=state.theme, inline=True)
     if state.description:
         embed.add_field(name="説明", value=state.description[:200], inline=False)
     if state.use_existing_channel:
@@ -35,7 +35,7 @@ def build(state: WizardState) -> tuple[discord.Embed, discord.ui.View]:
         else:
             channel_value += "\nカテゴリ: サーバーのルート"
     embed.add_field(name="句会チャンネル", value=channel_value, inline=False)
-    embed.set_footer(text="✅ 題名とチャンネル設定がそろうと次へ進めます。")
+    embed.set_footer(text="✅ 句会名とチャンネル設定がそろうと次へ進めます。")
     return embed, StepBasicView(state, filled=filled)
 
 
@@ -174,13 +174,13 @@ class _CategorySelect(discord.ui.ChannelSelect):
 
 class StepBasicModal(discord.ui.Modal, title="基本情報の入力"):
     kukai_title = discord.ui.TextInput(
-        label="題名 *",
-        placeholder="第1回 春の句会",
+        label="句会名",
+        placeholder="第1回 Bot句会",
         max_length=200,
     )
     theme = discord.ui.TextInput(
-        label="題（お題）",
-        placeholder="春（省略可）",
+        label="題",
+        placeholder="兼題など（省略可）",
         required=False,
         max_length=100,
     )
@@ -213,7 +213,7 @@ class StepBasicModal(discord.ui.Modal, title="基本情報の入力"):
 class ChannelNameModal(discord.ui.Modal, title="チャンネル名の設定"):
     channel_name = discord.ui.TextInput(
         label="チャンネル名（新規作成時）",
-        placeholder="未入力なら題名を使用",
+        placeholder="未入力時は句会名を使用",
         required=False,
         max_length=100,
     )

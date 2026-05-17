@@ -1098,7 +1098,7 @@ class KukaiCog(commands.Cog):
                 }
                 changed_lines: list[str] = []
                 if before["title"] != after["title"]:
-                    changed_lines.append(f"題名: {before['title']} → {after['title']}")
+                    changed_lines.append(f"句会名: {before['title']} → {after['title']}")
                 if before["theme"] != after["theme"]:
                     changed_lines.append(f"題: {(before['theme'] or '未設定')} → {(after['theme'] or '未設定')}")
                 if before["description"] != after["description"]:

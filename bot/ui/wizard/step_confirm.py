@@ -25,9 +25,9 @@ def build(state: WizardState) -> tuple[discord.Embed, discord.ui.View]:
         description="以下の設定で句会を作成します。よろしければ「作成」を押してください。",
         color=discord.Color.green(),
     )
-    embed.add_field(name="題名", value=state.title, inline=False)
+    embed.add_field(name="句会名", value=state.title, inline=False)
     if state.theme:
-        embed.add_field(name="題（お題）", value=state.theme, inline=True)
+        embed.add_field(name="題", value=state.theme, inline=True)
     if state.description:
         embed.add_field(name="説明", value=state.description[:200], inline=False)
 
