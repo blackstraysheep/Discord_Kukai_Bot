@@ -51,9 +51,11 @@ def build_select_summary(
             return lbl.get(key, default)
         return getattr(lbl, key, default)
 
+    # Show labels that have any count constraint (required OR capped)
+    # Skip: min_count==0 AND max_count is None (truly unlimited optional)
     required = [
         lbl for lbl in select_labels
-        if _attr(lbl, "min_count", 0) > 0
+        if (_attr(lbl, "min_count", 0) > 0 or _attr(lbl, "max_count", None) is not None)
         and _attr(lbl, "label", "") != _AUTHOR_LABEL
     ]
     required.sort(key=lambda lbl: _attr(lbl, "rank_priority", 999))

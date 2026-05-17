@@ -100,12 +100,12 @@ class StepNotifyView(discord.ui.View):
 
 class NotificationModal(discord.ui.Modal, title="通知設定"):
     reminders = discord.ui.TextInput(
-        label="通知（1行1件）",
+        label="通知（1行1件）書式: event,offset,dest,target,mention",
         style=discord.TextStyle.paragraph,
         placeholder=(
-            "submission_close,24h,kukai,all,false\n"
-            "selecting_close,1h,mention,incomplete,true\n"
-            "voice_start,30m,dm,all,false"
+            "submission_close,24h,kukai,all\n"
+            "selecting_close,1h,mention,incomplete\n"
+            "voice_start,30m,dm,all"
         ),
         required=False,
         max_length=3000,
