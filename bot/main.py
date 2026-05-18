@@ -12,6 +12,7 @@ logger = logging.getLogger(__name__)
 COGS = [
     "bot.cogs.kukai_cog",
     "bot.cogs.preset_cog",
+    "bot.cogs.notification_cog",
     "bot.cogs.entry_cog",
     "bot.cogs.submission_cog",
     "bot.cogs.select_cog",

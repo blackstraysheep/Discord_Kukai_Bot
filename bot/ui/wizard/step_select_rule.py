@@ -11,6 +11,7 @@ from bot.services import select_rule_service
 from bot.services.errors import ServiceError
 from bot.ui.wizard.base import STEP_COUNT, cancel_wizard, goto_step
 from bot.ui.wizard.wizard_state import WizardState, set_wizard
+from bot.utils.bulk_parser import BulkParseError, parse_label_spec
 
 
 def _ensure_specs(state: WizardState) -> None:
@@ -20,6 +21,26 @@ def _ensure_specs(state: WizardState) -> None:
 
 def _max_label(spec: dict[str, Any]) -> str:
     return "∞" if spec.get("max_count") is None else str(spec.get("max_count"))
+
+
+def _specs_as_text(specs: list[dict[str, Any]]) -> str:
+    lines: list[str] = []
+    for spec in specs:
+        if spec["label"] == select_rule_service.AUTHOR_COMMENT_LABEL:
+            continue
+        lines.append(
+            ",".join(
+                [
+                    str(spec["label"]),
+                    str(spec.get("point", 0)),
+                    str(spec.get("rank_priority") or spec.get("display_order") or 1),
+                    str(spec.get("min_count", 0)),
+                    _max_label(spec),
+                    str(spec.get("comment_mode", "none")),
+                ]
+            )
+        )
+    return "\n".join(lines)
 
 
 def build(state: WizardState) -> tuple[discord.Embed, discord.ui.View]:
@@ -61,7 +82,8 @@ class _PresetSelect(discord.ui.Select):
             discord.SelectOption(
                 label="デフォルト",
                 value="default",
-                default=state.select_preset_template_id is None,
+                default=state.select_preset_template_id is None
+                and state.select_preset_name == "デフォルト",
             )
         ]
         for row in state.select_preset_options[:24]:
@@ -204,6 +226,59 @@ class CountCommentModal(discord.ui.Modal, title="選句数・コメント設定"
         await interaction.response.edit_message(embed=embed, view=view)
 
 
+class CustomLabelModal(discord.ui.Modal, title="選句種別の直接入力"):
+    labels = discord.ui.TextInput(
+        label="1行1件: 名前,点数,rank,最小,最大,コメント",
+        style=discord.TextStyle.paragraph,
+        placeholder=(
+            "特選,2,1,0,1,none\n"
+            "並選,1,2,0,5,optional\n"
+            "逆選,-1,3,0,1,required"
+        ),
+        required=True,
+        max_length=3000,
+    )
+
+    def __init__(self, state: WizardState) -> None:
+        super().__init__()
+        self.state = state
+        current = _specs_as_text(state.select_label_specs)
+        if current:
+            self.labels.default = current
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        specs: list[dict[str, object]] = []
+        for line_no, raw in enumerate(self.labels.value.splitlines(), start=1):
+            line = raw.strip()
+            if not line or line.startswith("#"):
+                continue
+            try:
+                specs.append(parse_label_spec(line, line_no=line_no))
+            except BulkParseError as e:
+                await interaction.response.send_message(str(e), ephemeral=True)
+                return
+
+        if not specs:
+            await interaction.response.send_message(
+                "選句種別を1件以上入力してください。", ephemeral=True
+            )
+            return
+
+        try:
+            normalized = select_rule_service.normalize_kukai_specs(specs, template_id=None)
+        except ServiceError as e:
+            await interaction.response.send_message(str(e), ephemeral=True)
+            return
+
+        self.state.select_preset_template_id = None
+        self.state.select_preset_name = "カスタム"
+        self.state.select_points_enabled = True
+        self.state.select_label_specs = normalized
+        set_wizard(self.state)
+        embed, view = build(self.state)
+        await interaction.response.edit_message(embed=embed, view=view)
+
+
 class StepSelectRuleView(discord.ui.View):
     def __init__(self, state: WizardState) -> None:
         super().__init__(timeout=900)
@@ -231,15 +306,23 @@ class StepSelectRuleView(discord.ui.View):
         count_btn.callback = self._edit_counts
         self.add_item(count_btn)
 
-        back_btn = discord.ui.Button(label="← 戻る", style=discord.ButtonStyle.secondary, row=2)
+        custom_btn = discord.ui.Button(
+            label="選句種別を直接入力",
+            style=discord.ButtonStyle.primary,
+            row=2,
+        )
+        custom_btn.callback = self._edit_custom_labels
+        self.add_item(custom_btn)
+
+        back_btn = discord.ui.Button(label="← 戻る", style=discord.ButtonStyle.secondary, row=3)
         back_btn.callback = self._back
         self.add_item(back_btn)
 
-        next_btn = discord.ui.Button(label="次へ ➜", style=discord.ButtonStyle.success, row=2)
+        next_btn = discord.ui.Button(label="次へ ➜", style=discord.ButtonStyle.success, row=3)
         next_btn.callback = self._next
         self.add_item(next_btn)
 
-        cancel_btn = discord.ui.Button(label="❌ キャンセル", style=discord.ButtonStyle.danger, row=2)
+        cancel_btn = discord.ui.Button(label="❌ キャンセル", style=discord.ButtonStyle.danger, row=3)
         cancel_btn.callback = self._cancel
         self.add_item(cancel_btn)
 
@@ -264,6 +347,9 @@ class StepSelectRuleView(discord.ui.View):
             await interaction.response.send_message("設定対象のラベルがありません。", ephemeral=True)
             return
         await interaction.response.send_modal(CountCommentModal(self.state))
+
+    async def _edit_custom_labels(self, interaction: discord.Interaction) -> None:
+        await interaction.response.send_modal(CustomLabelModal(self.state))
 
     async def _back(self, interaction: discord.Interaction) -> None:
         self.state.step = 4

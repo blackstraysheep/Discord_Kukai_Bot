@@ -10,6 +10,7 @@ from bot.database import get_session
 from bot.services import entry_service, kukai_service
 from bot.services.errors import ServiceError
 from bot.utils.embed_builder import error_embed, success_embed
+from bot.utils.entry_notifications import notify_entry_approved
 
 if TYPE_CHECKING:
     from bot.models.entry import Entry
@@ -78,6 +79,13 @@ class EntryActionSelect(discord.ui.Select):
                 embed=success_embed(f"**{name}** さんを{verb}しました。"),
                 ephemeral=True,
             )
+            if self.action == "approve":
+                await notify_entry_approved(
+                    interaction.guild,
+                    kukai,
+                    user_id=target_user_id,
+                    display_name=name,
+                )
         except ServiceError as e:
             await interaction.response.send_message(
                 embed=error_embed(str(e)), ephemeral=True

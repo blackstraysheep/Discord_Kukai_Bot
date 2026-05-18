@@ -298,8 +298,27 @@ class KukaiCog(commands.Cog):
 
         state = WizardState(user_id=interaction.user.id, guild_id=interaction.guild.id)
         state.select_preset_options = [{"id": t.id, "name": t.name} for t in templates]
-        state.select_label_specs = select_rule_service.default_kukai_specs()
-        state.selected_select_label = "特選"
+        default_template = next((t for t in templates if t.is_default), None)
+        if default_template is not None:
+            points_enabled, _ = select_rule_service.deserialize_template_payload(
+                default_template.definition_json
+            )
+            state.select_preset_template_id = default_template.id
+            state.select_preset_name = default_template.name
+            state.select_points_enabled = points_enabled
+            state.select_label_specs = select_rule_service.build_kukai_specs_from_template(
+                default_template
+            )
+        else:
+            state.select_label_specs = select_rule_service.default_kukai_specs()
+        state.selected_select_label = next(
+            (
+                str(spec["label"])
+                for spec in state.select_label_specs
+                if spec["label"] != select_rule_service.AUTHOR_COMMENT_LABEL
+            ),
+            "特選",
+        )
         set_wizard(state)
         await goto_step(interaction, state, first_send=True)
 

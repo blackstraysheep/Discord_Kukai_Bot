@@ -8,7 +8,7 @@
 
 Discord完結型句会管理Bot。Python 3.13 / discord.py 2.x / SQLAlchemy 2.x async / aiosqlite / APScheduler 3.x。
 
-**現在の状態**: Phase 1〜10(品質強化) 完了。一括入力コマンド対応を追加済み。テスト 92件すべてパス。
+**現在の状態**: Phase 1〜10(品質強化) 完了。一括入力コマンド対応、句会情報表示改善、締切後エントリー承認フロー、通知管理コマンド、句会作成時の選句カスタム入力を追加済み。テスト 96件すべてパス。
 
 ---
 
@@ -35,10 +35,13 @@ Discord完結型句会管理Bot。Python 3.13 / discord.py 2.x / SQLAlchemy 2.x 
 
 ### Phase 3 — エントリー
 - `bot/repositories/entry_repo.py`
-- `bot/services/entry_service.py` — apply/approve/reject/withdraw/list_entries
+- `bot/services/entry_service.py` — enter/approve/reject/withdraw/list_entries
+  - エントリー締切後は自動承認せず `pending` として登録し、管理者承認を必須化
 - `bot/ui/entry_manage_view.py` — EntryManageView（承認/却下ボタン）
-- `bot/cogs/entry_cog.py` — `/entry apply/list/approve/reject/withdraw`
-- **テスト**: `test_entry_service.py`（12件）
+- `bot/cogs/entry_cog.py` — `/entry join/cancel/list/approve/reject/remove`
+  - 締切後エントリー申請時は句会チャンネルで句会作成者・追加管理者へ通知
+  - エントリー承認時は句会チャンネルで承認対象ユーザーだけに通知
+- **テスト**: `test_entry_service.py`（15件）
 
 ### Phase 4 — 投句
 - `bot/repositories/submission_repo.py`
@@ -81,6 +84,9 @@ Discord完結型句会管理Bot。Python 3.13 / discord.py 2.x / SQLAlchemy 2.x 
   - 句会作成時にデフォルトスケジュール（24h前通知 × 2）を自動生成
   - `replace_notification_schedules()` でカスタム通知を一括置換
   - APSchedulerの`date`トリガーでジョブ登録
+- `bot/cogs/notification_cog.py` — `/notification list/set/reset`
+  - 作成済み句会の通知設定を確認・一括差し替え・デフォルト復帰
+  - `set` はウィザードと同じ `event,offset,destination,target,mention` 書式を使用
 - `bot/main.py` 更新: setup_hookでinit_scheduler + set_bot + scheduler.start()
 - `bot/cogs/kukai_cog.py` 更新: create/pause/resume/cancelにスケジューラ連携
 
@@ -91,13 +97,14 @@ Discord完結型句会管理Bot。Python 3.13 / discord.py 2.x / SQLAlchemy 2.x 
 - `bot/ui/wizard/step_entry.py` — Step 2: エントリー設定（Select × 2）
 - `bot/ui/wizard/step_schedule.py` — Step 3: 投句締切/選句締切（Modal + JST検証）
 - `bot/ui/wizard/step_submission.py` — Step 4: 投句設定（Select + 詳細Modalで最低/最大投句数）
-- `bot/ui/wizard/step_select_rule.py` — Step 5: 選句プリセット選択と句会ごとの選句数・コメント設定
+- `bot/ui/wizard/step_select_rule.py` — Step 5: 選句プリセット選択、句会ごとの選句数・コメント設定、選句種別の直接入力
 - `bot/ui/wizard/step_publish.py` — Step 6: 公開/結果/作者設定（Select × 3）
 - `bot/ui/wizard/step_voice.py` — Step 7: ボイス句会の時間・場所設定
 - `bot/ui/wizard/step_notify.py` — Step 8: 通知回ごとの時間・通知先・対象・mention設定
 - `bot/ui/wizard/step_confirm.py` — Step 9: 確認・作成（チャンネル作成 → create_kukai → schedule_kukai_jobs）
 - `bot/services/kukai_service.py` 更新: create_kukai()にウィザード設定パラメータ追加
 - `/kukai create` をウィザード起動に差し替え（権限チェック後、step 1を送信）
+  - サーバー既定プリセットがある場合はウィザード開始時に自動適用
 
 ### Phase 9 — Export / Import + /kukai edit + ギルド設定（コア実装）
 - `bot/services/export_service.py` 追加
@@ -135,11 +142,15 @@ Discord完結型句会管理Bot。Python 3.13 / discord.py 2.x / SQLAlchemy 2.x 
   - `channel=current/new/<#channel_id>`、`preset_id`、`label=` に対応
   - `voice_enabled` / `voice_channel` / `voice_start_at` / `voice_end_at` に対応
   - `reminder=` による通知カスタマイズに対応
+  - `/kukai info` は作成時案内と同等の基本情報、現在の状態、句数、各締切、ボイス句会情報を表示
+  - `/kukai edit` で句会名を変更した際、チャンネル名が旧句会名由来ならチャンネル名も更新
 - `bot/cogs/select_cog.py`
   - `/select_bulk selections [kukai_id]` を追加
   - `番号=ラベル|コメント`, `overall=...`, `番号=clear` に対応
 - `bot/scheduler/jobs.py`
   - 自動投句締切時に公開対象0件で `waiting_publish` に残らないよう補正
+- `bot/ui/submission_view.py`
+  - 投句の登録・変更・削除時に、登録時と同じ形式で現在の投句一覧を通知
 
 ---
 
@@ -147,7 +158,8 @@ Discord完結型句会管理Bot。Python 3.13 / discord.py 2.x / SQLAlchemy 2.x 
 
 ```
 tests/test_bulk_parser.py          6件  ✅
-tests/test_entry_service.py      12件  ✅
+tests/test_entry_service.py      15件  ✅
+tests/test_kukai_info_embed.py    1件  ✅
 tests/test_kukai_service.py       9件  ✅
 tests/test_notification_phase10.py 6件 ✅
 tests/test_phase9_services.py     5件  ✅
@@ -158,7 +170,7 @@ tests/test_select_rule_service.py 5件  ✅
 tests/test_select_service.py      12件  ✅
 tests/test_submission_service.py 19件  ✅
                               -------
-合計                            92件  全パス
+合計                            96件  全パス
 ```
 
 実行: `py -m pytest`
@@ -212,6 +224,7 @@ kukai_bot/
 │   │   ├── kukai_cog.py      # /kukai *
 │   │   ├── entry_cog.py      # /entry *
 │   │   ├── preset_cog.py     # /preset *, /preset bulk
+│   │   ├── notification_cog.py # /notification *
 │   │   ├── submission_cog.py # /submit, /submit_bulk
 │   │   ├── select_cog.py     # /select, /select_bulk
 │   │   ├── check_cog.py      # /check
@@ -241,11 +254,13 @@ kukai_bot/
 │       ├── text.py
 │       ├── datetime_utils.py
 │       ├── discord_retry.py
+│       ├── entry_notifications.py
 │       └── embed_builder.py
 └── tests/
     ├── conftest.py
     ├── test_bulk_parser.py
     ├── test_kukai_service.py
+    ├── test_kukai_info_embed.py
     ├── test_entry_service.py
     ├── test_submission_service.py
     ├── test_select_service.py
@@ -346,11 +361,18 @@ py -m pytest tests/ -v
 
 # 5. Discord動作確認順序
 /kukai create          → ウィザード（9ステップ）で句会作成
+  Step 5でプリセット選択、選句数・コメント設定、または選句種別の直接入力が可能
 /kukai create_bulk ... → 行形式で句会を一括作成
   voice_enabled=true / voice_channel=<#...> / reminder=... でボイス句会・通知も設定可能
+/notification list ... → 句会の通知設定を確認
+/notification set ...  → event,offset,destination,target,mention 形式で通知を差し替え
+/notification reset ...→ 通知をデフォルト（投句・選句24時間前）へ戻す
 /kukai list            → 作成した句会を確認
 /kukai proceed ...     → 状態を進める
-/entry apply ...       → エントリー（entry_enabled=trueの場合）
+/kukai info ...        → 句会情報（現在の状態・締切・ボイス句会情報など）を確認
+/entry join ...        → エントリー（entry_enabled=trueの場合）
+  エントリー締切後は承認待ちになり、句会管理者へ通知
+  承認時は句会チャンネルで承認対象ユーザーだけに通知
 /submit ...            → 投句
 /submit_bulk ...       → 複数行を一括投句
 /kukai publish ...     → 投句公開（publish_mode=manualの場合）

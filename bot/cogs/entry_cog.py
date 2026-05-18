@@ -24,6 +24,7 @@ from bot.utils.embed_builder import (
     error_embed,
     success_embed,
 )
+from bot.utils.entry_notifications import notify_entry_approved
 
 logger = logging.getLogger(__name__)
 
@@ -274,6 +275,13 @@ class EntryCog(commands.Cog):
                         embed=success_embed(f"**{name}** さんを{action_ja}しました。"),
                         ephemeral=True,
                     )
+                    if action == "approve":
+                        await notify_entry_approved(
+                            interaction.guild,
+                            kukai,
+                            user_id=user.id,
+                            display_name=name,
+                        )
                     return
 
                 # No user specified → show select menu of pending entries
