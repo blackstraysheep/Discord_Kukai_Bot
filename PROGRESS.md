@@ -8,7 +8,7 @@
 
 Discord完結型句会管理Bot。Python 3.13 / discord.py 2.x / SQLAlchemy 2.x async / aiosqlite / APScheduler 3.x。
 
-**現在の状態**: Phase 1〜10(品質強化) 完了。一括入力コマンド対応、句会情報表示改善、締切後エントリー承認フロー、通知管理コマンド、句会作成時の選句カスタム入力を追加済み。テスト 96件すべてパス。
+**現在の状態**: Phase 1〜10(品質強化) 完了。一括入力コマンド対応、句会情報表示改善、締切後エントリー承認フロー、通知管理コマンド、句会作成時の選句カスタム入力、管理者向け進捗確認を追加済み。テスト 96件すべてパス。
 
 ---
 
@@ -78,6 +78,7 @@ Discord完結型句会管理Bot。Python 3.13 / discord.py 2.x / SQLAlchemy 2.x 
   - `notification_job(schedule_id)`: NotificationScheduleを取得しリマインダー送信
   - 通知回ごとに `channel_id` と `mention` を持ち、DM/チャンネル/mention付き通知を切替可能
   - `voice_start` 通知イベントに対応
+  - `entry_close` 通知ではエントリー参加者一覧（承認済/審査待ち）をEmbedに表示
   - `deadline_job(kukai_id, event_type)`: manual/semi_auto/full_autoに応じた自動進行
 - `bot/repositories/notification_repo.py`
 - `bot/services/notification_service.py` — schedule_kukai_jobs / cancel_kukai_jobs
@@ -114,6 +115,7 @@ Discord完結型句会管理Bot。Python 3.13 / discord.py 2.x / SQLAlchemy 2.x 
 - `bot/cogs/admin_cog.py` 実装
   - `/kukai_admin export` — JSON/CSVをDM送信
   - `/kukai_admin import_data` — JSON添付から復元
+  - `/kukai_admin status` — 管理者向けにエントリー者、投句数、選句ラベル別件数、コメント数、総評有無を表示
   - `/kukai_admin add_admin`, `/kukai_admin remove_admin`
   - `/guild settings` — create_role と role/user ID リストの確認・更新
 - `bot/services/kukai_service.py` 拡張
@@ -367,6 +369,7 @@ py -m pytest tests/ -v
 /notification list ... → 句会の通知設定を確認
 /notification set ...  → event,offset,destination,target,mention 形式で通知を差し替え
 /notification reset ...→ 通知をデフォルト（投句・選句24時間前）へ戻す
+/kukai_admin status ...→ 管理者向けにエントリー・投句・選句状況を確認
 /kukai list            → 作成した句会を確認
 /kukai proceed ...     → 状態を進める
 /kukai info ...        → 句会情報（現在の状態・締切・ボイス句会情報など）を確認

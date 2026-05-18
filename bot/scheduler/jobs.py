@@ -96,6 +96,14 @@ async def notification_job(schedule_id: int) -> None:
         import discord
         embed = discord.Embed(description=embed_desc, color=COLOR_INFO)
         embed.set_footer(text=f"句会 ID: {kukai.id}")
+        guild = _bot.get_guild(kukai.guild_id)
+        if ns.event_type == "entry_close" and getattr(kukai, "entry_enabled", False):
+            participant_lines = await _entry_close_participant_lines(session, guild, kukai.id)
+            embed.add_field(
+                name="参加者一覧",
+                value=_limited_field_value(participant_lines),
+                inline=False,
+            )
 
         target_user_ids = await _notification_target_user_ids(session, kukai, ns.event_type, ns.target)
         mention_text = " ".join(f"<@{user_id}>" for user_id in target_user_ids) if ns.mention else ""
@@ -103,7 +111,6 @@ async def notification_job(schedule_id: int) -> None:
         error_msg = None
 
         if ns.channel_id == -1:
-            guild = _bot.get_guild(kukai.guild_id)
             if guild:
                 for user_id in target_user_ids:
                     member = guild.get_member(user_id)
@@ -118,7 +125,6 @@ async def notification_job(schedule_id: int) -> None:
         else:
             channel_id = ns.channel_id if ns.channel_id else kukai.channel_id
             if channel_id and channel_id > 0:
-                guild = _bot.get_guild(kukai.guild_id)
                 if guild:
                     channel = guild.get_channel(channel_id)
                     if channel and hasattr(channel, "send"):
@@ -462,6 +468,52 @@ async def _notification_target_user_ids(session, kukai, event_type: str, target:
         )
         return [entry.user_id for entry in result.scalars().all()]
     return [kukai.created_by]
+
+
+def _limited_field_value(lines: list[str], *, limit: int = 1024) -> str:
+    if not lines:
+        return "（なし）"
+    value = ""
+    shown = 0
+    for line in lines:
+        candidate = f"{value}\n{line}" if value else line
+        if len(candidate) > limit:
+            remaining = len(lines) - shown
+            suffix = f"\n…他 {remaining} 件"
+            if value and len(value) + len(suffix) <= limit:
+                value += suffix
+            break
+        value = candidate
+        shown += 1
+    return value or "（表示できる項目がありません）"
+
+
+async def _entry_close_participant_lines(session, guild, kukai_id: int) -> list[str]:
+    from sqlalchemy import select
+
+    from bot.models.entry import Entry
+    from bot.utils.text import discord_safe
+
+    result = await session.execute(
+        select(Entry)
+        .where(
+            Entry.kukai_id == kukai_id,
+            Entry.status.in_(["approved", "pending"]),
+        )
+        .order_by(Entry.created_at)
+    )
+    entries = list(result.scalars().all())
+    lines: list[str] = []
+    for entry in entries:
+        icon = "✅" if entry.status == "approved" else "⏳"
+        status = "承認済" if entry.status == "approved" else "審査待ち"
+        if entry.haigo:
+            name = discord_safe(entry.haigo)
+        else:
+            member = guild.get_member(entry.user_id) if guild else None
+            name = discord_safe(member.display_name if member else f"UID:{entry.user_id}")
+        lines.append(f"{icon} {name}（{status}）")
+    return lines
 
 
 async def _auto_publish_result_list(session, kukai) -> tuple[int | None, str | None]:
