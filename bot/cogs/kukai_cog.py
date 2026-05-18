@@ -244,6 +244,7 @@ class KukaiCog(commands.Cog):
             from sqlalchemy import select as _sa_select
             from sqlalchemy.orm import selectinload
             from bot.models.kukai import Kukai as _Kukai
+            from bot.models.voice_session import VoiceSession as _VoiceSession
             async with get_session() as session:
                 result = await session.execute(
                     _sa_select(_Kukai)
@@ -260,7 +261,16 @@ class KukaiCog(commands.Cog):
                     )
                     return
                 select_labels = list(kukai.select_labels)
-            embed = _build_info_embed(kukai, select_labels=select_labels)
+                voice_session = (
+                    await session.execute(
+                        _sa_select(_VoiceSession).where(_VoiceSession.kukai_id == kukai.id)
+                    )
+                ).scalar_one_or_none()
+            embed = _build_info_embed(
+                kukai,
+                select_labels=select_labels,
+                voice_session=voice_session,
+            )
             await interaction.response.send_message(embed=embed, ephemeral=True)
         except ServiceError as e:
             await interaction.response.send_message(embed=error_embed(str(e)), ephemeral=True)
@@ -1206,7 +1216,12 @@ def _sanitize_channel_name(title: str) -> str:
     return name[:100].strip("-") or "kukai"
 
 
-def _build_info_embed(kukai, *, select_labels: list | None = None) -> discord.Embed:
+def _build_info_embed(
+    kukai,
+    *,
+    select_labels: list | None = None,
+    voice_session=None,
+) -> discord.Embed:
     state_ja = STATE_LABEL.get(kukai.state, kukai.state)
     embed = discord.Embed(
         title=f"📋 {kukai.title}",
@@ -1230,7 +1245,8 @@ def _build_info_embed(kukai, *, select_labels: list | None = None) -> discord.Em
     embed.add_field(name="投句締切", value=submission_deadline, inline=False)
     embed.add_field(name="選句締切", value=selecting_deadline, inline=False)
 
-    voice_session = getattr(kukai, "voice_session", None)
+    if voice_session is None:
+        voice_session = getattr(kukai, "__dict__", {}).get("voice_session")
     if voice_session is not None:
         start_at = format_jst(voice_session.start_at) if voice_session.start_at else "未定"
         voice_value = f"開始: {start_at}\n場所: <#{voice_session.vc_channel_id}>"

@@ -25,8 +25,10 @@ async def enter(
     """Register a user for a kukai."""
     if not kukai.entry_enabled:
         raise InvalidStateError("この句会はエントリー制ではありません。")
-    if KukaiState.from_value(kukai.state) != KukaiState.ENTRY_OPEN:
+    state = KukaiState.from_value(kukai.state)
+    if state not in {KukaiState.ENTRY_OPEN, KukaiState.ENTRY_CLOSED}:
         raise InvalidStateError("現在エントリーを受け付けていません。")
+    approval_required = kukai.entry_approval or is_late_entry_request(kukai)
 
     existing = await entry_repo.get_by_user(session, kukai.id, user_id)
     if existing:
@@ -40,7 +42,7 @@ async def enter(
                 raise ValidationError("その俳号はこの句会ですでに使われています。別の俳号を指定してください。")
         # rejected or withdrawn → reuse the row
         existing.haigo = haigo or None
-        existing.status = "pending" if kukai.entry_approval else "approved"
+        existing.status = "pending" if approval_required else "approved"
         existing.approved_by = None
         existing.approved_at = None
         return existing
@@ -54,7 +56,7 @@ async def enter(
         kukai_id=kukai.id,
         user_id=user_id,
         haigo=haigo or None,
-        status="pending" if kukai.entry_approval else "approved",
+        status="pending" if approval_required else "approved",
     )
     session.add(entry)
     await session.flush()
@@ -81,14 +83,14 @@ async def approve(
     target_user_id: int,
 ) -> Entry:
     """Admin: approve a pending entry."""
-    if not kukai.entry_approval:
-        raise ValidationError("この句会は承認制ではありません。")
     if KukaiState.from_value(kukai.state) not in _APPROVAL_ALLOWED:
         raise InvalidStateError("エントリー管理はエントリー期間中または締切後のみ可能です。")
 
     entry = await entry_repo.get_by_user(session, kukai.id, target_user_id)
     if not entry or entry.status == "withdrawn":
         raise NotFoundError("エントリーが見つかりません。")
+    if not kukai.entry_approval and entry.status != "pending":
+        raise ValidationError("この句会は承認制ではありません。")
 
     entry.status = "approved"
     entry.approved_by = approver_id
@@ -142,3 +144,14 @@ async def list_entries(
     status: str | None = None,
 ) -> list[Entry]:
     return await entry_repo.list_by_kukai(session, kukai_id, status)
+
+
+def is_late_entry_request(kukai) -> bool:
+    """True when a new entry must be reviewed because the entry deadline passed."""
+    state = KukaiState.from_value(kukai.state)
+    if state == KukaiState.ENTRY_CLOSED:
+        return True
+    if state != KukaiState.ENTRY_OPEN or kukai.entry_close_at is None:
+        return False
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    return kukai.entry_close_at <= now

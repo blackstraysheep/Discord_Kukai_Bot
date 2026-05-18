@@ -6,19 +6,26 @@ Discord does not allow a group and a same-name leaf command to coexist.
 We use '/entry join' for consistency.
 """
 
+import logging
+
 import discord
 from discord import app_commands
 from discord.ext import commands
+from sqlalchemy import select
 
 from bot.database import get_session
+from bot.models.kukai import KukaiAdmin
 from bot.services import entry_service, kukai_service, permission_service
 from bot.services.errors import ServiceError
 from bot.ui.entry_manage_view import EntryManageView
+from bot.utils.discord_retry import send_with_retry
 from bot.utils.embed_builder import (
     COLOR_INFO,
     error_embed,
     success_embed,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class EntryHaigoModal(discord.ui.Modal, title="エントリー"):
@@ -40,13 +47,21 @@ class EntryHaigoModal(discord.ui.Modal, title="エントリー"):
 
         haigo = self.haigo.value.strip() or None
         try:
+            late_entry = False
+            admin_ids: list[int] = []
             async with get_session() as session:
                 kukai = await kukai_service.get_kukai(
                     session, self.kukai_id, interaction.guild.id
                 )
+                late_entry = entry_service.is_late_entry_request(kukai)
                 entry = await entry_service.enter(
                     session, kukai, interaction.user.id, haigo
                 )
+                if late_entry and entry.status == "pending":
+                    result = await session.execute(
+                        select(KukaiAdmin.user_id).where(KukaiAdmin.kukai_id == kukai.id)
+                    )
+                    admin_ids = [kukai.created_by, *result.scalars().all()]
             display_name = entry.haigo or interaction.user.display_name  # type: ignore[union-attr]
             if entry.status == "approved":
                 msg = f"「**{kukai.title}**」にエントリーしました。\n俳号: **{display_name}**"
@@ -58,6 +73,15 @@ class EntryHaigoModal(discord.ui.Modal, title="エントリー"):
             await interaction.followup.send(
                 embed=success_embed(msg, title="エントリー完了"), ephemeral=True
             )
+            if late_entry and entry.status == "pending":
+                await _notify_late_entry_request(
+                    interaction,
+                    kukai_title=kukai.title,
+                    kukai_id=kukai.id,
+                    channel_id=kukai.channel_id,
+                    admin_ids=admin_ids,
+                    display_name=display_name,
+                )
         except ServiceError as e:
             await interaction.followup.send(embed=error_embed(str(e)), ephemeral=True)
 
@@ -281,3 +305,48 @@ class EntryCog(commands.Cog):
 
 async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(EntryCog(bot))
+
+
+async def _notify_late_entry_request(
+    interaction: discord.Interaction,
+    *,
+    kukai_title: str,
+    kukai_id: int,
+    channel_id: int | None,
+    admin_ids: list[int],
+    display_name: str,
+) -> None:
+    """Notify kukai admins that a post-deadline entry needs approval."""
+    assert interaction.guild is not None
+
+    target = interaction.guild.get_channel(channel_id) if channel_id else interaction.channel
+    if not target or not hasattr(target, "send"):
+        return
+
+    unique_admin_ids = list(dict.fromkeys(admin_ids))
+    mentions = " ".join(f"<@{user_id}>" for user_id in unique_admin_ids)
+    embed = discord.Embed(
+        title="締切後エントリー申請",
+        description=(
+            f"「**{kukai_title}**」に締切後のエントリー申請がありました。\n"
+            "承認する場合は `/entry approve`、却下する場合は `/entry reject` を実行してください。"
+        ),
+        color=COLOR_INFO,
+    )
+    embed.add_field(
+        name="申請者",
+        value=f"{interaction.user.mention} (`{interaction.user.id}`)\n俳号: **{display_name}**",
+        inline=False,
+    )
+    embed.set_footer(text=f"句会ID: {kukai_id}")
+
+    try:
+        await send_with_retry(
+            lambda: target.send(
+                content=mentions or None,
+                embed=embed,
+                allowed_mentions=discord.AllowedMentions(users=True, roles=False, everyone=False),
+            )
+        )
+    except (discord.Forbidden, discord.HTTPException) as error:
+        logger.warning("late entry admin notification failed: %s", error)

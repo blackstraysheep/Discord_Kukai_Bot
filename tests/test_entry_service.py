@@ -51,6 +51,41 @@ async def test_enter_with_approval(db_session):
 
 
 @pytest.mark.asyncio
+async def test_enter_after_deadline_requires_approval_even_without_approval_mode(db_session):
+    kukai = await _make_kukai(db_session, entry_approval=False)
+    kukai.entry_close_at = _utc(-1)
+    await kukai_service.proceed(db_session, kukai)  # → entry_open
+    await db_session.commit()
+
+    entry = await entry_service.enter(db_session, kukai, user_id=1)
+    assert entry.status == "pending"
+
+
+@pytest.mark.asyncio
+async def test_late_entry_allowed_in_entry_closed_as_pending(db_session):
+    kukai = await _make_kukai(db_session, entry_approval=False)
+    await kukai_service.proceed(db_session, kukai)  # → entry_open
+    await kukai_service.proceed(db_session, kukai)  # → entry_closed
+    await db_session.commit()
+
+    entry = await entry_service.enter(db_session, kukai, user_id=1)
+    assert entry.status == "pending"
+
+
+@pytest.mark.asyncio
+async def test_approve_late_pending_without_approval_mode(db_session):
+    kukai = await _make_kukai(db_session, entry_approval=False)
+    kukai.entry_close_at = _utc(-1)
+    await kukai_service.proceed(db_session, kukai)  # → entry_open
+    await db_session.commit()
+
+    await entry_service.enter(db_session, kukai, user_id=1)
+    entry = await entry_service.approve(db_session, kukai, approver_id=100, target_user_id=1)
+    assert entry.status == "approved"
+    assert entry.approved_by == 100
+
+
+@pytest.mark.asyncio
 async def test_enter_duplicate_raises(db_session):
     kukai = await _make_kukai(db_session)
     await kukai_service.proceed(db_session, kukai)
