@@ -93,7 +93,7 @@ class StepScheduleModal(discord.ui.Modal, title="日程の入力"):
         self.entry_close: discord.ui.TextInput | None = None
         if state.entry_enabled:
             self.entry_close = discord.ui.TextInput(
-                label="エントリー締切（任意） (YYYY-MM-DD HH:MM)",
+                label="エントリー締切 (YYYY-MM-DD HH:MM)",
                 placeholder="2026-06-01 20:00",
                 required=False,
                 max_length=20,
@@ -104,7 +104,7 @@ class StepScheduleModal(discord.ui.Modal, title="日程の入力"):
             self.add_item(self.entry_close)
 
         self.submission_close = discord.ui.TextInput(
-            label="投句締切 *  (YYYY-MM-DD HH:MM)",
+            label="投句締切 (YYYY-MM-DD HH:MM)",
             placeholder="2026-06-01 23:59",
             max_length=20,
         )
@@ -114,7 +114,7 @@ class StepScheduleModal(discord.ui.Modal, title="日程の入力"):
         self.add_item(self.submission_close)
 
         self.selecting_close = discord.ui.TextInput(
-            label="選句締切 *  (YYYY-MM-DD HH:MM)",
+            label="選句締切 (YYYY-MM-DD HH:MM)",
             placeholder="2026-06-08 23:59",
             max_length=20,
         )
