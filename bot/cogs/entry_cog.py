@@ -18,6 +18,7 @@ from bot.models.kukai import KukaiAdmin
 from bot.services import entry_service, kukai_service, permission_service
 from bot.services.errors import ServiceError
 from bot.ui.entry_manage_view import EntryManageView
+from bot.utils.channel import effective_channel_id
 from bot.utils.discord_retry import send_with_retry
 from bot.utils.embed_builder import (
     COLOR_INFO,
@@ -106,7 +107,7 @@ class EntryCog(commands.Cog):
                 kukai = await kukai_service.resolve_kukai_in_channel(
                     session,
                     guild_id=interaction.guild.id,
-                    channel_id=interaction.channel_id,
+                    channel_id=effective_channel_id(interaction),
                     kukai_id=kukai_id,
                 )
             await interaction.response.send_modal(EntryHaigoModal(kukai.id))
@@ -122,7 +123,7 @@ class EntryCog(commands.Cog):
                 kukai = await kukai_service.resolve_kukai_in_channel(
                     session,
                     guild_id=interaction.guild.id,
-                    channel_id=interaction.channel_id,
+                    channel_id=effective_channel_id(interaction),
                     kukai_id=kukai_id,
                 )
                 entry = await entry_service.withdraw(session, kukai, interaction.user.id)
@@ -137,8 +138,8 @@ class EntryCog(commands.Cog):
     # Admin commands
     # ------------------------------------------------------------------
 
-    @entry.command(name="list", description="【管理者】エントリー一覧を表示します")
-    @app_commands.describe(kukai_id="句会ID", status="絞り込み (省略で全件)")
+    @entry.command(name="list", description="【句会管理者】エントリー一覧を表示します")
+    @app_commands.describe(kukai_id="句会ID（省略可: このチャンネルで1件なら自動特定）", status="絞り込み (省略で全件)")
     @app_commands.choices(
         status=[
             app_commands.Choice(name="審査待ち", value="pending"),
@@ -150,19 +151,24 @@ class EntryCog(commands.Cog):
     async def entry_list(
         self,
         interaction: discord.Interaction,
-        kukai_id: int,
+        kukai_id: int | None = None,
         status: str | None = None,
     ) -> None:
         assert interaction.guild is not None
         try:
             async with get_session() as session:
-                kukai = await kukai_service.get_kukai(session, kukai_id, interaction.guild.id)
+                kukai = await kukai_service.resolve_kukai_in_channel(
+                    session,
+                    guild_id=interaction.guild.id,
+                    channel_id=effective_channel_id(interaction),
+                    kukai_id=kukai_id,
+                )
                 if not await permission_service.is_kukai_admin(session, kukai, interaction.user):  # type: ignore[arg-type]
                     await interaction.response.send_message(
                         embed=error_embed("この操作は句会管理者のみ実行できます。"), ephemeral=True
                     )
                     return
-                entries = await entry_service.list_entries(session, kukai_id, status)
+                entries = await entry_service.list_entries(session, kukai.id, status)
 
             if not entries:
                 label = f"（{status}）" if status else ""
@@ -193,38 +199,43 @@ class EntryCog(commands.Cog):
         except ServiceError as e:
             await interaction.response.send_message(embed=error_embed(str(e)), ephemeral=True)
 
-    @entry.command(name="approve", description="【管理者】エントリーを承認します")
-    @app_commands.describe(kukai_id="句会ID", user="承認するユーザー（省略でリストから選択）")
+    @entry.command(name="approve", description="【句会管理者】エントリーを承認します")
+    @app_commands.describe(kukai_id="句会ID（省略可: このチャンネルで1件なら自動特定）", user="承認するユーザー（省略でリストから選択）")
     async def entry_approve(
         self,
         interaction: discord.Interaction,
-        kukai_id: int,
         user: discord.Member | None = None,
+        kukai_id: int | None = None,
     ) -> None:
-        await self._admin_action(interaction, kukai_id, user, "approve")
+        await self._admin_action(interaction, effective_channel_id(interaction), kukai_id, user, "approve")
 
-    @entry.command(name="reject", description="【管理者】エントリーを却下します")
-    @app_commands.describe(kukai_id="句会ID", user="却下するユーザー（省略でリストから選択）")
+    @entry.command(name="reject", description="【句会管理者】エントリーを却下します")
+    @app_commands.describe(kukai_id="句会ID（省略可: このチャンネルで1件なら自動特定）", user="却下するユーザー（省略でリストから選択）")
     async def entry_reject(
         self,
         interaction: discord.Interaction,
-        kukai_id: int,
         user: discord.Member | None = None,
+        kukai_id: int | None = None,
     ) -> None:
-        await self._admin_action(interaction, kukai_id, user, "reject")
+        await self._admin_action(interaction, effective_channel_id(interaction), kukai_id, user, "reject")
 
-    @entry.command(name="remove", description="【管理者】エントリーを削除します（エントリー締切後）")
-    @app_commands.describe(kukai_id="句会ID", user="削除するユーザー")
+    @entry.command(name="remove", description="【句会管理者】エントリーを削除します（エントリー締切後）")
+    @app_commands.describe(kukai_id="句会ID（省略可: このチャンネルで1件なら自動特定）", user="削除するユーザー")
     async def entry_remove(
         self,
         interaction: discord.Interaction,
-        kukai_id: int,
         user: discord.Member,
+        kukai_id: int | None = None,
     ) -> None:
         assert interaction.guild is not None
         try:
             async with get_session() as session:
-                kukai = await kukai_service.get_kukai(session, kukai_id, interaction.guild.id)
+                kukai = await kukai_service.resolve_kukai_in_channel(
+                    session,
+                    guild_id=interaction.guild.id,
+                    channel_id=effective_channel_id(interaction),
+                    kukai_id=kukai_id,
+                )
                 if not await permission_service.is_kukai_admin(session, kukai, interaction.user):  # type: ignore[arg-type]
                     await interaction.response.send_message(
                         embed=error_embed("この操作は句会管理者のみ実行できます。"), ephemeral=True
@@ -245,7 +256,8 @@ class EntryCog(commands.Cog):
     async def _admin_action(
         self,
         interaction: discord.Interaction,
-        kukai_id: int,
+        channel_id: int | None,
+        kukai_id: int | None,
         user: discord.Member | None,
         action: str,
     ) -> None:
@@ -253,7 +265,12 @@ class EntryCog(commands.Cog):
         action_ja = "承認" if action == "approve" else "却下"
         try:
             async with get_session() as session:
-                kukai = await kukai_service.get_kukai(session, kukai_id, interaction.guild.id)
+                kukai = await kukai_service.resolve_kukai_in_channel(
+                    session,
+                    guild_id=interaction.guild.id,
+                    channel_id=channel_id,
+                    kukai_id=kukai_id,
+                )
                 if not await permission_service.is_kukai_admin(session, kukai, interaction.user):  # type: ignore[arg-type]
                     await interaction.response.send_message(
                         embed=error_embed("この操作は句会管理者のみ実行できます。"), ephemeral=True
@@ -285,7 +302,7 @@ class EntryCog(commands.Cog):
                     return
 
                 # No user specified → show select menu of pending entries
-                entries = await entry_service.list_entries(session, kukai_id, status="pending")
+                entries = await entry_service.list_entries(session, kukai.id, status="pending")
 
             if not entries:
                 await interaction.response.send_message(
@@ -297,7 +314,7 @@ class EntryCog(commands.Cog):
                 )
                 return
 
-            view = EntryManageView(kukai_id, entries, interaction.guild, action)
+            view = EntryManageView(kukai.id, entries, interaction.guild, action)
             await interaction.response.send_message(
                 embed=discord.Embed(
                     title=f"エントリー{action_ja}",

@@ -11,6 +11,7 @@ from bot.repositories import select_repo
 from bot.services import kukai_service, permission_service, result_service
 from bot.services.errors import ServiceError
 from bot.state_machine.states import KukaiState
+from bot.utils.channel import effective_channel_id
 from bot.utils.discord_retry import send_with_retry
 from bot.utils.embed_builder import COLOR_INFO, COLOR_RESULT, error_embed
 from bot.utils.text import discord_safe
@@ -369,7 +370,7 @@ class ResultCog(commands.Cog):
                 kukai = await kukai_service.resolve_kukai_in_channel(
                     session,
                     guild_id=interaction.guild.id,
-                    channel_id=interaction.channel_id,
+                    channel_id=effective_channel_id(interaction),
                     kukai_id=kukai_id,
                 )
                 state = KukaiState.from_value(kukai.state)

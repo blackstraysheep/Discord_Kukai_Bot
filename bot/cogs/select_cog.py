@@ -13,6 +13,7 @@ from bot.services.errors import ServiceError
 from bot.state_machine.states import KukaiState
 from bot.ui.select_view import SelectView, load_select_data
 from bot.utils.bulk_parser import BulkParseError, parse_fields
+from bot.utils.channel import effective_channel_id
 from bot.utils.embed_builder import COLOR_INFO, error_embed
 
 
@@ -29,7 +30,7 @@ class SelectCog(commands.Cog):
                 kukai = await kukai_service.resolve_kukai_in_channel(
                     session,
                     guild_id=interaction.guild.id,
-                    channel_id=interaction.channel_id,
+                    channel_id=effective_channel_id(interaction),
                     kukai_id=kukai_id,
                 )
                 if KukaiState.from_value(kukai.state) != KukaiState.SELECTING_OPEN:
@@ -91,7 +92,7 @@ class SelectCog(commands.Cog):
         except ServiceError as e:
             await interaction.response.send_message(embed=error_embed(str(e)), ephemeral=True)
 
-    @app_commands.command(name="select_bulk", description="複数行をまとめて選句します")
+    @app_commands.command(name="select-bulk", description="複数行をまとめて選句します")
     @app_commands.describe(
         selections="番号=ラベル|コメント / overall=総評 / 番号=clear",
         kukai_id="句会ID（省略可: このチャンネルで1件なら自動特定）",
@@ -117,7 +118,7 @@ class SelectCog(commands.Cog):
                 kukai = await kukai_service.resolve_kukai_in_channel(
                     session,
                     guild_id=interaction.guild.id,
-                    channel_id=interaction.channel_id,
+                    channel_id=effective_channel_id(interaction),
                     kukai_id=kukai_id,
                 )
                 if KukaiState.from_value(kukai.state) != KukaiState.SELECTING_OPEN:

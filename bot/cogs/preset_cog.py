@@ -44,7 +44,7 @@ class PresetCog(commands.Cog):
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
 
-    preset = app_commands.Group(name="preset", description="選句プリセットの管理")
+    preset = app_commands.Group(name="select-preset", description="選句プリセットの管理")
     label = app_commands.Group(name="label", description="プリセット内のラベル管理", parent=preset)
 
     # ── Preset CRUD ──────────────────────────────────────────────────────────

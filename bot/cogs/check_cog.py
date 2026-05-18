@@ -9,6 +9,7 @@ from bot.database import get_session
 from bot.models.select_rule import SelectLabel
 from bot.repositories import entry_repo, submission_repo, select_repo
 from bot.services import kukai_service
+from bot.utils.channel import effective_channel_id
 from bot.services.errors import ServiceError
 from bot.state_machine.states import KukaiState
 from bot.utils.embed_builder import COLOR_INFO, error_embed
@@ -28,7 +29,7 @@ class CheckCog(commands.Cog):
                 kukai = await kukai_service.resolve_kukai_in_channel(
                     session,
                     guild_id=interaction.guild.id,
-                    channel_id=interaction.channel_id,
+                    channel_id=effective_channel_id(interaction),
                     kukai_id=kukai_id,
                 )
                 user_id = interaction.user.id

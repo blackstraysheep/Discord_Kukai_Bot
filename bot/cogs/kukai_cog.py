@@ -37,6 +37,7 @@ from bot.utils.bulk_parser import (
     reject_unknown_keys,
     values_for,
 )
+from bot.utils.channel import effective_channel_id
 from bot.utils.discord_retry import send_with_retry
 from bot.utils.datetime_utils import format_jst, parse_datetime
 from bot.utils.submission_publish import build_submission_publish_embeds
@@ -197,12 +198,14 @@ class KukaiCog(commands.Cog):
         self.bot = bot
 
     kukai = app_commands.Group(name="kukai", description="句会の管理")
+    kukai_admin_grp = app_commands.Group(name="admin", description="句会管理者・データ操作", parent=kukai)
+    kukai_notify_grp = app_commands.Group(name="notify", description="通知設定の管理", parent=kukai)
 
     # ------------------------------------------------------------------
-    # Participant commands
+    # Top-level participant commands
     # ------------------------------------------------------------------
 
-    @kukai.command(name="list", description="このサーバーの開催中・招集中の句会一覧を表示します")
+    @app_commands.command(name="list", description="このサーバーの開催中・招集中の句会一覧を表示します")
     async def kukai_list(self, interaction: discord.Interaction) -> None:
         assert interaction.guild is not None
         async with get_session() as session:
@@ -236,7 +239,7 @@ class KukaiCog(commands.Cog):
 
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
-    @kukai.command(name="info", description="句会の詳細を表示します")
+    @app_commands.command(name="info", description="句会の詳細を表示します")
     @app_commands.describe(kukai_id="句会ID")
     async def kukai_info(self, interaction: discord.Interaction, kukai_id: int) -> None:
         assert interaction.guild is not None
@@ -322,7 +325,7 @@ class KukaiCog(commands.Cog):
         set_wizard(state)
         await goto_step(interaction, state, first_send=True)
 
-    @kukai.command(name="create_bulk", description="【管理者】行形式で新しい句会を一括作成します")
+    @kukai.command(name="create-bulk", description="【作成権限者】行形式で新しい句会を一括作成します")
     @app_commands.describe(config="title=... / submission_close_at=... / selecting_close_at=... / label=...")
     async def kukai_create_bulk(self, interaction: discord.Interaction, config: str) -> None:
         assert interaction.guild is not None
@@ -654,9 +657,9 @@ class KukaiCog(commands.Cog):
             message += f"\n\n⚠️ {name_collision_warning.strip()}"
         await interaction.edit_original_response(embed=success_embed(message))
 
-    @kukai.command(name="proceed", description="【管理者】句会を次の状態へ進めます")
-    @app_commands.describe(kukai_id="句会ID")
-    async def kukai_proceed(self, interaction: discord.Interaction, kukai_id: int) -> None:
+    @kukai.command(name="proceed", description="【句会管理者】句会を次の状態へ進めます")
+    @app_commands.describe(kukai_id="句会ID（省略可: このチャンネルで1件なら自動特定）")
+    async def kukai_proceed(self, interaction: discord.Interaction, kukai_id: int | None = None) -> None:
         assert interaction.guild is not None
         try:
             published_count: int | None = None
@@ -664,7 +667,12 @@ class KukaiCog(commands.Cog):
             result_count: int | None = None
             result_warning: str | None = None
             async with get_session() as session:
-                kukai = await kukai_service.get_kukai(session, kukai_id, interaction.guild.id)
+                kukai = await kukai_service.resolve_kukai_in_channel(
+                    session,
+                    guild_id=interaction.guild.id,
+                    channel_id=effective_channel_id(interaction),
+                    kukai_id=kukai_id,
+                )
                 if not await permission_service.is_kukai_admin(session, kukai, interaction.user):  # type: ignore[arg-type]
                     await interaction.response.send_message(
                         embed=error_embed("この操作は句会管理者のみ実行できます。"), ephemeral=True
@@ -708,13 +716,18 @@ class KukaiCog(commands.Cog):
         except ServiceError as e:
             await interaction.response.send_message(embed=error_embed(str(e)), ephemeral=True)
 
-    @kukai.command(name="pause", description="【管理者】句会を一時停止します")
-    @app_commands.describe(kukai_id="句会ID")
-    async def kukai_pause(self, interaction: discord.Interaction, kukai_id: int) -> None:
+    @kukai.command(name="pause", description="【句会管理者】句会を一時停止します")
+    @app_commands.describe(kukai_id="句会ID（省略可: このチャンネルで1件なら自動特定）")
+    async def kukai_pause(self, interaction: discord.Interaction, kukai_id: int | None = None) -> None:
         assert interaction.guild is not None
         try:
             async with get_session() as session:
-                kukai = await kukai_service.get_kukai(session, kukai_id, interaction.guild.id)
+                kukai = await kukai_service.resolve_kukai_in_channel(
+                    session,
+                    guild_id=interaction.guild.id,
+                    channel_id=effective_channel_id(interaction),
+                    kukai_id=kukai_id,
+                )
                 if not await permission_service.is_kukai_admin(session, kukai, interaction.user):  # type: ignore[arg-type]
                     await interaction.response.send_message(
                         embed=error_embed("この操作は句会管理者のみ実行できます。"), ephemeral=True
@@ -729,13 +742,18 @@ class KukaiCog(commands.Cog):
         except ServiceError as e:
             await interaction.response.send_message(embed=error_embed(str(e)), ephemeral=True)
 
-    @kukai.command(name="resume", description="【管理者】句会を再開します")
-    @app_commands.describe(kukai_id="句会ID")
-    async def kukai_resume(self, interaction: discord.Interaction, kukai_id: int) -> None:
+    @kukai.command(name="resume", description="【句会管理者】句会を再開します")
+    @app_commands.describe(kukai_id="句会ID（省略可: このチャンネルで1件なら自動特定）")
+    async def kukai_resume(self, interaction: discord.Interaction, kukai_id: int | None = None) -> None:
         assert interaction.guild is not None
         try:
             async with get_session() as session:
-                kukai = await kukai_service.get_kukai(session, kukai_id, interaction.guild.id)
+                kukai = await kukai_service.resolve_kukai_in_channel(
+                    session,
+                    guild_id=interaction.guild.id,
+                    channel_id=effective_channel_id(interaction),
+                    kukai_id=kukai_id,
+                )
                 if not await permission_service.is_kukai_admin(session, kukai, interaction.user):  # type: ignore[arg-type]
                     await interaction.response.send_message(
                         embed=error_embed("この操作は句会管理者のみ実行できます。"), ephemeral=True
@@ -751,19 +769,25 @@ class KukaiCog(commands.Cog):
         except ServiceError as e:
             await interaction.response.send_message(embed=error_embed(str(e)), ephemeral=True)
 
-    @kukai.command(name="cancel", description="【管理者】句会を中止します")
-    @app_commands.describe(kukai_id="句会ID")
-    async def kukai_cancel(self, interaction: discord.Interaction, kukai_id: int) -> None:
+    @kukai.command(name="cancel", description="【句会管理者】句会を中止します")
+    @app_commands.describe(kukai_id="句会ID（省略可: このチャンネルで1件なら自動特定）")
+    async def kukai_cancel(self, interaction: discord.Interaction, kukai_id: int | None = None) -> None:
         assert interaction.guild is not None
         try:
             async with get_session() as session:
-                kukai = await kukai_service.get_kukai(session, kukai_id, interaction.guild.id)
+                kukai = await kukai_service.resolve_kukai_in_channel(
+                    session,
+                    guild_id=interaction.guild.id,
+                    channel_id=effective_channel_id(interaction),
+                    kukai_id=kukai_id,
+                )
                 if not await permission_service.is_kukai_admin(session, kukai, interaction.user):  # type: ignore[arg-type]
                     await interaction.response.send_message(
                         embed=error_embed("この操作は句会管理者のみ実行できます。"), ephemeral=True
                     )
                     return
 
+            resolved_id = kukai.id
             view = ConfirmView()
             await interaction.response.send_message(
                 embed=discord.Embed(
@@ -783,7 +807,7 @@ class KukaiCog(commands.Cog):
                 return
 
             async with get_session() as session:
-                kukai = await kukai_service.get_kukai(session, kukai_id, interaction.guild.id)
+                kukai = await kukai_service.get_kukai(session, resolved_id, interaction.guild.id)
                 await kukai_service.cancel(session, kukai)
                 await notification_service.cancel_kukai_jobs(session, kukai.id)
 
@@ -923,19 +947,24 @@ class KukaiCog(commands.Cog):
 
         return len(results), None, first_message_id
 
-    @kukai.command(name="rollback", description="【管理者】句会を指定した前段階へ戻します")
-    @app_commands.describe(kukai_id="句会ID", target_state="戻す先の状態")
+    @kukai.command(name="rollback", description="【句会管理者】句会を指定した前段階へ戻します")
+    @app_commands.describe(kukai_id="句会ID（省略可: このチャンネルで1件なら自動特定）", target_state="戻す先の状態")
     @app_commands.choices(target_state=ROLLBACK_TARGET_CHOICES)
     async def kukai_rollback(
         self,
         interaction: discord.Interaction,
-        kukai_id: int,
         target_state: str,
+        kukai_id: int | None = None,
     ) -> None:
         assert interaction.guild is not None
         try:
             async with get_session() as session:
-                kukai = await kukai_service.get_kukai(session, kukai_id, interaction.guild.id)
+                kukai = await kukai_service.resolve_kukai_in_channel(
+                    session,
+                    guild_id=interaction.guild.id,
+                    channel_id=effective_channel_id(interaction),
+                    kukai_id=kukai_id,
+                )
                 if not await permission_service.is_kukai_admin(session, kukai, interaction.user):  # type: ignore[arg-type]
                     await interaction.response.send_message(
                         embed=error_embed("この操作は句会管理者のみ実行できます。"), ephemeral=True
@@ -952,6 +981,7 @@ class KukaiCog(commands.Cog):
                     return
                 allow_reset_submissions = submission_service.can_reset_submissions_on_rollback(target)
 
+            resolved_id = kukai.id
             current_label = STATE_LABEL.get(current.value, current.value)
             target_label = STATE_LABEL.get(target.value, target.value)
             reset_note = (
@@ -987,7 +1017,7 @@ class KukaiCog(commands.Cog):
             keep_submissions = view.choice != "reset_all"
             keep_selects = view.choice == "keep_all"
             async with get_session() as session:
-                kukai = await kukai_service.get_kukai(session, kukai_id, interaction.guild.id)
+                kukai = await kukai_service.get_kukai(session, resolved_id, interaction.guild.id)
                 await notification_service.cancel_kukai_jobs(session, kukai.id)
                 await submission_service.rollback_to_state(
                     session,
@@ -1018,9 +1048,9 @@ class KukaiCog(commands.Cog):
             else:
                 await interaction.response.send_message(embed=error_embed(str(e)), ephemeral=True)
 
-    @kukai.command(name="edit", description="【管理者】句会の設定を変更します")
+    @kukai.command(name="edit", description="【句会管理者】句会の設定を変更します")
     @app_commands.describe(
-        kukai_id="句会ID",
+        kukai_id="句会ID（省略可: このチャンネルで1件なら自動特定）",
         title="新しいタイトル",
         theme="新しい題（空文字でクリア）",
         description="新しい説明（空文字でクリア）",
@@ -1039,7 +1069,7 @@ class KukaiCog(commands.Cog):
     async def kukai_edit(
         self,
         interaction: discord.Interaction,
-        kukai_id: int,
+        kukai_id: int | None = None,
         title: str | None = None,
         theme: str | None = None,
         description: str | None = None,
@@ -1068,7 +1098,12 @@ class KukaiCog(commands.Cog):
 
         try:
             async with get_session() as session:
-                kukai = await kukai_service.get_kukai(session, kukai_id, interaction.guild.id)
+                kukai = await kukai_service.resolve_kukai_in_channel(
+                    session,
+                    guild_id=interaction.guild.id,
+                    channel_id=effective_channel_id(interaction),
+                    kukai_id=kukai_id,
+                )
                 if not await permission_service.is_kukai_admin(session, kukai, interaction.user):  # type: ignore[arg-type]
                     await interaction.response.send_message(
                         embed=error_embed("この操作は句会管理者のみ実行できます。"),
@@ -1228,6 +1263,459 @@ class KukaiCog(commands.Cog):
         except ServiceError as e:
             await interaction.response.send_message(embed=error_embed(str(e)), ephemeral=True)
 
+    # ------------------------------------------------------------------
+    # /kukai admin subgroup
+    # ------------------------------------------------------------------
+
+    @kukai_admin_grp.command(name="status", description="【句会管理者】エントリー・投句・選句の進捗を確認します")
+    @app_commands.describe(kukai_id="句会ID（省略可: このチャンネルで1件なら自動特定）")
+    async def admin_status(self, interaction: discord.Interaction, kukai_id: int | None = None) -> None:
+        assert interaction.guild is not None
+        from collections import Counter, defaultdict
+        from sqlalchemy import select as _sa_select
+        from bot.models.select_rule import SelectLabel
+        from bot.repositories import entry_repo, select_repo, submission_repo
+        from bot.utils.text import discord_safe
+
+        def _entry_status_icon(status: str) -> str:
+            return {"approved": "✅", "pending": "⏳", "rejected": "❌", "withdrawn": "↩️"}.get(status, "•")
+
+        def _entry_status_label(status: str) -> str:
+            return {"approved": "承認済", "pending": "審査待ち", "rejected": "却下", "withdrawn": "取消"}.get(status, status)
+
+        def _member_name(guild: discord.Guild, user_id: int, haigo: str | None = None) -> str:
+            if haigo:
+                return discord_safe(haigo)
+            member = guild.get_member(user_id)
+            return discord_safe(member.display_name if member else f"UID:{user_id}")
+
+        def _field_value(lines: list[str], *, limit: int = 1024) -> str:
+            if not lines:
+                return "（なし）"
+            value = ""
+            shown = 0
+            for line in lines:
+                candidate = f"{value}\n{line}" if value else line
+                if len(candidate) > limit:
+                    remaining = len(lines) - shown
+                    suffix = f"\n…他 {remaining} 件"
+                    if value and len(value) + len(suffix) <= limit:
+                        value += suffix
+                    break
+                value = candidate
+                shown += 1
+            return value or "（表示できる項目がありません）"
+
+        try:
+            async with get_session() as session:
+                kukai = await kukai_service.resolve_kukai_in_channel(
+                    session,
+                    guild_id=interaction.guild.id,
+                    channel_id=effective_channel_id(interaction),
+                    kukai_id=kukai_id,
+                )
+                if not await permission_service.is_kukai_admin(session, kukai, interaction.user):  # type: ignore[arg-type]
+                    await interaction.response.send_message(
+                        embed=error_embed("この句会の管理者権限がありません。"), ephemeral=True
+                    )
+                    return
+                entries = await entry_repo.list_by_kukai(session, kukai.id)
+                submissions = await submission_repo.list_by_kukai(session, kukai.id)
+                selects = await select_repo.get_all_selects(session, kukai.id)
+                overall_comments = await select_repo.list_overall_comments(session, kukai.id)
+                label_result = await session.execute(
+                    _sa_select(SelectLabel)
+                    .where(SelectLabel.kukai_id == kukai.id)
+                    .order_by(SelectLabel.display_order)
+                )
+                labels = list(label_result.scalars().all())
+        except ServiceError as e:
+            await interaction.response.send_message(embed=error_embed(str(e)), ephemeral=True)
+            return
+
+        guild = interaction.guild
+        entry_by_user = {entry.user_id: entry for entry in entries}
+        approved_entries = [entry for entry in entries if entry.status == "approved"]
+        if kukai.entry_enabled:
+            participant_user_ids = [entry.user_id for entry in approved_entries]
+        else:
+            participant_user_ids = sorted(
+                {row.user_id for row in submissions}
+                | {row.selector_user_id for row in selects}
+                | {row.user_id for row in overall_comments}
+            )
+        submission_counts = Counter(row.user_id for row in submissions)
+        selects_by_user: dict[int, list] = defaultdict(list)
+        for row in selects:
+            selects_by_user[row.selector_user_id].append(row)
+        overall_user_ids = {row.user_id for row in overall_comments}
+        non_author_labels = [label for label in labels if label.label != "作者コメント"]
+
+        embed = discord.Embed(title=f"管理者用 進捗確認 — {kukai.title}", color=COLOR_INFO)
+        embed.set_footer(text=f"句会ID: {kukai.id} | 状態: {kukai.state}")
+        if kukai.entry_enabled:
+            entry_lines = [
+                f"{_entry_status_icon(e.status)} {_member_name(guild, e.user_id, e.haigo)} ({_entry_status_label(e.status)})"
+                for e in entries
+            ]
+            embed.add_field(
+                name=f"エントリー者 ({len(entries)}件 / 承認済 {len(approved_entries)}件)",
+                value=_field_value(entry_lines), inline=False,
+            )
+        else:
+            embed.add_field(name="エントリー者", value="エントリー制なし。", inline=False)
+        max_label = "∞" if kukai.submission_max is None else str(kukai.submission_max)
+        submission_lines = [
+            f"{'✅' if submission_counts.get(u, 0) >= kukai.submission_min else '⚠️'} "
+            f"{_member_name(guild, u, entry_by_user.get(u).haigo if entry_by_user.get(u) else None)} "
+            f"{submission_counts.get(u, 0)}句投句済（必要 {kukai.submission_min}〜{max_label}句）"
+            for u in participant_user_ids
+        ]
+        embed.add_field(name="投句状況", value=_field_value(submission_lines), inline=False)
+        selection_lines = []
+        for user_id in participant_user_ids:
+            entry = entry_by_user.get(user_id)
+            user_selects = selects_by_user.get(user_id, [])
+            label_counts = Counter(row.select_label_id for row in user_selects if not row.is_self_comment)
+            missing = [lbl for lbl in non_author_labels if label_counts.get(lbl.id, 0) < lbl.min_count]
+            icon = "✅" if not missing else "⚠️"
+            parts = [f"{lbl.label}{label_counts.get(lbl.id, 0)}" for lbl in non_author_labels]
+            comment_count = sum(1 for row in user_selects if not row.is_self_comment and row.comment is not None)
+            author_comment_count = sum(1 for row in user_selects if row.is_self_comment)
+            parts.append(f"コメント{comment_count}")
+            if author_comment_count:
+                parts.append(f"作者コメント{author_comment_count}")
+            parts.append(f"総評{1 if user_id in overall_user_ids else 0}")
+            missing_text = (
+                " 不足:" + ",".join(f"{lbl.label}{label_counts.get(lbl.id, 0)}/{lbl.min_count}" for lbl in missing)
+                if missing else ""
+            )
+            selection_lines.append(
+                f"{icon} {_member_name(guild, user_id, entry.haigo if entry else None)} "
+                f"{' '.join(parts)}{missing_text}"
+            )
+        if not non_author_labels:
+            selection_lines = ["（作者コメント以外の選句ラベルがありません）"]
+        embed.add_field(name="選句状況", value=_field_value(selection_lines), inline=False)
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
+    @kukai_admin_grp.command(name="add", description="【句会管理者】句会管理者を追加します")
+    @app_commands.describe(kukai_id="句会ID（省略可: このチャンネルで1件なら自動特定）", user="追加するユーザー")
+    async def admin_add(
+        self, interaction: discord.Interaction, user: discord.Member, kukai_id: int | None = None
+    ) -> None:
+        assert interaction.guild is not None
+        try:
+            async with get_session() as session:
+                kukai = await kukai_service.resolve_kukai_in_channel(
+                    session,
+                    guild_id=interaction.guild.id,
+                    channel_id=effective_channel_id(interaction),
+                    kukai_id=kukai_id,
+                )
+                allowed = (
+                    interaction.user.id == interaction.guild.owner_id
+                    or await permission_service.is_kukai_admin(session, kukai, interaction.user)  # type: ignore[arg-type]
+                )
+                if not allowed:
+                    await interaction.response.send_message(
+                        embed=error_embed("管理者追加は句会管理者またはサーバー所有者のみ実行できます。"), ephemeral=True
+                    )
+                    return
+                await kukai_service.add_kukai_admin(session, kukai, user_id=user.id, added_by=interaction.user.id)
+            await interaction.response.send_message(
+                embed=success_embed(f"{user.mention} を句会管理者に追加しました。"), ephemeral=True
+            )
+        except ServiceError as e:
+            await interaction.response.send_message(embed=error_embed(str(e)), ephemeral=True)
+
+    @kukai_admin_grp.command(name="remove", description="【句会管理者】句会管理者を削除します")
+    @app_commands.describe(kukai_id="句会ID（省略可: このチャンネルで1件なら自動特定）", user="削除するユーザー")
+    async def admin_remove(
+        self, interaction: discord.Interaction, user: discord.Member, kukai_id: int | None = None
+    ) -> None:
+        assert interaction.guild is not None
+        try:
+            async with get_session() as session:
+                kukai = await kukai_service.resolve_kukai_in_channel(
+                    session,
+                    guild_id=interaction.guild.id,
+                    channel_id=effective_channel_id(interaction),
+                    kukai_id=kukai_id,
+                )
+                allowed = (
+                    interaction.user.id == interaction.guild.owner_id
+                    or interaction.user.id == kukai.created_by
+                )
+                if not allowed:
+                    await interaction.response.send_message(
+                        embed=error_embed("管理者削除は句会作成者またはサーバー所有者のみ実行できます。"), ephemeral=True
+                    )
+                    return
+                await kukai_service.remove_kukai_admin(session, kukai, user_id=user.id)
+            await interaction.response.send_message(
+                embed=success_embed(f"{user.mention} を句会管理者から削除しました。"), ephemeral=True
+            )
+        except ServiceError as e:
+            await interaction.response.send_message(embed=error_embed(str(e)), ephemeral=True)
+
+    @kukai_admin_grp.command(name="export", description="【句会管理者】句会データをエクスポートします")
+    @app_commands.describe(kukai_id="句会ID（省略時は全句会 / サーバー管理者のみ）", export_format="出力形式")
+    async def admin_export(
+        self,
+        interaction: discord.Interaction,
+        kukai_id: int | None = None,
+        export_format: Literal["json", "csv"] = "json",
+    ) -> None:
+        assert interaction.guild is not None
+        from bot.services import export_service
+
+        def _is_owner_or_admin(member: discord.Member) -> bool:
+            return member.id == member.guild.owner_id or member.guild_permissions.administrator
+
+        try:
+            async with get_session() as session:
+                if kukai_id is None:
+                    if not _is_owner_or_admin(interaction.user):  # type: ignore[arg-type]
+                        await interaction.response.send_message(
+                            embed=error_embed("全句会エクスポートはサーバー管理者のみ実行できます。"), ephemeral=True
+                        )
+                        return
+                else:
+                    kukai = await kukai_service.get_kukai(session, kukai_id, interaction.guild.id)
+                    if not await permission_service.is_kukai_admin(session, kukai, interaction.user):  # type: ignore[arg-type]
+                        await interaction.response.send_message(
+                            embed=error_embed("この句会の管理者権限がありません。"), ephemeral=True
+                        )
+                        return
+                payload = await export_service.export_payload(
+                    session, guild_id=interaction.guild.id, kukai_id=kukai_id
+                )
+            import io
+            if export_format == "csv":
+                content = export_service.payload_to_csv(payload).encode("utf-8")
+                filename = "kukai_export.csv"
+            else:
+                content = export_service.payload_to_json(payload).encode("utf-8")
+                filename = "kukai_export.json"
+            await interaction.user.send(
+                content=f"句会データを送付します（{export_format.upper()}）",
+                file=discord.File(io.BytesIO(content), filename=filename),
+            )
+            await interaction.response.send_message(
+                embed=success_embed("DMにエクスポートファイルを送付しました。"), ephemeral=True
+            )
+        except discord.Forbidden:
+            await interaction.response.send_message(
+                embed=error_embed("DMを送信できませんでした。DM受信設定を確認してください。"), ephemeral=True
+            )
+        except ServiceError as e:
+            await interaction.response.send_message(embed=error_embed(str(e)), ephemeral=True)
+
+    @kukai_admin_grp.command(name="import", description="【サーバー管理者】句会データ(JSON)をインポートします")
+    @app_commands.describe(file="exportで出力したJSONファイル")
+    async def admin_import(self, interaction: discord.Interaction, file: discord.Attachment) -> None:
+        assert interaction.guild is not None
+        import json
+        from bot.services import export_service
+        from bot.services.errors import ValidationError
+
+        def _is_owner_or_admin(member: discord.Member) -> bool:
+            return member.id == member.guild.owner_id or member.guild_permissions.administrator
+
+        if not _is_owner_or_admin(interaction.user):  # type: ignore[arg-type]
+            await interaction.response.send_message(
+                embed=error_embed("インポートはサーバー管理者のみ実行できます。"), ephemeral=True
+            )
+            return
+        try:
+            raw = (await file.read()).decode("utf-8")
+            payload = json.loads(raw)
+            if not isinstance(payload, dict):
+                raise ValidationError("JSON形式が不正です。")
+            async with get_session() as session:
+                imported_ids = await export_service.import_payload(
+                    session, guild_id=interaction.guild.id, payload=payload
+                )
+                for imported_id in imported_ids:
+                    kukai = await kukai_service.get_kukai(session, imported_id, interaction.guild.id)
+                    await notification_service.schedule_kukai_jobs(session, kukai)
+            await interaction.response.send_message(
+                embed=success_embed(
+                    f"{len(imported_ids)}件の句会をインポートしました。\n"
+                    f"句会ID: {', '.join(str(k) for k in imported_ids)}"
+                ),
+                ephemeral=True,
+            )
+        except UnicodeDecodeError:
+            await interaction.response.send_message(
+                embed=error_embed("UTF-8のJSONファイルを指定してください。"), ephemeral=True
+            )
+        except json.JSONDecodeError:
+            await interaction.response.send_message(
+                embed=error_embed("JSONのパースに失敗しました。ファイル内容を確認してください。"), ephemeral=True
+            )
+        except ServiceError as e:
+            await interaction.response.send_message(embed=error_embed(str(e)), ephemeral=True)
+
+    # ------------------------------------------------------------------
+    # /kukai notify subgroup
+    # ------------------------------------------------------------------
+
+    _EVENT_LABELS = {
+        "entry_close": "エントリー締切",
+        "submission_close": "投句締切",
+        "selecting_close": "選句締切",
+        "voice_start": "ボイス句会開始",
+    }
+
+    @kukai_notify_grp.command(name="list", description="句会の通知設定を表示します")
+    @app_commands.describe(kukai_id="句会ID（省略可: このチャンネルで1件なら自動特定）")
+    async def notify_list(self, interaction: discord.Interaction, kukai_id: int | None = None) -> None:
+        assert interaction.guild is not None
+        from sqlalchemy import select as _sa_select
+        from bot.models.notification import NotificationSchedule
+
+        try:
+            async with get_session() as session:
+                kukai = await kukai_service.resolve_kukai_in_channel(
+                    session,
+                    guild_id=interaction.guild.id,
+                    channel_id=effective_channel_id(interaction),
+                    kukai_id=kukai_id,
+                )
+                schedules = (
+                    await session.execute(
+                        _sa_select(NotificationSchedule)
+                        .where(NotificationSchedule.kukai_id == kukai.id)
+                        .order_by(
+                            NotificationSchedule.event_type,
+                            NotificationSchedule.offset_secs.desc(),
+                            NotificationSchedule.id,
+                        )
+                    )
+                ).scalars().all()
+        except ServiceError as e:
+            await interaction.response.send_message(embed=error_embed(str(e)), ephemeral=True)
+            return
+
+        embed = discord.Embed(title=f"通知設定 — {kukai.title}", color=COLOR_INFO)
+        if not schedules:
+            embed.description = "未登録です。ジョブ登録時にデフォルト通知が作成されます。"
+        else:
+            def _fmt_offset(s: int) -> str:
+                if s % 3600 == 0:
+                    return f"{s // 3600}h"
+                if s % 60 == 0:
+                    return f"{s // 60}m"
+                return f"{s}s"
+
+            def _fmt_dest(ch_id: int | None, mention: bool) -> str:
+                if ch_id == -1:
+                    return "DM"
+                base = "句会チャンネル" if ch_id is None else f"<#{ch_id}>"
+                return base + (" + mention" if mention else "")
+
+            lines = [
+                f"[{row.id}] {self._EVENT_LABELS.get(row.event_type, row.event_type)} "
+                f"{_fmt_offset(row.offset_secs)}前 / "
+                f"{_fmt_dest(row.channel_id, row.mention)} / "
+                f"{row.target}{' / 送信済み' if row.fired else ''}"
+                for row in schedules
+            ]
+            embed.description = "\n".join(lines[:20])
+            if len(schedules) > 20:
+                embed.set_footer(text=f"他 {len(schedules) - 20} 件")
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
+    @kukai_notify_grp.command(name="replace", description="【句会管理者】通知設定を一括で差し替えます")
+    @app_commands.describe(
+        kukai_id="句会ID（省略可: このチャンネルで1件なら自動特定）",
+        config="1行1件: event,offset,destination,target,mention",
+    )
+    async def notify_replace(
+        self, interaction: discord.Interaction, config: str, kukai_id: int | None = None
+    ) -> None:
+        from bot.utils.bulk_parser import BulkParseError, parse_reminder_spec
+
+        try:
+            specs = []
+            for line_no, raw in enumerate(config.splitlines(), start=1):
+                line = raw.strip()
+                if not line or line.startswith("#"):
+                    continue
+                specs.append(parse_reminder_spec(line, line_no=line_no))
+            if not specs:
+                raise BulkParseError("通知設定を1件以上入力してください。")
+        except BulkParseError as e:
+            await interaction.response.send_message(embed=error_embed(str(e)), ephemeral=True)
+            return
+
+        assert interaction.guild is not None
+        await interaction.response.defer(ephemeral=True)
+        try:
+            async with get_session() as session:
+                kukai = await kukai_service.resolve_kukai_in_channel(
+                    session,
+                    guild_id=interaction.guild.id,
+                    channel_id=effective_channel_id(interaction),
+                    kukai_id=kukai_id,
+                )
+                if not await permission_service.is_kukai_admin(session, kukai, interaction.user):  # type: ignore[arg-type]
+                    await interaction.edit_original_response(
+                        embed=error_embed("この操作は句会管理者のみ実行できます。")
+                    )
+                    return
+                from sqlalchemy import select as _sa_select
+                from bot.models.voice_session import VoiceSession
+                voice_session = (
+                    await session.execute(_sa_select(VoiceSession).where(VoiceSession.kukai_id == kukai.id))
+                ).scalar_one_or_none()
+                kukai.__dict__["voice_session"] = voice_session
+                await notification_service.cancel_kukai_jobs(session, kukai.id)
+                await notification_service.replace_notification_schedules(session, kukai, specs)
+                await notification_service.schedule_kukai_jobs(session, kukai)
+        except ServiceError as e:
+            await interaction.edit_original_response(embed=error_embed(str(e)))
+            return
+        await interaction.edit_original_response(
+            embed=success_embed(f"句会 `{kukai.id}` の通知設定を {len(specs)} 件に差し替えました。")
+        )
+
+    @kukai_notify_grp.command(name="restore", description="【句会管理者】通知設定をデフォルトに戻します")
+    @app_commands.describe(kukai_id="句会ID（省略可: このチャンネルで1件なら自動特定）")
+    async def notify_restore(self, interaction: discord.Interaction, kukai_id: int | None = None) -> None:
+        assert interaction.guild is not None
+        await interaction.response.defer(ephemeral=True)
+        try:
+            async with get_session() as session:
+                kukai = await kukai_service.resolve_kukai_in_channel(
+                    session,
+                    guild_id=interaction.guild.id,
+                    channel_id=effective_channel_id(interaction),
+                    kukai_id=kukai_id,
+                )
+                if not await permission_service.is_kukai_admin(session, kukai, interaction.user):  # type: ignore[arg-type]
+                    await interaction.edit_original_response(
+                        embed=error_embed("この操作は句会管理者のみ実行できます。")
+                    )
+                    return
+                from sqlalchemy import select as _sa_select
+                from bot.models.voice_session import VoiceSession
+                voice_session = (
+                    await session.execute(_sa_select(VoiceSession).where(VoiceSession.kukai_id == kukai.id))
+                ).scalar_one_or_none()
+                kukai.__dict__["voice_session"] = voice_session
+                await notification_service.cancel_kukai_jobs(session, kukai.id)
+                await notification_service.replace_notification_schedules(session, kukai, [])
+                await notification_service.schedule_kukai_jobs(session, kukai)
+        except ServiceError as e:
+            await interaction.edit_original_response(embed=error_embed(str(e)))
+            return
+        await interaction.edit_original_response(
+            embed=success_embed(f"句会 `{kukai.id}` の通知設定をデフォルトに戻しました。")
+        )
+
 
 def _sanitize_channel_name(title: str) -> str:
     name = title.replace(" ", "-").replace("　", "-")
@@ -1279,3 +1767,24 @@ def _build_info_embed(
 
 async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(KukaiCog(bot))
+
+
+# ---------------------------------------------------------------------------
+# Helpers shared by admin/notify subgroup methods (imported at call site)
+# ---------------------------------------------------------------------------
+
+def _format_offset(seconds: int) -> str:
+    if seconds % 3600 == 0:
+        return f"{seconds // 3600}h"
+    if seconds % 60 == 0:
+        return f"{seconds // 60}m"
+    return f"{seconds}s"
+
+
+def _format_destination(channel_id: int | None, mention: bool) -> str:
+    if channel_id == -1:
+        return "DM"
+    base = "句会チャンネル" if channel_id is None else f"<#{channel_id}>"
+    if mention:
+        base += " + mention"
+    return base

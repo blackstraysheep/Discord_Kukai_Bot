@@ -6,6 +6,7 @@ from discord.ext import commands
 
 from bot.database import get_session
 from bot.services import kukai_service, submission_service
+from bot.utils.channel import effective_channel_id
 from bot.services.errors import ServiceError
 from bot.ui.submission_view import SubmissionView, _submissions_embed
 from bot.utils.embed_builder import error_embed
@@ -24,7 +25,7 @@ class SubmissionCog(commands.Cog):
                 kukai = await kukai_service.resolve_kukai_in_channel(
                     session,
                     guild_id=interaction.guild.id,
-                    channel_id=interaction.channel_id,
+                    channel_id=effective_channel_id(interaction),
                     kukai_id=kukai_id,
                 )
                 subs = await submission_service.list_user_submissions(
@@ -36,7 +37,7 @@ class SubmissionCog(commands.Cog):
         except ServiceError as e:
             await interaction.response.send_message(embed=error_embed(str(e)), ephemeral=True)
 
-    @app_commands.command(name="submit_bulk", description="複数行をまとめて投句します")
+    @app_commands.command(name="submit-bulk", description="複数行をまとめて投句します")
     @app_commands.describe(
         kukai_id="句会ID（省略可: このチャンネルで1件なら自動特定）",
         texts="1行1句で入力（最大20句）",
@@ -69,7 +70,7 @@ class SubmissionCog(commands.Cog):
                 kukai = await kukai_service.resolve_kukai_in_channel(
                     session,
                     guild_id=interaction.guild.id,
-                    channel_id=interaction.channel_id,
+                    channel_id=effective_channel_id(interaction),
                     kukai_id=kukai_id,
                 )
                 for poem in poems:
