@@ -58,6 +58,22 @@ def _submission_snapshot(subs: list[Submission]) -> str:
     return "\n".join(lines)
 
 
+async def _send_submission_status_message(
+    interaction: discord.Interaction,
+    *,
+    title: str,
+    subs: list[Submission],
+) -> None:
+    await interaction.followup.send(
+        embed=discord.Embed(
+            title=title,
+            description=_submission_snapshot(subs),
+            color=COLOR_INFO,
+        ),
+        ephemeral=True,
+    )
+
+
 class SubmitBulkModal(discord.ui.Modal):
     def __init__(self, kukai_id: int, slots: int) -> None:
         super().__init__(title="投句（追加）")
@@ -113,13 +129,10 @@ class SubmitBulkModal(discord.ui.Modal):
                 embed=embed,
                 view=SubmissionView(self.kukai_id, subs, kukai),
             )
-            await interaction.followup.send(
-                embed=discord.Embed(
-                    title="✅ 投句を登録しました",
-                    description=_submission_snapshot(subs),
-                    color=COLOR_INFO,
-                ),
-                ephemeral=True,
+            await _send_submission_status_message(
+                interaction,
+                title="✅ 投句を登録しました",
+                subs=subs,
             )
         except ServiceError as e:
             await interaction.followup.send(embed=error_embed(str(e)), ephemeral=True)
@@ -155,6 +168,11 @@ class SubmitEditModal(discord.ui.Modal, title="投句（編集）"):
             await interaction.edit_original_response(
                 embed=_submissions_embed(kukai, subs),
                 view=SubmissionView(self.kukai_id, subs, kukai),
+            )
+            await _send_submission_status_message(
+                interaction,
+                title="✅ 投句を変更しました",
+                subs=subs,
             )
         except ServiceError as e:
             await interaction.followup.send(embed=error_embed(str(e)), ephemeral=True)
@@ -222,6 +240,11 @@ class SubmissionDeleteSelect(discord.ui.Select):
             await interaction.edit_original_response(
                 embed=_submissions_embed(kukai, subs),
                 view=SubmissionView(self.kukai_id, subs, kukai),
+            )
+            await _send_submission_status_message(
+                interaction,
+                title="✅ 投句を削除しました",
+                subs=subs,
             )
         except ServiceError as e:
             await interaction.followup.send(embed=error_embed(str(e)), ephemeral=True)
@@ -317,6 +340,11 @@ class SubmissionView(discord.ui.View):
                 await interaction.edit_original_response(
                     embed=_submissions_embed(kukai, subs),
                     view=SubmissionView(self.kukai_id, subs, kukai),
+                )
+                await _send_submission_status_message(
+                    interaction,
+                    title="✅ 投句を削除しました",
+                    subs=subs,
                 )
             except ServiceError as e:
                 await interaction.followup.send(embed=error_embed(str(e)), ephemeral=True)

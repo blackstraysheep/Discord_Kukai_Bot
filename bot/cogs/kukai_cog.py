@@ -248,7 +248,10 @@ class KukaiCog(commands.Cog):
                 result = await session.execute(
                     _sa_select(_Kukai)
                     .where(_Kukai.id == kukai_id, _Kukai.guild_id == interaction.guild.id)
-                    .options(selectinload(_Kukai.select_labels))
+                    .options(
+                        selectinload(_Kukai.select_labels),
+                        selectinload(_Kukai.voice_session),
+                    )
                 )
                 kukai = result.scalar_one_or_none()
                 if kukai is None:
@@ -1031,6 +1034,9 @@ class KukaiCog(commands.Cog):
             await interaction.response.send_message(embed=error_embed(str(e)), ephemeral=True)
             return
 
+        channel_rename_line: str | None = None
+        channel_rename_warning: str | None = None
+
         try:
             async with get_session() as session:
                 kukai = await kukai_service.get_kukai(session, kukai_id, interaction.guild.id)
@@ -1149,7 +1155,37 @@ class KukaiCog(commands.Cog):
                         f" → {format_jst(after['selecting_close_at']) if after['selecting_close_at'] else '未設定'}"
                     )
 
-            extra = "\n締切変更に合わせて通知ジョブを再登録しました。" if deadlines_changed else ""
+            if before["title"] != after["title"] and kukai.channel_id:
+                channel = interaction.guild.get_channel(kukai.channel_id)
+                old_channel_name = _sanitize_channel_name(str(before["title"]))
+                new_channel_name = _sanitize_channel_name(str(after["title"]))
+                if (
+                    isinstance(channel, discord.TextChannel)
+                    and channel.name.lower() == old_channel_name.lower()
+                    and channel.name.lower() != new_channel_name.lower()
+                ):
+                    try:
+                        await channel.edit(
+                            name=new_channel_name,
+                            reason="句会名の更新に合わせてチャンネル名を更新",
+                        )
+                        channel_rename_line = f"チャンネル名: {old_channel_name} → {new_channel_name}"
+                    except discord.Forbidden:
+                        channel_rename_warning = "チャンネル名を更新する権限がありません。"
+                    except discord.HTTPException:
+                        channel_rename_warning = "チャンネル名の更新に失敗しました。"
+
+            if channel_rename_line:
+                changed_lines.append(channel_rename_line)
+
+            extra_parts: list[str] = []
+            if deadlines_changed:
+                extra_parts.append("締切変更に合わせて通知ジョブを再登録しました。")
+            if channel_rename_line:
+                extra_parts.append("チャンネル名も更新しました。")
+            if channel_rename_warning:
+                extra_parts.append(f"⚠️ {channel_rename_warning}")
+            extra = ("\n" + "\n".join(extra_parts)) if extra_parts else ""
             await interaction.response.send_message(
                 embed=success_embed(f"句会「{kukai.title}」の設定を更新しました。{extra}"),
                 ephemeral=True,
@@ -1179,14 +1215,29 @@ def _build_info_embed(kukai, *, select_labels: list | None = None) -> discord.Em
     )
     if kukai.theme:
         embed.add_field(name="題", value=kukai.theme, inline=True)
-    embed.add_field(name="状態", value=state_ja, inline=True)
+    embed.add_field(name="現在の状態", value=state_ja, inline=True)
+
     if select_labels is not None:
         summary = build_select_summary(kukai.submission_min, kukai.submission_max, select_labels)
         embed.add_field(name="句数", value=summary, inline=False)
-    if kukai.submission_close_at:
-        embed.add_field(name="投句締切", value=format_jst(kukai.submission_close_at), inline=False)
-    if kukai.selecting_close_at:
-        embed.add_field(name="選句締切", value=format_jst(kukai.selecting_close_at), inline=False)
+
+    if kukai.entry_enabled:
+        entry_deadline = format_jst(kukai.entry_close_at) if kukai.entry_close_at else "未定"
+        embed.add_field(name="エントリー締切", value=entry_deadline, inline=False)
+
+    submission_deadline = format_jst(kukai.submission_close_at) if kukai.submission_close_at else "未定"
+    selecting_deadline = format_jst(kukai.selecting_close_at) if kukai.selecting_close_at else "未定"
+    embed.add_field(name="投句締切", value=submission_deadline, inline=False)
+    embed.add_field(name="選句締切", value=selecting_deadline, inline=False)
+
+    voice_session = getattr(kukai, "voice_session", None)
+    if voice_session is not None:
+        start_at = format_jst(voice_session.start_at) if voice_session.start_at else "未定"
+        voice_value = f"開始: {start_at}\n場所: <#{voice_session.vc_channel_id}>"
+        if voice_session.end_at is not None:
+            voice_value += f"\n終了: {format_jst(voice_session.end_at)}"
+        embed.add_field(name="ボイス句会", value=voice_value, inline=False)
+
     embed.set_footer(text=f"句会ID: {kukai.id}")
     return embed
 
