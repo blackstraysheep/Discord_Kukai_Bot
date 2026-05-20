@@ -1,6 +1,6 @@
 # Kukai Bot 現在仕様（技術者向け）
 
-最終更新: 2026-05-18
+最終更新: 2026-05-20
 
 ## 1. 全体構成
 - 実装言語: Python 3.11+（開発・テスト環境は Python 3.13）
@@ -39,7 +39,7 @@
   - 新規時チャンネル名は別モーダルで設定可（未設定時は句会名）
 - 締切表示:
   - エントリー無効時はエントリー締切を非表示
-- `/kukai create_bulk`:
+- `/kukai create-bulk`:
   - 行形式テキストから句会を一括作成
   - GUIウィザードと併存し、同じ `kukai_service.create_kukai()` を使用
   - `preset_id` 指定時は選句プリセットを句会ラベルへ展開
@@ -67,16 +67,14 @@
   - ボタンはコマンド案内ではなく実処理を実行（モーダル/GUI表示）
 
 ## 5. コマンドの `kukai_id` 省略
-- 省略対象:
-  - `/entry join`, `/entry cancel`
-  - `/submit`, `/submit_bulk`
-  - `/select`, `/select_bulk`
-  - `/check`
-  - `/result`
+- 全コマンドで `kukai_id` は省略可能（`int | None = None`）
 - 解決ルール:
   - `kukai_id` 指定時はそのIDを優先
-  - 省略時は「同一チャンネルの進行中句会」を探索
+  - 省略時は「同一チャンネルの進行中句会」を探索（`ENDED` / `CANCELLED` 除外）
   - 候補 0 件/複数件はエラーで明示
+- スレッド対応:
+  - スレッド内でコマンドを使用した場合、`interaction.channel_id`（スレッドID）ではなく親チャンネルIDを使って解決する
+  - `bot/utils/channel.py` の `effective_channel_id()` で透過的に処理
 
 ## 6. 句会情報表示
 - `/kukai info`:
@@ -117,8 +115,8 @@
   - 管理者向け。`pending` / `approved` / `rejected` / `withdrawn` で絞り込み可能
 - `/entry remove`:
   - 管理者向け。エントリー締切後にエントリーを削除
-- `/kukai_admin status`:
-  - 管理者向け。句会内容そのものは表示せず、進捗だけを表示
+- `/kukai status`:
+  - 句会管理者向け。句会内容そのものは表示せず、進捗だけを表示
   - エントリー者: 承認済/審査待ち/却下/取消をアイコン付きで表示
   - 投句状況: 承認済参加者ごとに投句数を表示し、必要投句数未満は `⚠️`
   - 選句状況: 承認済参加者ごとに選句ラベル別件数、コメント数、作者コメント数、総評有無を表示
@@ -129,7 +127,7 @@
 - `/submit` で投句GUIを表示
 - 追加は一括モーダル方式（1回最大5句）
 - 最大投句数を超えない入力枠数を自動調整
-- `/submit_bulk`:
+- `/submit-bulk`:
   - 1行1句で最大20句まで一括投句
   - 句会ID省略時は同一チャンネルの進行中句会から自動解決
   - 受付状態、参加承認、投句上限は `submission_service.submit()` と同じ制約
@@ -145,7 +143,7 @@
 - 句プルダウンの末尾に `総評` を追加
 - `総評` 選択時は選種別も総評モードへ切替
 - 旧「総評ボタン」は廃止
-- `/select_bulk`:
+- `/select-bulk`:
   - 行形式で複数の選句・総評・取消を一括処理
   - 書式: `番号=ラベル|コメント`
   - 総評: `overall=総評本文`
@@ -176,8 +174,8 @@
   - 完全同点は同順位
 
 ## 11. 選句プリセット
-- `/preset list` / `/preset add` / `/preset label *` / `/preset gui` を提供
-- `/preset bulk`:
+- `/select-preset list` / `/select-preset add` / `/select-preset label *` / `/select-preset gui` を提供
+- `/select-preset bulk`:
   - 行形式テキストからプリセットを一括作成・更新
   - 対応項目: `name`, `points_enabled`, `set_default`, `label`
   - `label` 書式:
@@ -207,7 +205,7 @@
   - `offset`: `24h`, `30m`, `1d6h` など
   - `destination=dm` は対象者へDM送信
   - `destination=mention` は句会チャンネルへ対象者mention付きで通知
-- `/preset bulk` 例:
+- `/select-preset bulk` 例:
 ```text
 name=標準
 points_enabled=true
@@ -216,7 +214,7 @@ label=特選,2,1,0,1,none
 label=並選,1,2,0,5,optional
 label=予選,0,3,0,∞,none
 ```
-- `/kukai create_bulk` 例:
+- `/kukai create-bulk` 例:
 ```text
 title=春の句会
 theme=桜
@@ -235,7 +233,7 @@ reminder=submission_close,24h,kukai,all,false
 reminder=selecting_close,1h,mention,incomplete,true
 reminder=voice_start,30m,dm,all,false
 ```
-- `/select_bulk` 例:
+- `/select-bulk` 例:
 ```text
 1=特選|景が鮮やかです
 4=並選
@@ -258,11 +256,11 @@ overall=全体に春らしい句が多かったです
   - `submission_close`
   - `selecting_close`
   - `voice_start`
-- `/notification`:
-  - `/notification list kukai_id` で登録済み通知を表示
-  - `/notification set kukai_id config` で通知設定を一括差し替え
-  - `/notification reset kukai_id` でデフォルト通知へ戻す
-  - `set` の `config` は1行1件の `event,offset,destination,target,mention`
+- `/kukai notify`:
+  - `/kukai notify list` で登録済み通知を表示
+  - `/kukai notify replace config` で通知設定を一括差し替え（`set` から改名）
+  - `/kukai notify restore` でデフォルト通知へ戻す（`reset` から改名）
+  - `replace` の `config` は1行1件の `event,offset,destination,target,mention`
   - 差し替え・リセット時は既存ジョブをキャンセルし、通知スケジュールを再登録
 - `entry_close` 通知:
   - エントリー制句会では、通知Embedに参加者一覧を追加

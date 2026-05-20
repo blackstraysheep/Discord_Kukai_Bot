@@ -8,7 +8,7 @@
 
 Discord完結型句会管理Bot。Python 3.13 / discord.py 2.x / SQLAlchemy 2.x async / aiosqlite / APScheduler 3.x。
 
-**現在の状態**: Phase 1〜10(品質強化) 完了。一括入力コマンド対応、句会情報表示改善、締切後エントリー承認フロー、通知管理コマンド、句会作成時の選句カスタム入力、管理者向け進捗確認を追加済み。テスト 96件すべてパス。
+**現在の状態**: Phase 1〜10(品質強化) 完了 + コマンド体系再編済み。一括入力コマンド対応、句会情報表示改善、締切後エントリー承認フロー、通知管理コマンド、句会作成時の選句カスタム入力、管理者向け進捗確認を追加済み。テスト 96件すべてパス。
 
 ---
 
@@ -85,11 +85,9 @@ Discord完結型句会管理Bot。Python 3.13 / discord.py 2.x / SQLAlchemy 2.x 
   - 句会作成時にデフォルトスケジュール（24h前通知 × 2）を自動生成
   - `replace_notification_schedules()` でカスタム通知を一括置換
   - APSchedulerの`date`トリガーでジョブ登録
-- `bot/cogs/notification_cog.py` — `/notification list/set/reset`
-  - 作成済み句会の通知設定を確認・一括差し替え・デフォルト復帰
-  - `set` はウィザードと同じ `event,offset,destination,target,mention` 書式を使用
+- `bot/cogs/kukai_cog.py` 更新: create/pause/resume/cancelにスケジューラ連携、通知管理コマンドを `/kukai notify` サブグループとして統合
+  - `/kukai notify list/replace/restore`（旧 `notification_cog.py` の `/notification list/set/reset`）
 - `bot/main.py` 更新: setup_hookでinit_scheduler + set_bot + scheduler.start()
-- `bot/cogs/kukai_cog.py` 更新: create/pause/resume/cancelにスケジューラ連携
 
 ### Phase 8 — 句会作成ウィザード
 - `bot/ui/wizard/wizard_state.py` — WizardState dataclass（TTL 15分）+ インメモリレジストリ（get/set/clear_wizard）
@@ -113,11 +111,8 @@ Discord完結型句会管理Bot。Python 3.13 / discord.py 2.x / SQLAlchemy 2.x 
   - `import_payload()` — エクスポートJSONを同一guildへ復元（ID再採番マッピング）
   - `payload_to_json()`, `payload_to_csv()` を実装
 - `bot/cogs/admin_cog.py` 実装
-  - `/kukai_admin export` — JSON/CSVをDM送信
-  - `/kukai_admin import_data` — JSON添付から復元
-  - `/kukai_admin status` — 管理者向けにエントリー者、投句数、選句ラベル別件数、コメント数、総評有無を表示
-  - `/kukai_admin add_admin`, `/kukai_admin remove_admin`
-  - `/guild settings` — create_role と role/user ID リストの確認・更新
+  - `/guild settings` — create_role と role/user ID リストの確認・更新（このCogに残留）
+  - 句会管理操作は `/kukai admin` サブグループへ移動済み（後述のコマンド再編参照）
 - `bot/services/kukai_service.py` 拡張
   - `add_kukai_admin()`, `remove_kukai_admin()`
   - `edit_kukai()` — title/theme/description/締切/submission設定/publish_mode/result_mode/author_revealを更新
@@ -140,19 +135,37 @@ Discord完結型句会管理Bot。Python 3.13 / discord.py 2.x / SQLAlchemy 2.x 
   - 既存JSONの `rank_priority` 未設定データは読み込み時に補完
   - `作者コメント` は句会展開時に `rank_priority=999` 固定
 - `bot/cogs/kukai_cog.py`
-  - `/kukai create_bulk config` を追加
+  - `/kukai create-bulk config` を追加（`create_bulk` → kebab-case）
   - `channel=current/new/<#channel_id>`、`preset_id`、`label=` に対応
   - `voice_enabled` / `voice_channel` / `voice_start_at` / `voice_end_at` に対応
   - `reminder=` による通知カスタマイズに対応
   - `/kukai info` は作成時案内と同等の基本情報、現在の状態、句数、各締切、ボイス句会情報を表示
   - `/kukai edit` で句会名を変更した際、チャンネル名が旧句会名由来ならチャンネル名も更新
 - `bot/cogs/select_cog.py`
-  - `/select_bulk selections [kukai_id]` を追加
+  - `/select-bulk selections [kukai_id]` を追加（`select_bulk` → kebab-case）
   - `番号=ラベル|コメント`, `overall=...`, `番号=clear` に対応
 - `bot/scheduler/jobs.py`
   - 自動投句締切時に公開対象0件で `waiting_publish` に残らないよう補正
 - `bot/ui/submission_view.py`
   - 投句の登録・変更・削除時に、登録時と同じ形式で現在の投句一覧を通知
+
+### コマンド体系再編（2026-05-20）
+
+**変更の動機**: コマンド名の一貫性欠如（snake_case混在、`_admin` 単発、グループ境界の不整合）を解消。
+
+- **命名規則**: 複合語はすべて kebab-case 統一（`create_bulk` → `create-bulk` 等）
+- **参加者コマンド**: `/submit`, `/select`, `/check`, `/result` はトップレベルで完結
+- `/kukai list` → トップレベル `/list`, `/kukai info` → トップレベル `/info`
+- `/kukai_admin` グループ解体 → `/kukai admin` サブグループ（`kukai_cog.py` 内）
+  - `/kukai admin status|add|remove|export|import`
+- `/kukai status` を追加（管理者向け進捗表示。admin サブグループではなく `/kukai` 直下）
+- `/notification` グループ解体 → `/kukai notify` サブグループ（`kukai_cog.py` 内）
+  - `/kukai notify list|replace|restore`（`set` → `replace`, `reset` → `restore`）
+  - `notification_cog.py` は削除
+- `/preset` → `/select-preset`（将来の `/notify-preset` との対称性）
+- 全管理コマンドで `kukai_id: int | None = None` + `resolve_kukai_in_channel` に統一
+- スレッド内コマンド対応: `bot/utils/channel.py` の `effective_channel_id()` を全Cogに適用
+- **権限ラベル**: `【管理者】` → `【句会管理者】` / `【作成権限者】` / `【サーバー管理者】`
 
 ---
 
@@ -223,15 +236,14 @@ kukai_bot/
 │   │   ├── setup.py
 │   │   └── jobs.py
 │   ├── cogs/
-│   │   ├── kukai_cog.py      # /kukai *
+│   │   ├── kukai_cog.py      # /kukai *, /kukai admin *, /kukai notify *, /list, /info
 │   │   ├── entry_cog.py      # /entry *
-│   │   ├── preset_cog.py     # /preset *, /preset bulk
-│   │   ├── notification_cog.py # /notification *
-│   │   ├── submission_cog.py # /submit, /submit_bulk
-│   │   ├── select_cog.py     # /select, /select_bulk
+│   │   ├── preset_cog.py     # /select-preset *
+│   │   ├── submission_cog.py # /submit, /submit-bulk
+│   │   ├── select_cog.py     # /select, /select-bulk
 │   │   ├── check_cog.py      # /check
 │   │   ├── result_cog.py     # /result
-│   │   └── admin_cog.py      # /kukai_admin *, /guild settings
+│   │   └── admin_cog.py      # /guild settings
 │   ├── ui/
 │   │   ├── common.py         # ConfirmView, PaginatedEmbed, error_embed
 │   │   ├── submission_view.py
@@ -253,6 +265,7 @@ kukai_bot/
 │   │       └── step_confirm.py
 │   └── utils/
 │       ├── bulk_parser.py
+│       ├── channel.py        # effective_channel_id() スレッド対応ヘルパー
 │       ├── text.py
 │       ├── datetime_utils.py
 │       ├── discord_retry.py
@@ -364,23 +377,23 @@ py -m pytest tests/ -v
 # 5. Discord動作確認順序
 /kukai create          → ウィザード（9ステップ）で句会作成
   Step 5でプリセット選択、選句数・コメント設定、または選句種別の直接入力が可能
-/kukai create_bulk ... → 行形式で句会を一括作成
+/kukai create-bulk ... → 行形式で句会を一括作成
   voice_enabled=true / voice_channel=<#...> / reminder=... でボイス句会・通知も設定可能
-/notification list ... → 句会の通知設定を確認
-/notification set ...  → event,offset,destination,target,mention 形式で通知を差し替え
-/notification reset ...→ 通知をデフォルト（投句・選句24時間前）へ戻す
-/kukai_admin status ...→ 管理者向けにエントリー・投句・選句状況を確認
-/kukai list            → 作成した句会を確認
+/kukai notify list     → 句会の通知設定を確認
+/kukai notify replace  → event,offset,destination,target,mention 形式で通知を差し替え
+/kukai notify restore  → 通知をデフォルト（投句・選句24時間前）へ戻す
+/kukai status          → 句会管理者向けにエントリー・投句・選句状況を確認
+/list                  → 作成した句会を確認
 /kukai proceed ...     → 状態を進める
-/kukai info ...        → 句会情報（現在の状態・締切・ボイス句会情報など）を確認
+/info ...              → 句会情報（現在の状態・締切・ボイス句会情報など）を確認
 /entry join ...        → エントリー（entry_enabled=trueの場合）
   エントリー締切後は承認待ちになり、句会管理者へ通知
   承認時は句会チャンネルで承認対象ユーザーだけに通知
 /submit ...            → 投句
-/submit_bulk ...       → 複数行を一括投句
+/submit-bulk ...       → 複数行を一括投句
 /kukai publish ...     → 投句公開（publish_mode=manualの場合）
 /select ...            → 選句
-/select_bulk ...       → 番号=ラベル|コメント 形式で一括選句
+/select-bulk ...       → 番号=ラベル|コメント 形式で一括選句
 /kukai proceed ...     → 選句締切→結果へ
 /result ...            → 結果表示
 ```
