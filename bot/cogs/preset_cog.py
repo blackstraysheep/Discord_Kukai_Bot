@@ -68,7 +68,7 @@ class PresetCog(commands.Cog):
 
         embed = discord.Embed(title="選句プリセット一覧", color=COLOR_INFO)
         for t in templates[:10]:
-            label_strs = [f"{s.label} ({s.point:+d}pt/rank{s.rank_priority})" for s in t.labels[:5]]
+            label_strs = [f"{s.label} ({s.point:+d}pt)" for s in t.labels[:5]]
             default_mark = "（既定）" if t.is_default else ""
             pts_str = "点数あり" if t.points_enabled else "点数なし"
             embed.add_field(
@@ -87,7 +87,7 @@ class PresetCog(commands.Cog):
         await open_preset_wizard(interaction)
 
     @preset.command(name="bulk", description="【管理者】行形式で選句プリセットを一括登録・更新します")
-    @app_commands.describe(config="name=... / label=名前,点数,rank,最小数,最大数,コメントモード")
+    @app_commands.describe(config="name=... / label=名前,点数,最小数,最大数,コメントモード")
     async def preset_bulk(self, interaction: discord.Interaction, config: str) -> None:
         if not await _check_admin(interaction):
             return
@@ -136,7 +136,7 @@ class PresetCog(commands.Cog):
             return
 
         label_lines = [
-            f"{row.label} ({row.point:+d}pt / rank {row.rank_priority})"
+            f"{row.label} ({row.point:+d}pt)"
             for row in preset.labels[:10]
         ]
         await interaction.response.send_message(
@@ -340,7 +340,7 @@ class PresetCog(commands.Cog):
             color=COLOR_INFO,
         )
         if template.labels:
-            lines = [f"**{s.label}** {s.point:+d}pt / rank {s.rank_priority}" for s in template.labels]
+            lines = [f"**{s.label}** {s.point:+d}pt" for s in template.labels]
             embed.add_field(name="ラベル", value="\n".join(lines), inline=False)
         else:
             embed.description = (embed.description or "") + "\n（ラベル未設定）"

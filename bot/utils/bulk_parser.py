@@ -102,8 +102,7 @@ def parse_label_spec(value: str, *, line_no: int | None = None) -> dict[str, obj
     prefix = f"{line_no}行目: " if line_no is not None else ""
     if len(parts) not in {1, 2, 3, 5, 6}:
         raise BulkParseError(
-            f"{prefix}label は `名前,点数,rank,最小数,最大数,コメントモード` "
-            "または rank 省略の `名前,点数,最小数,最大数,コメントモード` で指定してください。"
+            f"{prefix}label は `名前,点数,最小数,最大数,コメントモード` で指定してください。"
         )
 
     label = parts[0].strip()
