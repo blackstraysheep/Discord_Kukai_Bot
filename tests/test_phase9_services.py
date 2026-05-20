@@ -19,7 +19,7 @@ def _utc(days: int) -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(days=days)
 
 
-async def _make_kukai(session):
+async def _make_kukai(session, *, entry_enabled: bool = True, entry_approval: bool = False):
     return await kukai_service.create_kukai(
         session,
         guild_id=1,
@@ -28,6 +28,8 @@ async def _make_kukai(session):
         title="Phase9テスト句会",
         submission_close_at=_utc(7),
         selecting_close_at=_utc(14),
+        entry_enabled=entry_enabled,
+        entry_approval=entry_approval,
     )
 
 
@@ -65,9 +67,7 @@ async def test_edit_kukai_updates_fields_and_deadlines(db_session):
 
 @pytest.mark.asyncio
 async def test_edit_kukai_blocks_submission_settings_after_selecting_open(db_session):
-    kukai = await _make_kukai(db_session)
-    kukai.entry_enabled = False
-    await db_session.flush()
+    kukai = await _make_kukai(db_session, entry_enabled=False)
 
     while KukaiState(kukai.state) != KukaiState.SELECTING_OPEN:
         await kukai_service.proceed(db_session, kukai)
@@ -112,13 +112,9 @@ async def test_add_and_remove_kukai_admin(db_session):
 
 @pytest.mark.asyncio
 async def test_export_and_import_payload_roundtrip(db_session):
-    kukai = await _make_kukai(db_session)
-    kukai.entry_enabled = True
-    kukai.entry_approval = True
+    kukai = await _make_kukai(db_session, entry_enabled=True, entry_approval=True)
     await db_session.flush()
 
-    # entry_open -> submit flow
-    await kukai_service.proceed(db_session, kukai)  # entry_open
     await entry_service.enter(db_session, kukai, user_id=101, haigo="甲")
     await entry_service.approve(db_session, kukai, approver_id=100, target_user_id=101)
     await kukai_service.proceed(db_session, kukai)  # entry_closed

@@ -27,8 +27,8 @@ async def _make_kukai(session, *, entry_enabled: bool = False):
         title="通知テスト句会",
         submission_close_at=_utc(7),
         selecting_close_at=_utc(14),
+        entry_enabled=entry_enabled,
     )
-    kukai.entry_enabled = entry_enabled
     await session.flush()
     return kukai
 
@@ -229,7 +229,6 @@ async def test_deadline_job_submission_close_semi_auto_incomplete_notifies_admin
     db_session, monkeypatch
 ):
     kukai = await _make_kukai(db_session, entry_enabled=True)
-    await kukai_service.proceed(db_session, kukai)  # entry_open
     await entry_service.enter(db_session, kukai, user_id=101)
     await kukai_service.proceed(db_session, kukai)  # entry_closed
     await kukai_service.proceed(db_session, kukai)  # submission_open

@@ -1,5 +1,6 @@
 """Entry (エントリー) lifecycle operations."""
 
+import logging
 from datetime import datetime, timezone
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -14,6 +15,7 @@ from bot.services.errors import (
 from bot.state_machine.states import KukaiState
 
 _APPROVAL_ALLOWED = {KukaiState.ENTRY_OPEN, KukaiState.ENTRY_CLOSED}
+logger = logging.getLogger(__name__)
 
 
 async def enter(
@@ -23,10 +25,24 @@ async def enter(
     haigo: str | None = None,
 ) -> Entry:
     """Register a user for a kukai."""
-    if not kukai.entry_enabled:
-        raise InvalidStateError("この句会はエントリー制ではありません。")
     state = KukaiState.from_value(kukai.state)
+    if not kukai.entry_enabled:
+        logger.info(
+            "event=entry_rejected_disabled kukai_id=%s user_id=%s state=%s entry_enabled=%s",
+            kukai.id,
+            user_id,
+            state,
+            kukai.entry_enabled,
+        )
+        raise InvalidStateError("この句会はエントリー制ではありません。")
     if state not in {KukaiState.ENTRY_OPEN, KukaiState.ENTRY_CLOSED}:
+        logger.info(
+            "event=entry_rejected_by_state kukai_id=%s user_id=%s state=%s entry_enabled=%s",
+            kukai.id,
+            user_id,
+            state,
+            kukai.entry_enabled,
+        )
         raise InvalidStateError("現在エントリーを受け付けていません。")
     approval_required = kukai.entry_approval or is_late_entry_request(kukai)
 

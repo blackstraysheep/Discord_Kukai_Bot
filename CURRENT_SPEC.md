@@ -21,6 +21,10 @@
   - `cancelled`
 - `waiting_results` は実運用フローから除外（`selecting_closed -> results`）
 - 遷移ロジック: `bot/state_machine/transitions.py`
+- 句会作成直後の初期状態:
+  - `entry_enabled=true` の場合は `entry_open`
+  - `entry_enabled=false` の場合は `submission_open`
+  - `draft` はロールバック/インポート用の状態として残す
 
 ## 3. 句会作成ウィザード
 - ステップ:

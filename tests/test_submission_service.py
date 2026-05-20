@@ -34,8 +34,8 @@ async def _make_kukai(
         title="テスト句会",
         submission_close_at=_utc(7),
         selecting_close_at=_utc(14),
+        entry_enabled=entry_enabled,
     )
-    kukai.entry_enabled = entry_enabled
     kukai.submission_min = submission_min
     kukai.submission_max = submission_max
     kukai.submission_overflow = submission_overflow
@@ -45,7 +45,7 @@ async def _make_kukai(
 
 
 async def _advance_to_submission_open(session, kukai):
-    """Advance kukai to SUBMISSION_OPEN from DRAFT."""
+    """Advance kukai to SUBMISSION_OPEN."""
     while KukaiState(kukai.state) != KukaiState.SUBMISSION_OPEN:
         await kukai_service.proceed(session, kukai)
     await session.commit()
@@ -75,7 +75,7 @@ async def test_submit_normalizes_text(db_session):
 @pytest.mark.asyncio
 async def test_submit_wrong_state_raises(db_session):
     kukai = await _make_kukai(db_session, entry_enabled=False)
-    # Still in draft
+    kukai.state = KukaiState.DRAFT
     with pytest.raises(InvalidStateError):
         await submission_service.submit(db_session, kukai, user_id=1, text="春の海")
 
@@ -93,8 +93,6 @@ async def test_submit_requires_entry_approval(db_session):
 @pytest.mark.asyncio
 async def test_submit_with_approved_entry(db_session):
     kukai = await _make_kukai(db_session, entry_enabled=True)
-    # Advance to entry_open and enter
-    await kukai_service.proceed(db_session, kukai)  # → entry_open
     await entry_service.enter(db_session, kukai, user_id=1)
     await kukai_service.proceed(db_session, kukai)  # → entry_closed
     await kukai_service.proceed(db_session, kukai)  # → submission_open

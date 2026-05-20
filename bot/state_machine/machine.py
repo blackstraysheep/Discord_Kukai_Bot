@@ -6,6 +6,7 @@ at bot startup so this module has no Discord imports.
 
 from collections.abc import Awaitable, Callable
 from datetime import datetime, timezone
+import logging
 from typing import Any
 
 from bot.services.errors import InvalidStateError
@@ -14,6 +15,7 @@ from bot.state_machine.transitions import ADMIN_REACHABLE, PAUSABLE, next_state
 
 
 SideEffectCallback = Callable[..., Awaitable[None]]
+logger = logging.getLogger(__name__)
 
 
 class StateMachine:
@@ -80,6 +82,14 @@ class StateMachine:
 
         kukai.state = target
         kukai.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
+
+        logger.info(
+            "event=state_transition kukai_id=%s from_state=%s to_state=%s is_admin=%s",
+            getattr(kukai, "id", None),
+            current,
+            target,
+            is_admin,
+        )
 
         # Fire optional side-effect callback
         cb_key = f"on_enter_{target}"

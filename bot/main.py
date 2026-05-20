@@ -1,5 +1,8 @@
 import logging
+import os
 from pathlib import Path
+import socket
+from urllib.parse import urlsplit, urlunsplit
 
 import discord
 from discord.ext import commands
@@ -101,9 +104,28 @@ def main() -> None:
     )
 
     Path(settings.data_dir).mkdir(parents=True, exist_ok=True)
+    logger.info(
+        "event=bot_runtime_start pid=%s host=%s cwd=%s data_dir=%s database_url=%s",
+        os.getpid(),
+        socket.gethostname(),
+        Path.cwd(),
+        settings.data_dir,
+        _redact_url(settings.database_url),
+    )
 
     bot = KukaiBot()
     bot.run(settings.bot_token)
+
+
+def _redact_url(raw: str) -> str:
+    parsed = urlsplit(raw)
+    if parsed.password is None:
+        return raw
+    username = parsed.username or ""
+    host = parsed.hostname or ""
+    port = f":{parsed.port}" if parsed.port is not None else ""
+    userinfo = f"{username}:***@" if username else ""
+    return urlunsplit((parsed.scheme, f"{userinfo}{host}{port}", parsed.path, parsed.query, parsed.fragment))
 
 
 if __name__ == "__main__":

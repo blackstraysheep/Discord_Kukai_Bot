@@ -87,16 +87,15 @@ async def test_state_machine_proceed(db_session):
         selecting_close_at=_utc(14),
     )
     await db_session.commit()
-    assert kukai.state == KukaiState.DRAFT
-
-    # entry_enabled=True by default → draft → entry_open
-    new_state = await kukai_service.proceed(db_session, kukai)
-    assert new_state == KukaiState.ENTRY_OPEN
     assert kukai.state == KukaiState.ENTRY_OPEN
+
+    new_state = await kukai_service.proceed(db_session, kukai)
+    assert new_state == KukaiState.ENTRY_CLOSED
+    assert kukai.state == KukaiState.ENTRY_CLOSED
 
 
 @pytest.mark.asyncio
-async def test_state_machine_proceed_skip_entry(db_session):
+async def test_create_kukai_skip_entry_starts_submission_open(db_session):
     kukai = await kukai_service.create_kukai(
         db_session,
         guild_id=1,
@@ -105,12 +104,13 @@ async def test_state_machine_proceed_skip_entry(db_session):
         title="エントリースキップ",
         submission_close_at=_utc(7),
         selecting_close_at=_utc(14),
+        entry_enabled=False,
     )
-    kukai.entry_enabled = False
     await db_session.commit()
 
+    assert kukai.state == KukaiState.SUBMISSION_OPEN
     new_state = await kukai_service.proceed(db_session, kukai)
-    assert new_state == KukaiState.SUBMISSION_OPEN
+    assert new_state == KukaiState.SUBMISSION_CLOSED
 
 
 @pytest.mark.asyncio
@@ -124,7 +124,6 @@ async def test_pause_and_resume(db_session):
         submission_close_at=_utc(7),
         selecting_close_at=_utc(14),
     )
-    await kukai_service.proceed(db_session, kukai)  # → entry_open
     await db_session.commit()
 
     await kukai_service.pause(db_session, kukai)

@@ -106,10 +106,11 @@ class EntryCog(commands.Cog):
     @app_commands.describe(kukai_id="句会ID（省略可: このチャンネルで1件なら自動特定）")
     async def entry_join(self, interaction: discord.Interaction, kukai_id: int | None = None) -> None:
         assert interaction.guild is not None
+        channel_id = effective_channel_id(interaction)
         await interaction.response.send_modal(
             EntryHaigoModal(
                 kukai_id=kukai_id,
-                channel_id=effective_channel_id(interaction),
+                channel_id=channel_id,
                 guild_id=interaction.guild.id,
             )
         )

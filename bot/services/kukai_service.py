@@ -1,5 +1,6 @@
 """Kukai CRUD and lifecycle operations."""
 
+import logging
 from datetime import datetime
 
 from sqlalchemy import select
@@ -21,6 +22,7 @@ from bot.state_machine.transitions import next_state
 
 # Shared state machine instance (no callbacks yet; added in later phases)
 _state_machine = StateMachine()
+logger = logging.getLogger(__name__)
 
 _SUBMISSION_LOCKED_STATES = {
     KukaiState.SELECTING_OPEN,
@@ -71,6 +73,8 @@ async def create_kukai(
 
     _validate_deadlines(submission_close_at, selecting_close_at)
 
+    initial_state = KukaiState.ENTRY_OPEN if entry_enabled else KukaiState.SUBMISSION_OPEN
+
     kukai = Kukai(
         guild_id=guild_id,
         created_by=created_by,
@@ -78,7 +82,7 @@ async def create_kukai(
         title=title,
         theme=theme,
         description=description,
-        state=KukaiState.DRAFT,
+        state=initial_state,
         entry_close_at=entry_close_at,
         submission_close_at=submission_close_at,
         selecting_close_at=selecting_close_at,
@@ -107,6 +111,17 @@ async def create_kukai(
         session.add(SelectLabel(kukai_id=kukai.id, **data))
     await session.flush()
     await session.refresh(kukai, attribute_names=["select_labels"])
+
+    logger.info(
+        "event=create_kukai kukai_id=%s title=%r entry_enabled=%s initial_state=%s "
+        "created_by=%s channel_id=%s",
+        kukai.id,
+        kukai.title,
+        kukai.entry_enabled,
+        kukai.state,
+        kukai.created_by,
+        kukai.channel_id,
+    )
 
     return kukai
 

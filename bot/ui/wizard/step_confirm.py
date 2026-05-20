@@ -304,7 +304,7 @@ class StepConfirmView(discord.ui.View):
             f"句会「**{kukai_title}**」を作成しました。\n"
             f"チャンネル: {channel.mention}\n"
             f"句会ID: `{kukai_id}`\n\n"
-            f"`/kukai proceed kukai_id:{kukai_id}` で受付を開始できます。\n"
+            "受付を開始しました。\n"
             "このウィザードは完了しました（再操作不可）。"
         )
         if name_collision_warning:

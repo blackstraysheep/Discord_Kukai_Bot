@@ -23,8 +23,8 @@ async def _setup_selecting(session, *, entry_enabled=False, max_count=None, comm
         title="テスト句会",
         submission_close_at=_utc(7),
         selecting_close_at=_utc(14),
+        entry_enabled=entry_enabled,
     )
-    kukai.entry_enabled = entry_enabled
     await session.flush()
 
     # Customize first label (特選) with max_count / comment_mode
@@ -116,9 +116,8 @@ async def test_cast_select_max_count_two_subs(db_session):
     """Verify max_count=1 blocks a second submission being selected with the same label."""
     kukai = await kukai_service.create_kukai(
         db_session, guild_id=1, created_by=100, channel_id=200, title="X",
-        submission_close_at=_utc(7), selecting_close_at=_utc(14),
+        submission_close_at=_utc(7), selecting_close_at=_utc(14), entry_enabled=False,
     )
-    kukai.entry_enabled = False
     kukai.select_labels[0].max_count = 1
     await db_session.flush()
 

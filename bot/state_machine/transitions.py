@@ -6,7 +6,9 @@ The standard forward path:
         → results → ended
 
 Shortcuts driven by kukai settings:
-  - entry_enabled=False  : draft → submission_open (skip entry states)
+  - create_kukai() starts at entry_open when entry_enabled=True
+  - create_kukai() starts at submission_open when entry_enabled=False
+  - draft remains a rollback/import state and proceeds by the same rules
   - publish_mode='auto'  : submission_closed → selecting_open (skip waiting_publish)
   - selecting_* 完了後    : selecting_closed → results（waiting_results は廃止）
 

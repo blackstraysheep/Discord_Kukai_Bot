@@ -28,9 +28,8 @@ async def _setup_results(session, selects_spec):
         title="テスト句会",
         submission_close_at=_utc(7),
         selecting_close_at=_utc(14),
+        entry_enabled=False,
     )
-    kukai.entry_enabled = False
-    await session.flush()
 
     labels = kukai.select_labels  # loaded by create_kukai
 
@@ -191,7 +190,7 @@ async def test_compute_results_wrong_state_raises(db_session):
         submission_close_at=_utc(7),
         selecting_close_at=_utc(14),
     )
-    # Still in draft
+    # Not in results yet
     with pytest.raises(InvalidStateError):
         await result_service.compute_results(db_session, kukai)
 
@@ -207,9 +206,8 @@ async def test_compute_results_no_selects(db_session):
         title="テスト2",
         submission_close_at=_utc(7),
         selecting_close_at=_utc(14),
+        entry_enabled=False,
     )
-    kukai2.entry_enabled = False
-    await db_session.flush()
 
     while KukaiState(kukai2.state) != KukaiState.SUBMISSION_OPEN:
         await kukai_service.proceed(db_session, kukai2)

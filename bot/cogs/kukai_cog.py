@@ -1,6 +1,7 @@
 """Kukai management commands: /kukai *"""
 
 import asyncio
+import logging
 import re
 
 from typing import Literal
@@ -49,6 +50,8 @@ from bot.utils.embed_builder import (
     error_embed,
     success_embed,
 )
+
+logger = logging.getLogger(__name__)
 
 # Japanese labels for each state
 STATE_LABEL: dict[str, str] = {
@@ -110,7 +113,13 @@ class StageActionView(discord.ui.View):
                             return
                         from bot.cogs.entry_cog import EntryHaigoModal
 
-                        await interaction.response.send_modal(EntryHaigoModal(kukai.id))
+                        await interaction.response.send_modal(
+                            EntryHaigoModal(
+                                kukai_id=kukai.id,
+                                channel_id=effective_channel_id(interaction),
+                                guild_id=interaction.guild.id,
+                            )
+                        )
                         return
 
                     if self.state == KukaiState.SUBMISSION_OPEN:
@@ -668,11 +677,12 @@ class KukaiCog(commands.Cog):
             publish_warning: str | None = None
             result_count: int | None = None
             result_warning: str | None = None
+            interaction_channel_id = effective_channel_id(interaction)
             async with get_session() as session:
                 kukai = await kukai_service.resolve_kukai_in_channel(
                     session,
                     guild_id=interaction.guild.id,
-                    channel_id=effective_channel_id(interaction),
+                    channel_id=interaction_channel_id,
                     kukai_id=kukai_id,
                 )
                 if not await permission_service.is_kukai_admin(session, kukai, interaction.user):  # type: ignore[arg-type]
@@ -681,6 +691,15 @@ class KukaiCog(commands.Cog):
                     )
                     return
                 current_state = KukaiState.from_value(kukai.state)
+                logger.info(
+                    "event=kukai_proceed_command_start kukai_id=%s actor_user_id=%s "
+                    "before_state=%s interaction_id=%s channel_id=%s",
+                    kukai.id,
+                    interaction.user.id,
+                    current_state,
+                    getattr(interaction, "id", None),
+                    interaction_channel_id,
+                )
                 if current_state in {KukaiState.SUBMISSION_CLOSED, KukaiState.WAITING_PUBLISH}:
                     await kukai_service.jump(session, kukai, KukaiState.WAITING_PUBLISH)
                     published = await submission_service.publish(session, kukai)
@@ -700,6 +719,16 @@ class KukaiCog(commands.Cog):
                         if result_message_id is not None:
                             kukai.result_message_id = result_message_id
                 await notification_service.schedule_kukai_jobs(session, kukai)
+                logger.info(
+                    "event=kukai_proceed_command kukai_id=%s actor_user_id=%s "
+                    "before_state=%s after_state=%s interaction_id=%s channel_id=%s",
+                    kukai.id,
+                    interaction.user.id,
+                    current_state,
+                    new_state,
+                    getattr(interaction, "id", None),
+                    interaction_channel_id,
+                )
             state_ja = STATE_LABEL.get(str(new_state), str(new_state))
             description = f"句会「{kukai.title}」を **{state_ja}** へ進めました。"
             if published_count is not None:
