@@ -1,6 +1,6 @@
 # Kukai Bot 現在仕様（技術者向け）
 
-最終更新: 2026-05-20（4件改善）
+最終更新: 2026-05-20（5件改善）
 
 ## 1. 全体構成
 - 実装言語: Python 3.11+（開発・テスト環境は Python 3.13）
@@ -223,6 +223,39 @@
   - `offset`: `24h`, `30m`, `1d6h` など
   - `destination=dm` は対象者へDM送信
   - `destination=mention` は句会チャンネルへ対象者mention付きで通知
+- `/kukai create` と `/kukai create-bulk`:
+  - `/kukai create` は引数なしのGUIウィザード起動コマンド
+  - CLI風に全項目を指定して作成する場合は `/kukai create-bulk config:` を使う
+  - `config` には複数行の `key=value` テキストを貼り付ける
+  - 必須項目:
+    - `title`
+    - `submission_close_at`
+    - `selecting_close_at`
+    - `entry_enabled=true` の場合は `entry_close_at` も必須
+  - 主な任意項目とデフォルト:
+    - `channel=current`（`current` / `new` / `<#channel_id>`）
+    - `entry_enabled=true`
+    - `entry_approval=false`
+    - `min_participants=0`
+    - `submission_min=1`
+    - `submission_max=3`（`∞`, `unlimited`, `none`, `null` で無制限）
+    - `submission_overflow=false`
+    - `submission_mode=manual`（`manual` / `semi_auto` / `full_auto`）
+    - `selecting_mode=manual`（`manual` / `semi_auto` / `full_auto`）
+    - `publish_mode=manual`（`manual` / `auto`）
+    - `result_mode=manual`（`manual` / `auto`）
+    - `author_reveal=true`
+    - `author_reveal_zero=true`
+    - `voice_enabled=false`
+  - `channel=new` の場合:
+    - `channel_name` 未指定時は `title` からチャンネル名を生成
+    - `category_id` で作成先カテゴリを指定可能
+  - 選句ラベル:
+    - `label=名前,点数,rank,最小数,最大数,コメントモード`
+    - rank省略: `label=名前,点数,最小数,最大数,コメントモード`
+    - `comment_mode` は `none` / `optional` / `required`
+    - `label=` がある場合は `preset_id` より優先
+    - `label=` も `preset_id` も無い場合はデフォルト選句ラベルを使用
 - `/select-preset bulk` 例:
 ```text
 name=標準
@@ -232,21 +265,67 @@ label=特選,2,1,0,1,none
 label=並選,1,2,0,5,optional
 label=予選,0,3,0,∞,none
 ```
-- `/kukai create-bulk` 例:
+- `/kukai create` 例:
 ```text
-title=春の句会
-theme=桜
+/kukai create
+```
+- `/kukai create-bulk` 最小構成例:
+```text
+/kukai create-bulk config:
+title=ミニ句会
+theme=月
 channel=current
 entry_enabled=false
-submission_close_at=2026-05-20 23:59
-selecting_close_at=2026-05-22 23:59
+submission_close_at=2026-06-10 23:59
+selecting_close_at=2026-06-12 23:59
+```
+- `/kukai create-bulk` プリセット使用例:
+```text
+/kukai create-bulk config:
+title=夏の句会
+theme=夕立
+channel=new
+channel_name=summer-kukai
+category_id=123456789012345678
+entry_enabled=false
+submission_close_at=2026-07-10 23:59
+selecting_close_at=2026-07-12 23:59
 submission_min=1
 submission_max=3
 preset_id=1
+reminder=submission_close,24h,kukai,all,false
+reminder=selecting_close,1h,mention,incomplete,true
+```
+- `/kukai create-bulk` 全項目例:
+```text
+/kukai create-bulk config:
+title=春の句会
+theme=桜
+description=春季定例句会です
+channel=current
+entry_enabled=true
+entry_approval=false
+min_participants=0
+entry_close_at=2026-06-01 23:59
+submission_close_at=2026-06-03 23:59
+selecting_close_at=2026-06-05 23:59
+submission_min=1
+submission_max=3
+submission_overflow=false
+submission_mode=manual
+selecting_mode=manual
+publish_mode=manual
+result_mode=manual
+author_reveal=true
+author_reveal_zero=true
+label=特選,2,1,0,1,none
+label=並選,1,2,0,5,optional
+label=予選,0,3,0,∞,none
 voice_enabled=true
 voice_channel=<#123456789012345678>
-voice_start_at=2026-05-23 21:00
-voice_end_at=2026-05-23 22:00
+voice_start_at=2026-06-06 21:00
+voice_end_at=2026-06-06 22:00
+reminder=entry_close,24h,kukai,all,false
 reminder=submission_close,24h,kukai,all,false
 reminder=selecting_close,1h,mention,incomplete,true
 reminder=voice_start,30m,dm,all,false
