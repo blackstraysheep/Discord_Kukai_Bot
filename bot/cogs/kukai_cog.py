@@ -285,13 +285,14 @@ class KukaiCog(commands.Cog):
     @kukai.command(name="create", description="新しい句会を作成します（ウィザード形式）")
     async def kukai_create(self, interaction: discord.Interaction) -> None:
         assert interaction.guild is not None
+        await interaction.response.defer(ephemeral=True)
         async with get_session() as session:
             allowed = await permission_service.can_create_kukai(
                 session, interaction.guild.id, interaction.user  # type: ignore[arg-type]
             )
             templates = await select_rule_service.list_templates(session, interaction.guild.id)
         if not allowed:
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 embed=error_embed("句会の作成権限がありません。"), ephemeral=True
             )
             return
@@ -661,6 +662,7 @@ class KukaiCog(commands.Cog):
     @app_commands.describe(kukai_id="句会ID（省略可: このチャンネルで1件なら自動特定）")
     async def kukai_proceed(self, interaction: discord.Interaction, kukai_id: int | None = None) -> None:
         assert interaction.guild is not None
+        await interaction.response.defer(ephemeral=True)
         try:
             published_count: int | None = None
             publish_warning: str | None = None
@@ -674,7 +676,7 @@ class KukaiCog(commands.Cog):
                     kukai_id=kukai_id,
                 )
                 if not await permission_service.is_kukai_admin(session, kukai, interaction.user):  # type: ignore[arg-type]
-                    await interaction.response.send_message(
+                    await interaction.followup.send(
                         embed=error_embed("この操作は句会管理者のみ実行できます。"), ephemeral=True
                     )
                     return
@@ -708,13 +710,13 @@ class KukaiCog(commands.Cog):
                 description += f"\n結果 {result_count}句を公開しました。"
                 if result_warning:
                     description += f"\n⚠️ {result_warning}"
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 embed=success_embed(description),
                 ephemeral=True,
             )
             await self._announce_to_kukai_channel(interaction.guild, kukai, new_state)
         except ServiceError as e:
-            await interaction.response.send_message(embed=error_embed(str(e)), ephemeral=True)
+            await interaction.followup.send(embed=error_embed(str(e)), ephemeral=True)
 
     @kukai.command(name="pause", description="【句会管理者】句会を一時停止します")
     @app_commands.describe(kukai_id="句会ID（省略可: このチャンネルで1件なら自動特定）")
@@ -957,6 +959,7 @@ class KukaiCog(commands.Cog):
         kukai_id: int | None = None,
     ) -> None:
         assert interaction.guild is not None
+        await interaction.response.defer(ephemeral=True)
         try:
             async with get_session() as session:
                 kukai = await kukai_service.resolve_kukai_in_channel(
@@ -966,7 +969,7 @@ class KukaiCog(commands.Cog):
                     kukai_id=kukai_id,
                 )
                 if not await permission_service.is_kukai_admin(session, kukai, interaction.user):  # type: ignore[arg-type]
-                    await interaction.response.send_message(
+                    await interaction.followup.send(
                         embed=error_embed("この操作は句会管理者のみ実行できます。"), ephemeral=True
                     )
                     return
@@ -975,9 +978,7 @@ class KukaiCog(commands.Cog):
                 try:
                     submission_service.validate_rollback_target(current, target)
                 except ServiceError as e:
-                    await interaction.response.send_message(
-                        embed=error_embed(str(e)), ephemeral=True
-                    )
+                    await interaction.followup.send(embed=error_embed(str(e)), ephemeral=True)
                     return
                 allow_reset_submissions = submission_service.can_reset_submissions_on_rollback(target)
 
@@ -990,7 +991,7 @@ class KukaiCog(commands.Cog):
                 else "この戻し先では投句内容は保持されます。"
             )
             view = RollbackView(allow_reset_submissions=allow_reset_submissions)
-            await interaction.response.send_message(
+            await interaction.edit_original_response(
                 embed=discord.Embed(
                     title="⚠️ 句会のロールバック",
                     description=(
@@ -1003,7 +1004,6 @@ class KukaiCog(commands.Cog):
                     color=discord.Color.orange(),
                 ),
                 view=view,
-                ephemeral=True,
             )
             await view.wait()
 
@@ -1043,10 +1043,7 @@ class KukaiCog(commands.Cog):
                 view=None,
             )
         except ServiceError as e:
-            if interaction.response.is_done():
-                await interaction.edit_original_response(embed=error_embed(str(e)), view=None)
-            else:
-                await interaction.response.send_message(embed=error_embed(str(e)), ephemeral=True)
+            await interaction.edit_original_response(embed=error_embed(str(e)), view=None)
 
     @kukai.command(name="edit", description="【句会管理者】句会の設定を変更します")
     @app_commands.describe(

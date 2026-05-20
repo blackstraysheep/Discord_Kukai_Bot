@@ -38,10 +38,11 @@ class EntryHaigoModal(discord.ui.Modal, title="エントリー"):
         max_length=100,
     )
 
-    def __init__(self, kukai_id: int) -> None:
+    def __init__(self, kukai_id: int | None, channel_id: int | None, guild_id: int) -> None:
         super().__init__()
         self.kukai_id = kukai_id
-        self._result_embed: discord.Embed | None = None
+        self.channel_id = channel_id
+        self.guild_id = guild_id
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
         await interaction.response.defer(ephemeral=True)
@@ -52,8 +53,11 @@ class EntryHaigoModal(discord.ui.Modal, title="エントリー"):
             late_entry = False
             admin_ids: list[int] = []
             async with get_session() as session:
-                kukai = await kukai_service.get_kukai(
-                    session, self.kukai_id, interaction.guild.id
+                kukai = await kukai_service.resolve_kukai_in_channel(
+                    session,
+                    guild_id=self.guild_id,
+                    channel_id=self.channel_id,
+                    kukai_id=self.kukai_id,
                 )
                 late_entry = entry_service.is_late_entry_request(kukai)
                 entry = await entry_service.enter(
@@ -102,22 +106,19 @@ class EntryCog(commands.Cog):
     @app_commands.describe(kukai_id="句会ID（省略可: このチャンネルで1件なら自動特定）")
     async def entry_join(self, interaction: discord.Interaction, kukai_id: int | None = None) -> None:
         assert interaction.guild is not None
-        try:
-            async with get_session() as session:
-                kukai = await kukai_service.resolve_kukai_in_channel(
-                    session,
-                    guild_id=interaction.guild.id,
-                    channel_id=effective_channel_id(interaction),
-                    kukai_id=kukai_id,
-                )
-            await interaction.response.send_modal(EntryHaigoModal(kukai.id))
-        except ServiceError as e:
-            await interaction.response.send_message(embed=error_embed(str(e)), ephemeral=True)
+        await interaction.response.send_modal(
+            EntryHaigoModal(
+                kukai_id=kukai_id,
+                channel_id=effective_channel_id(interaction),
+                guild_id=interaction.guild.id,
+            )
+        )
 
     @entry.command(name="cancel", description="エントリーを取り消します（受付期間中のみ）")
     @app_commands.describe(kukai_id="句会ID（省略可: このチャンネルで1件なら自動特定）")
     async def entry_cancel(self, interaction: discord.Interaction, kukai_id: int | None = None) -> None:
         assert interaction.guild is not None
+        await interaction.response.defer(ephemeral=True)
         try:
             async with get_session() as session:
                 kukai = await kukai_service.resolve_kukai_in_channel(
@@ -127,12 +128,12 @@ class EntryCog(commands.Cog):
                     kukai_id=kukai_id,
                 )
                 entry = await entry_service.withdraw(session, kukai, interaction.user.id)
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 embed=success_embed(f"「{kukai.title}」のエントリーを取り消しました。"),
                 ephemeral=True,
             )
         except ServiceError as e:
-            await interaction.response.send_message(embed=error_embed(str(e)), ephemeral=True)
+            await interaction.followup.send(embed=error_embed(str(e)), ephemeral=True)
 
     # ------------------------------------------------------------------
     # Admin commands
@@ -155,6 +156,7 @@ class EntryCog(commands.Cog):
         status: str | None = None,
     ) -> None:
         assert interaction.guild is not None
+        await interaction.response.defer(ephemeral=True)
         try:
             async with get_session() as session:
                 kukai = await kukai_service.resolve_kukai_in_channel(
@@ -164,7 +166,7 @@ class EntryCog(commands.Cog):
                     kukai_id=kukai_id,
                 )
                 if not await permission_service.is_kukai_admin(session, kukai, interaction.user):  # type: ignore[arg-type]
-                    await interaction.response.send_message(
+                    await interaction.followup.send(
                         embed=error_embed("この操作は句会管理者のみ実行できます。"), ephemeral=True
                     )
                     return
@@ -172,7 +174,7 @@ class EntryCog(commands.Cog):
 
             if not entries:
                 label = f"（{status}）" if status else ""
-                await interaction.response.send_message(
+                await interaction.followup.send(
                     embed=discord.Embed(
                         description=f"エントリー{label}はありません。", color=COLOR_INFO
                     ),
@@ -195,9 +197,9 @@ class EntryCog(commands.Cog):
             )
             if len(entries) > 40:
                 embed.set_footer(text=f"他 {len(entries) - 40} 件")
-            await interaction.response.send_message(embed=embed, ephemeral=True)
+            await interaction.followup.send(embed=embed, ephemeral=True)
         except ServiceError as e:
-            await interaction.response.send_message(embed=error_embed(str(e)), ephemeral=True)
+            await interaction.followup.send(embed=error_embed(str(e)), ephemeral=True)
 
     @entry.command(name="approve", description="【句会管理者】エントリーを承認します")
     @app_commands.describe(kukai_id="句会ID（省略可: このチャンネルで1件なら自動特定）", user="承認するユーザー（省略でリストから選択）")
@@ -228,6 +230,7 @@ class EntryCog(commands.Cog):
         kukai_id: int | None = None,
     ) -> None:
         assert interaction.guild is not None
+        await interaction.response.defer(ephemeral=True)
         try:
             async with get_session() as session:
                 kukai = await kukai_service.resolve_kukai_in_channel(
@@ -237,17 +240,17 @@ class EntryCog(commands.Cog):
                     kukai_id=kukai_id,
                 )
                 if not await permission_service.is_kukai_admin(session, kukai, interaction.user):  # type: ignore[arg-type]
-                    await interaction.response.send_message(
+                    await interaction.followup.send(
                         embed=error_embed("この操作は句会管理者のみ実行できます。"), ephemeral=True
                     )
                     return
                 await entry_service.admin_remove(session, kukai, user.id)
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 embed=success_embed(f"{user.display_name} さんのエントリーを削除しました。"),
                 ephemeral=True,
             )
         except ServiceError as e:
-            await interaction.response.send_message(embed=error_embed(str(e)), ephemeral=True)
+            await interaction.followup.send(embed=error_embed(str(e)), ephemeral=True)
 
     # ------------------------------------------------------------------
     # Internal helper
@@ -262,6 +265,7 @@ class EntryCog(commands.Cog):
         action: str,
     ) -> None:
         assert interaction.guild is not None
+        await interaction.response.defer(ephemeral=True)
         action_ja = "承認" if action == "approve" else "却下"
         try:
             async with get_session() as session:
@@ -272,13 +276,12 @@ class EntryCog(commands.Cog):
                     kukai_id=kukai_id,
                 )
                 if not await permission_service.is_kukai_admin(session, kukai, interaction.user):  # type: ignore[arg-type]
-                    await interaction.response.send_message(
+                    await interaction.followup.send(
                         embed=error_embed("この操作は句会管理者のみ実行できます。"), ephemeral=True
                     )
                     return
 
                 if user is not None:
-                    # Direct action on specified user
                     if action == "approve":
                         entry = await entry_service.approve(
                             session, kukai, interaction.user.id, user.id
@@ -288,7 +291,7 @@ class EntryCog(commands.Cog):
                             session, kukai, interaction.user.id, user.id
                         )
                     name = entry.haigo or user.display_name
-                    await interaction.response.send_message(
+                    await interaction.followup.send(
                         embed=success_embed(f"**{name}** さんを{action_ja}しました。"),
                         ephemeral=True,
                     )
@@ -301,11 +304,10 @@ class EntryCog(commands.Cog):
                         )
                     return
 
-                # No user specified → show select menu of pending entries
                 entries = await entry_service.list_entries(session, kukai.id, status="pending")
 
             if not entries:
-                await interaction.response.send_message(
+                await interaction.followup.send(
                     embed=discord.Embed(
                         description="審査待ちのエントリーはありません。",
                         color=COLOR_INFO,
@@ -315,7 +317,7 @@ class EntryCog(commands.Cog):
                 return
 
             view = EntryManageView(kukai.id, entries, interaction.guild, action)
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 embed=discord.Embed(
                     title=f"エントリー{action_ja}",
                     description=f"審査待ち: {len(entries)} 件\nリストからユーザーを選択してください。",
@@ -325,7 +327,7 @@ class EntryCog(commands.Cog):
                 ephemeral=True,
             )
         except ServiceError as e:
-            await interaction.response.send_message(embed=error_embed(str(e)), ephemeral=True)
+            await interaction.followup.send(embed=error_embed(str(e)), ephemeral=True)
 
 
 async def setup(bot: commands.Bot) -> None:

@@ -20,6 +20,7 @@ class SubmissionCog(commands.Cog):
     @app_commands.describe(kukai_id="句会ID（省略可: このチャンネルで1件なら自動特定）")
     async def submit(self, interaction: discord.Interaction, kukai_id: int | None = None) -> None:
         assert interaction.guild is not None
+        await interaction.response.defer(ephemeral=True)
         try:
             async with get_session() as session:
                 kukai = await kukai_service.resolve_kukai_in_channel(
@@ -33,9 +34,9 @@ class SubmissionCog(commands.Cog):
                 )
             embed = _submissions_embed(kukai, subs)
             view = SubmissionView(kukai.id, subs, kukai)
-            await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+            await interaction.followup.send(embed=embed, view=view, ephemeral=True)
         except ServiceError as e:
-            await interaction.response.send_message(embed=error_embed(str(e)), ephemeral=True)
+            await interaction.followup.send(embed=error_embed(str(e)), ephemeral=True)
 
     @app_commands.command(name="submit-bulk", description="複数行をまとめて投句します")
     @app_commands.describe(
@@ -57,6 +58,7 @@ class SubmissionCog(commands.Cog):
             )
             return
 
+        await interaction.response.defer(ephemeral=True)
         accepted = 0
         over_limit_count = 0
         try:
@@ -85,12 +87,9 @@ class SubmissionCog(commands.Cog):
                 embed.description += (
                     f"\n⚠️ {over_limit_count}句は上限（{kukai.submission_max}句）超過扱いです。"
                 )
-            await interaction.response.send_message(
-                embed=embed,
-                ephemeral=True,
-            )
+            await interaction.followup.send(embed=embed, ephemeral=True)
         except ServiceError as e:
-            await interaction.response.send_message(embed=error_embed(str(e)), ephemeral=True)
+            await interaction.followup.send(embed=error_embed(str(e)), ephemeral=True)
 
 
 async def setup(bot: commands.Bot) -> None:

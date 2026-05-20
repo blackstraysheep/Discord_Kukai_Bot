@@ -38,7 +38,7 @@ async def goto_step(
         await _ensure_notify_presets(state)
     embed, view = _make_step(state)
     if first_send:
-        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+        await interaction.edit_original_response(embed=embed, view=view)
     else:
         await interaction.response.edit_message(embed=embed, view=view)
 
