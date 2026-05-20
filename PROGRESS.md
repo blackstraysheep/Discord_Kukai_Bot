@@ -20,7 +20,7 @@ Discord完結型句会管理Bot。Python 3.13 / discord.py 2.x / SQLAlchemy 2.x 
 - `bot/database.py` — async engine, sessionmaker, `get_session()` コンテキストマネージャ
 - `bot/models/` — 全15テーブル（Kukai, KukaiAdmin, SelectLabel, Entry, Submission, PublishedSubmission, Select, SelectComment, OverallSelectComment, NotificationSchedule, NotificationLog, NotificationPreset, GuildSettings, SelectRuleTemplate, VoiceSession）
 - `alembic/versions/0001_initial.py` — 初期マイグレーション
-- `alembic/versions/0002_notification_presets.py` — 通知プリセットテーブル追加
+- `alembic/versions/0007_notification_presets.py` — 通知プリセットテーブル追加
 - `bot/main.py` — KukaiBot クラス、Cog一括ロード、APScheduler起動
 
 ### Phase 2 — State Machine + Kukai CRUD
@@ -179,7 +179,7 @@ Discord完結型句会管理Bot。Python 3.13 / discord.py 2.x / SQLAlchemy 2.x 
    - `bot/repositories/notification_preset_repo.py` — CRUD
    - `bot/services/notification_preset_service.py` — list/create/delete/set_default
    - `bot/cogs/notify_preset_cog.py` — `/notify-preset list|add|bulk|delete|set-default`
-   - `alembic/versions/0002_notification_presets.py` — マイグレーション
+   - `alembic/versions/0007_notification_presets.py` — マイグレーション
    - ウィザード step8 にプリセット選択ドロップダウンを追加。既定プリセットがあれば自動適用
 4. **締切後エントリー判定を状態ベースに変更**: `is_late_entry_request()` を `state == ENTRY_CLOSED` のみで判定。`entry_close_at` 時刻との比較を廃止。
 

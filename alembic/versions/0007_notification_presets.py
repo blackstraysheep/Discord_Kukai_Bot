@@ -1,7 +1,7 @@
 """notification_presets table
 
-Revision ID: 0002
-Revises: 0001
+Revision ID: 0007
+Revises: 0006
 Create Date: 2026-05-20
 """
 
@@ -10,8 +10,8 @@ from typing import Sequence, Union
 import sqlalchemy as sa
 from alembic import op
 
-revision: str = "0002"
-down_revision: Union[str, None] = "0001"
+revision: str = "0007"
+down_revision: Union[str, None] = "0006"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
