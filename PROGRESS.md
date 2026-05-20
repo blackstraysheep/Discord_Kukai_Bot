@@ -8,7 +8,7 @@
 
 Discord完結型句会管理Bot。Python 3.13 / discord.py 2.x / SQLAlchemy 2.x async / aiosqlite / APScheduler 3.x。
 
-**現在の状態**: Phase 1〜10(品質強化) 完了 + コマンド体系再編済み。一括入力コマンド対応、句会情報表示改善、締切後エントリー承認フロー、通知管理コマンド、句会作成時の選句カスタム入力、管理者向け進捗確認を追加済み。テスト 96件すべてパス。
+**現在の状態**: Phase 1〜10(品質強化) 完了 + コマンド体系再編済み + 追加改善4件済み。一括入力コマンド対応、句会情報表示改善、締切後エントリー承認フロー（状態ベース）、通知プリセット、通知管理コマンド、句会作成時の選句カスタム入力、管理者向け進捗確認を追加済み。テスト 96件すべてパス。
 
 ---
 
@@ -18,8 +18,9 @@ Discord完結型句会管理Bot。Python 3.13 / discord.py 2.x / SQLAlchemy 2.x 
 - `pyproject.toml`, `Dockerfile`, `docker-compose.yml`
 - `bot/settings.py` — pydantic-settings（BOT_TOKEN, DATABASE_URL, DATA_DIR, LOG_LEVEL, DEV_GUILD_IDS）
 - `bot/database.py` — async engine, sessionmaker, `get_session()` コンテキストマネージャ
-- `bot/models/` — 全14テーブル（Kukai, KukaiAdmin, SelectLabel, Entry, Submission, PublishedSubmission, Select, SelectComment, OverallSelectComment, NotificationSchedule, NotificationLog, GuildSettings, SelectRuleTemplate, VoiceSession）
+- `bot/models/` — 全15テーブル（Kukai, KukaiAdmin, SelectLabel, Entry, Submission, PublishedSubmission, Select, SelectComment, OverallSelectComment, NotificationSchedule, NotificationLog, NotificationPreset, GuildSettings, SelectRuleTemplate, VoiceSession）
 - `alembic/versions/0001_initial.py` — 初期マイグレーション
+- `alembic/versions/0002_notification_presets.py` — 通知プリセットテーブル追加
 - `bot/main.py` — KukaiBot クラス、Cog一括ロード、APScheduler起動
 
 ### Phase 2 — State Machine + Kukai CRUD
@@ -162,10 +163,25 @@ Discord完結型句会管理Bot。Python 3.13 / discord.py 2.x / SQLAlchemy 2.x 
 - `/notification` グループ解体 → `/kukai notify` サブグループ（`kukai_cog.py` 内）
   - `/kukai notify list|replace|restore`（`set` → `replace`, `reset` → `restore`）
   - `notification_cog.py` は削除
-- `/preset` → `/select-preset`（将来の `/notify-preset` との対称性）
+- `/preset` → `/select-preset`（`/notify-preset` との対称性）
 - 全管理コマンドで `kukai_id: int | None = None` + `resolve_kukai_in_channel` に統一
 - スレッド内コマンド対応: `bot/utils/channel.py` の `effective_channel_id()` を全Cogに適用
 - **権限ラベル**: `【管理者】` → `【句会管理者】` / `【作成権限者】` / `【サーバー管理者】`
+
+### 追加改善（2026-05-20）
+
+1. **submit-bulk 上限撤廃**: 固定20句制限を削除。`kukai.submission_max` のみで制御（無制限設定なら上限なし）。
+2. **rank 変更**:
+   - `bulk_parser.py` / `select_rule_service.py` の `min_value=1` / `rank < 1` 制約を削除し任意整数を受け入れ
+   - ウィザード step5「選句種別を直接入力」を5フィールド書式（`名前,点数,最小,最大,コメント`）に変更。rank はリスト順で自動付番
+3. **通知プリセット新規実装**:
+   - `bot/models/notification_preset.py` — `NotificationPreset` モデル（JSON列でエントリ保存）
+   - `bot/repositories/notification_preset_repo.py` — CRUD
+   - `bot/services/notification_preset_service.py` — list/create/delete/set_default
+   - `bot/cogs/notify_preset_cog.py` — `/notify-preset list|add|bulk|delete|set-default`
+   - `alembic/versions/0002_notification_presets.py` — マイグレーション
+   - ウィザード step8 にプリセット選択ドロップダウンを追加。既定プリセットがあれば自動適用
+4. **締切後エントリー判定を状態ベースに変更**: `is_late_entry_request()` を `state == ENTRY_CLOSED` のみで判定。`entry_close_at` 時刻との比較を廃止。
 
 ---
 
@@ -236,14 +252,15 @@ kukai_bot/
 │   │   ├── setup.py
 │   │   └── jobs.py
 │   ├── cogs/
-│   │   ├── kukai_cog.py      # /kukai *, /kukai admin *, /kukai notify *, /list, /info
-│   │   ├── entry_cog.py      # /entry *
-│   │   ├── preset_cog.py     # /select-preset *
-│   │   ├── submission_cog.py # /submit, /submit-bulk
-│   │   ├── select_cog.py     # /select, /select-bulk
-│   │   ├── check_cog.py      # /check
-│   │   ├── result_cog.py     # /result
-│   │   └── admin_cog.py      # /guild settings
+│   │   ├── kukai_cog.py         # /kukai *, /kukai admin *, /kukai notify *, /list, /info
+│   │   ├── entry_cog.py         # /entry *
+│   │   ├── preset_cog.py        # /select-preset *
+│   │   ├── notify_preset_cog.py # /notify-preset *
+│   │   ├── submission_cog.py    # /submit, /submit-bulk
+│   │   ├── select_cog.py        # /select, /select-bulk
+│   │   ├── check_cog.py         # /check
+│   │   ├── result_cog.py        # /result
+│   │   └── admin_cog.py         # /guild settings
 │   ├── ui/
 │   │   ├── common.py         # ConfirmView, PaginatedEmbed, error_embed
 │   │   ├── submission_view.py

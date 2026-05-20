@@ -147,11 +147,5 @@ async def list_entries(
 
 
 def is_late_entry_request(kukai) -> bool:
-    """True when a new entry must be reviewed because the entry deadline passed."""
-    state = KukaiState.from_value(kukai.state)
-    if state == KukaiState.ENTRY_CLOSED:
-        return True
-    if state != KukaiState.ENTRY_OPEN or kukai.entry_close_at is None:
-        return False
-    now = datetime.now(timezone.utc).replace(tzinfo=None)
-    return kukai.entry_close_at <= now
+    """True when a new entry must be reviewed because entry phase has closed (state-based)."""
+    return KukaiState.from_value(kukai.state) == KukaiState.ENTRY_CLOSED

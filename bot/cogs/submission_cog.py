@@ -40,7 +40,7 @@ class SubmissionCog(commands.Cog):
     @app_commands.command(name="submit-bulk", description="複数行をまとめて投句します")
     @app_commands.describe(
         kukai_id="句会ID（省略可: このチャンネルで1件なら自動特定）",
-        texts="1行1句で入力（最大20句）",
+        texts="1行1句で入力",
     )
     async def submit_bulk(
         self,
@@ -53,12 +53,6 @@ class SubmissionCog(commands.Cog):
         if not poems:
             await interaction.response.send_message(
                 embed=error_embed("1行以上入力してください。"),
-                ephemeral=True,
-            )
-            return
-        if len(poems) > 20:
-            await interaction.response.send_message(
-                embed=error_embed("一括投句は最大20句までです。"),
                 ephemeral=True,
             )
             return

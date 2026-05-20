@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import discord
 
+from bot.repositories import notification_preset_repo
+from bot.services import notification_preset_service
+from bot.database import get_session
 from bot.ui.wizard.base import STEP_COUNT, cancel_wizard, goto_step
 from bot.ui.wizard.wizard_state import WizardState, set_wizard
 from bot.utils.bulk_parser import BulkParseError, parse_reminder_spec
@@ -47,19 +50,55 @@ def build(state: WizardState) -> tuple[discord.Embed, discord.ui.View]:
     return embed, StepNotifyView(state)
 
 
+class _PresetSelect(discord.ui.Select):
+    def __init__(self, state: WizardState) -> None:
+        self.state = state
+        options = [discord.SelectOption(label="（手動入力）", value="__manual__")]
+        for row in state.notify_preset_options[:24]:
+            options.append(
+                discord.SelectOption(label=str(row["name"]), value=str(row["id"]))
+            )
+        super().__init__(placeholder="プリセットから読み込む", options=options, row=0)
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        value = self.values[0]
+        if value == "__manual__":
+            await interaction.response.defer()
+            return
+        assert interaction.guild is not None
+        try:
+            async with get_session() as session:
+                preset = await notification_preset_repo.get_by_guild(session, interaction.guild.id)
+                target = next((p for p in preset if str(p.id) == value), None)
+                if target is None:
+                    await interaction.response.send_message("プリセットが見つかりません。", ephemeral=True)
+                    return
+                entries = notification_preset_service.entries_from_json(target.entries_json)
+        except Exception:
+            await interaction.response.send_message("プリセットの読み込みに失敗しました。", ephemeral=True)
+            return
+        self.state.notification_specs = entries
+        set_wizard(self.state)
+        embed, view = build(self.state)
+        await interaction.response.edit_message(embed=embed, view=view)
+
+
 class StepNotifyView(discord.ui.View):
     def __init__(self, state: WizardState) -> None:
         super().__init__(timeout=900)
         self.state = state
 
-        edit_btn = discord.ui.Button(label="通知を入力", style=discord.ButtonStyle.primary, row=0)
+        if state.notify_preset_options:
+            self.add_item(_PresetSelect(state))
+
+        edit_btn = discord.ui.Button(label="通知を入力", style=discord.ButtonStyle.primary, row=1)
         edit_btn.callback = self._edit
         self.add_item(edit_btn)
 
         clear_btn = discord.ui.Button(
             label="デフォルトに戻す",
             style=discord.ButtonStyle.secondary,
-            row=0,
+            row=1,
             disabled=not state.notification_specs,
         )
         clear_btn.callback = self._clear

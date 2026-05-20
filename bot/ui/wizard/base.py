@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import discord
 
-from bot.ui.wizard.wizard_state import WizardState, clear_wizard
+from bot.database import get_session
+from bot.repositories import notification_preset_repo
+from bot.services import notification_preset_service
+from bot.ui.wizard.wizard_state import WizardState, clear_wizard, set_wizard
 
 STEP_COUNT = 9
 STEP_NAMES = {
@@ -31,11 +34,26 @@ async def goto_step(
     first_send: bool = False,
 ) -> None:
     """Render the step view for state.step. Use first_send=True from the initial slash command."""
+    if state.step == 8:
+        await _ensure_notify_presets(state)
     embed, view = _make_step(state)
     if first_send:
         await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
     else:
         await interaction.response.edit_message(embed=embed, view=view)
+
+
+async def _ensure_notify_presets(state: WizardState) -> None:
+    async with get_session() as session:
+        presets = await notification_preset_repo.get_by_guild(session, state.guild_id)
+        state.notify_preset_options = [{"id": p.id, "name": p.name} for p in presets]
+        if not state.notification_specs:
+            default_entries = await notification_preset_service.get_default_entries(
+                session, state.guild_id
+            )
+            if default_entries:
+                state.notification_specs = default_entries
+    set_wizard(state)
 
 
 def _make_step(state: WizardState) -> tuple[discord.Embed, discord.ui.View]:

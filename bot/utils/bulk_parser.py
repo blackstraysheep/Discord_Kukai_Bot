@@ -117,13 +117,13 @@ def parse_label_spec(value: str, *, line_no: int | None = None) -> dict[str, obj
     comment_mode = "optional"
 
     if len(parts) == 3:
-        rank_priority = parse_int(parts[2], name=f"{prefix}{label} のrank", min_value=1)
+        rank_priority = parse_int(parts[2], name=f"{prefix}{label} のrank")
     elif len(parts) == 5:
         min_count = parse_int(parts[2], name=f"{prefix}{label} の最小数", min_value=0)
         max_count = parse_optional_int(parts[3], name=f"{prefix}{label} の最大数", min_value=0)
         comment_mode = parts[4].lower()
     elif len(parts) == 6:
-        rank_priority = parse_int(parts[2], name=f"{prefix}{label} のrank", min_value=1)
+        rank_priority = parse_int(parts[2], name=f"{prefix}{label} のrank")
         min_count = parse_int(parts[3], name=f"{prefix}{label} の最小数", min_value=0)
         max_count = parse_optional_int(parts[4], name=f"{prefix}{label} の最大数", min_value=0)
         comment_mode = parts[5].lower()

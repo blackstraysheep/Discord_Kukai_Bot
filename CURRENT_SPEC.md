@@ -1,6 +1,6 @@
 # Kukai Bot 現在仕様（技術者向け）
 
-最終更新: 2026-05-20
+最終更新: 2026-05-20（4件改善）
 
 ## 1. 全体構成
 - 実装言語: Python 3.11+（開発・テスト環境は Python 3.13）
@@ -102,9 +102,10 @@
 - 承認制:
   - `entry_approval=true` の句会では通常エントリーも `pending`
   - 管理者は `/entry approve` / `/entry reject` で承認・却下
-- 締切後エントリー:
-  - `entry_close_at` 経過後、または状態が `entry_closed` の場合は自動承認しない
-  - `entry_approval=false` でも `pending` として登録
+- 締切後エントリー（状態ベース判定）:
+  - **状態が `entry_closed` の場合のみ**「締切後エントリー」と判定する（時刻ベース判定は廃止）
+  - `ENTRY_OPEN` 状態では、`entry_close_at` が過去であっても通常承認される
+  - `entry_approval=false` でも `entry_closed` 状態での申請は `pending` として登録
   - 句会チャンネルへ句会作成者・追加管理者をメンションして通知
   - 承認された場合のみ、以後の投句・選句対象になる
 - 承認通知:
@@ -128,7 +129,7 @@
 - 追加は一括モーダル方式（1回最大5句）
 - 最大投句数を超えない入力枠数を自動調整
 - `/submit-bulk`:
-  - 1行1句で最大20句まで一括投句
+  - 1行1句で一括投句（句数上限は `kukai.submission_max` に従う。無制限設定なら上限なし）
   - 句会ID省略時は同一チャンネルの進行中句会から自動解決
   - 受付状態、参加承認、投句上限は `submission_service.submit()` と同じ制約
 - 注記表示:
@@ -181,13 +182,30 @@
   - `label` 書式:
     - `label=名前,点数,rank,最小数,最大数,コメントモード`
     - rank省略: `label=名前,点数,最小数,最大数,コメントモード`
-  - `rank` は小さいほど結果同点時の優先度が高い
+  - `rank` は任意の整数を受け入れる。小さいほど結果同点時の優先度が高い
   - `rank` 省略時はラベル定義順で自動採番
   - `作者コメント` はプリセット登録不可。句会ラベル展開時に `rank_priority=999` で補完
+- ウィザード step 5 の「選句種別を直接入力」モーダル:
+  - 書式: `名前,点数,最小数,最大数,コメントモード`（5フィールド、rank列なし）
+  - rank はリスト順に自動付番される
 - プリセットJSON:
   - `points_enabled`
   - `labels[]`: `label`, `point`, `rank_priority`, `min_count`, `max_count`, `comment_mode`
   - 旧JSONに `rank_priority` が無い場合は読み込み時に定義順で補完
+
+## 11b. 通知プリセット
+- `/notify-preset list` / `/notify-preset add` / `/notify-preset bulk` / `/notify-preset delete` / `/notify-preset set-default` を提供
+- `/notify-preset bulk`:
+  - 行形式テキストから通知プリセットを一括作成・更新
+  - 対応項目: `name`, `set_default`, `entry`
+  - `entry` 書式: `event,offset,destination,target,mention`（`/kukai notify replace` と同じ書式）
+  - 同名プリセットが存在する場合は上書き
+- ギルドに既定プリセットが設定されている場合:
+  - 句会作成ウィザード step 8 で自動適用される
+- ウィザード step 8:
+  - 通知プリセットがある場合、プリセット選択ドロップダウンが表示される
+  - プリセットを選ぶと通知設定が一括ロードされる
+  - 手動入力（「通知を入力」ボタン）と併用可能
 
 ## 12. 行形式一括コマンド
 - 共通仕様:

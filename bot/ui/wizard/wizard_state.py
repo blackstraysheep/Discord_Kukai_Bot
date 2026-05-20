@@ -60,6 +60,7 @@ class WizardState:
 
     # Step 8: Notifications
     notification_specs: list[dict[str, Any]] = field(default_factory=list)
+    notify_preset_options: list[dict[str, Any]] = field(default_factory=list)
 
     # Step 1 extras
     category_id: Optional[int] = None

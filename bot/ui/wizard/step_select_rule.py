@@ -33,7 +33,6 @@ def _specs_as_text(specs: list[dict[str, Any]]) -> str:
                 [
                     str(spec["label"]),
                     str(spec.get("point", 0)),
-                    str(spec.get("rank_priority") or spec.get("display_order") or 1),
                     str(spec.get("min_count", 0)),
                     _max_label(spec),
                     str(spec.get("comment_mode", "none")),
@@ -228,12 +227,12 @@ class CountCommentModal(discord.ui.Modal, title="選句数・コメント設定"
 
 class CustomLabelModal(discord.ui.Modal, title="選句種別の直接入力"):
     labels = discord.ui.TextInput(
-        label="1行1件: 名前,点数,rank,最小,最大,コメント",
+        label="1行1件: 名前,点数,最小,最大,コメント",
         style=discord.TextStyle.paragraph,
         placeholder=(
-            "特選,2,1,0,1,none\n"
-            "並選,1,2,0,5,optional\n"
-            "逆選,-1,3,0,1,required"
+            "特選,2,0,1,none\n"
+            "並選,1,0,5,optional\n"
+            "逆選,-1,0,1,required"
         ),
         required=True,
         max_length=3000,

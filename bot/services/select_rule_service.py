@@ -128,8 +128,6 @@ def _normalize_common(
                 rank_priority = int(rank_raw)
             except (TypeError, ValueError):
                 raise ValidationError(f"「{label}」のrankは整数で指定してください。") from None
-            if rank_priority < 1:
-                raise ValidationError(f"「{label}」のrankは1以上にしてください。")
             spec["rank_priority"] = rank_priority
         normalized.append(spec)
 
