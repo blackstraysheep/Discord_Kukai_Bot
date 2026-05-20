@@ -291,6 +291,7 @@ class _LabelSelect(discord.ui.Select):
 
     async def callback(self, interaction: discord.Interaction) -> None:
         self._view_owner._selected_label_value = self.values[0]
+        self._view_owner._build_items()
         await interaction.response.edit_message(
             embed=self._view_owner.build_embed(),
             view=self._view_owner,
@@ -360,6 +361,7 @@ class SelectView(discord.ui.View):
             lines.append(f"...他 {len(self._pub_subs) - 25} 句")
         lines.append("`総評` 句会全体へのコメント")
         embed.add_field(name="番号+句リスト", value="\n".join(lines), inline=False)
+        embed.add_field(name="選句数", value=self._select_count_summary(), inline=False)
 
         if self._is_overall_selected():
             embed.add_field(name="選択中 総評", value=self._overall_comment[:500] or "（未入力）", inline=False)
@@ -386,6 +388,26 @@ class SelectView(discord.ui.View):
         embed.add_field(name="現在の状態", value=status, inline=False)
         embed.set_footer(text=f"句会 ID: {self._kukai.id}")
         return embed
+
+    def _select_count_summary(self) -> str:
+        counts: dict[int, int] = {}
+        for selected in self._selects.values():
+            if selected.is_self_comment:
+                continue
+            counts[selected.select_label_id] = counts.get(selected.select_label_id, 0) + 1
+
+        rows: list[str] = []
+        for lbl in self._labels:
+            if lbl.label == _AUTHOR_COMMENT_LABEL:
+                continue
+            current = counts.get(lbl.id, 0)
+            max_label = "∞" if lbl.max_count is None else str(lbl.max_count)
+            if lbl.min_count > 0:
+                target = f"{lbl.min_count}〜{max_label}"
+            else:
+                target = max_label
+            rows.append(f"{lbl.label}: **{current}** / {target}")
+        return "\n".join(rows) if rows else "（通常選句ラベルなし）"
 
     def _build_items(self) -> None:
         self.clear_items()

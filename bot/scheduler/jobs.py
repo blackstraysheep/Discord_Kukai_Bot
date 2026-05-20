@@ -520,11 +520,10 @@ async def _auto_publish_result_list(session, kukai) -> tuple[int | None, str | N
     """Publish result embeds to channel and store the first message ID."""
     import discord
 
-    from bot.repositories import select_repo
     from bot.services import result_service
     from bot.state_machine.states import KukaiState
     from bot.utils.discord_retry import send_with_retry
-    from bot.cogs.result_cog import ResultSwitchView, _resolve_initial_format
+    from bot.cogs.result_cog import ResultOpenView, build_result_entry_embed, _resolve_initial_format
 
     if KukaiState.from_value(kukai.state) != KukaiState.RESULTS:
         return None, "句会状態が結果公開中ではないため、結果投稿をスキップしました。"
@@ -532,8 +531,6 @@ async def _auto_publish_result_list(session, kukai) -> tuple[int | None, str | N
     results = await result_service.compute_results(session, kukai)
     if not results:
         return 0, "集計対象の投句がありません。"
-    overall_comments = await select_repo.list_overall_comments(session, kukai.id)
-
     if not kukai.channel_id:
         logger.warning(
             "_auto_publish_result_list: no channel set (kukai_id=%d)",
@@ -560,15 +557,14 @@ async def _auto_publish_result_list(session, kukai) -> tuple[int | None, str | N
         return len(results), "公開先テキストチャンネルが見つかりません。"
 
     first_message_id: int | None = None
-    view = ResultSwitchView(
-        kukai,
-        results,
-        overall_comments,
-        guild,
-        initial_format=_resolve_initial_format(kukai, None),
-    )
     try:
-        sent = await send_with_retry(lambda: channel.send(embed=view.current_embed(), view=view))
+        initial_format = _resolve_initial_format(kukai, None)
+        sent = await send_with_retry(
+            lambda: channel.send(
+                embed=build_result_entry_embed(kukai, result_count=len(results)),
+                view=ResultOpenView(kukai.id, initial_format=initial_format),
+            )
+        )
         first_message_id = sent.id
     except Exception as error:
         logger.warning(

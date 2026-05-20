@@ -64,7 +64,10 @@ def _score_embed(
         # Inline comments (up to 3)
         for lv in r.label_selects:
             for comment in lv.comments[:3]:
-                body_lines.append(f"　💬 [{lv.label}] {discord_safe(comment[:80])}")
+                body_lines.append(
+                    f"　💬 [{lv.label}] {discord_safe(comment.text[:80])}"
+                    f"（{_comment_signature(comment.selector_user_id, guild)}）"
+                )
 
         field_value = "\n".join(body_lines)
 
@@ -95,7 +98,7 @@ def _number_embed(kukai, results, guild: discord.Guild) -> list[discord.Embed]:
         line = f"`No.{r.number}` {discord_safe(r.text)}　— {label_str} ({r.total_score}点)"
         author_comments = [c for lv in r.label_selects if lv.label == "作者コメント" for c in lv.comments[:1]]
         if author_comments:
-            line += f"\n　🖊 作者コメント: {discord_safe(author_comments[0][:80])}"
+            line += f"\n　🖊 作者コメント: {discord_safe(author_comments[0].text[:80])}"
         lines.append(line)
     embed.description = "\n".join(lines[:40])
     if len(sorted_r) > 40:
@@ -133,7 +136,7 @@ def _author_embed(
             line = f"`No.{r.number}` {discord_safe(r.text)} — {r.total_score}点 ({r.rank}位)"
             author_comments = [c for lv in r.label_selects if lv.label == "作者コメント" for c in lv.comments[:1]]
             if author_comments:
-                line += f"\n　🖊 作者コメント: {discord_safe(author_comments[0][:80])}"
+                line += f"\n　🖊 作者コメント: {discord_safe(author_comments[0].text[:80])}"
             lines.append(line)
         embed.add_field(
             name=f"{discord_safe(author_name)} (合計 {total}点)",
@@ -200,6 +203,74 @@ def _resolve_initial_format(kukai, requested: str | None) -> str:
         return default_format
 
     return available[0]
+
+
+def _comment_signature(user_id: int, guild: discord.Guild) -> str:
+    member = guild.get_member(user_id)
+    return discord_safe(member.display_name if member else f"UID:{user_id}")
+
+
+def build_result_entry_embed(kukai, *, result_count: int) -> discord.Embed:
+    embed = discord.Embed(
+        title=f"🏆 選句結果 — {kukai.title}",
+        description="結果を見るボタンから個別に表示できます。",
+        color=COLOR_RESULT,
+    )
+    embed.set_footer(text=f"句会 ID: {kukai.id}　|　全 {result_count} 句")
+    return embed
+
+
+class ResultOpenView(discord.ui.View):
+    def __init__(self, kukai_id: int, *, initial_format: str | None = None) -> None:
+        super().__init__(timeout=86400)
+        self.kukai_id = kukai_id
+        self.initial_format = initial_format
+
+        button = discord.ui.Button(
+            label="結果を見る",
+            style=discord.ButtonStyle.primary,
+            row=0,
+        )
+        button.callback = self._on_open
+        self.add_item(button)
+
+    async def _on_open(self, interaction: discord.Interaction) -> None:
+        assert interaction.guild is not None
+        try:
+            async with get_session() as session:
+                kukai = await kukai_service.get_kukai(session, self.kukai_id, interaction.guild.id)
+                state = KukaiState.from_value(kukai.state)
+                if state not in {KukaiState.RESULTS, KukaiState.ENDED}:
+                    await interaction.response.send_message(
+                        embed=error_embed("結果はまだ公開されていません。"),
+                        ephemeral=True,
+                    )
+                    return
+                results = await result_service.compute_results(session, kukai)
+                overall_comments = await select_repo.list_overall_comments(session, kukai.id)
+        except ServiceError as e:
+            await interaction.response.send_message(embed=error_embed(str(e)), ephemeral=True)
+            return
+
+        if not results:
+            await interaction.response.send_message(
+                embed=discord.Embed(description="集計対象の投句がありません。", color=COLOR_INFO),
+                ephemeral=True,
+            )
+            return
+
+        view = ResultSwitchView(
+            kukai,
+            results,
+            overall_comments,
+            interaction.guild,
+            initial_format=_resolve_initial_format(kukai, self.initial_format),
+        )
+        await interaction.response.send_message(
+            embed=view.current_embed(),
+            view=view,
+            ephemeral=True,
+        )
 
 
 class _ResultFormatSelect(discord.ui.Select):
@@ -425,6 +496,17 @@ class ResultCog(commands.Cog):
 
             # Public in RESULTS state, ephemeral otherwise
             ephemeral = state != KukaiState.RESULTS
+            if not ephemeral:
+                await send_with_retry(
+                    lambda: interaction.response.send_message(
+                        embed=build_result_entry_embed(kukai, result_count=len(results)),
+                        view=ResultOpenView(
+                            kukai.id,
+                            initial_format=_resolve_initial_format(kukai, requested_format),
+                        ),
+                    )
+                )
+                return
             await send_with_retry(
                 lambda: interaction.response.send_message(
                     embed=view.current_embed(),

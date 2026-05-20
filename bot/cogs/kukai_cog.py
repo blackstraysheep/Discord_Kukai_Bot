@@ -400,8 +400,9 @@ class KukaiCog(commands.Cog):
                 name="submission_min",
                 min_value=1,
             )
+            submission_max_raw = first_value(fields, "submission_max", "3")
             submission_max = parse_optional_int(
-                first_value(fields, "submission_max", "3") or "3",
+                submission_max_raw if submission_max_raw is not None else "3",
                 name="submission_max",
                 min_value=1,
             )
@@ -959,19 +960,17 @@ class KukaiCog(commands.Cog):
         results = await result_service.compute_results(session, kukai)
         if not results:
             return 0, "集計対象の投句がないため、結果投稿をスキップしました。", None
-        overall_comments = await select_repo.list_overall_comments(session, kukai.id)
-        from bot.cogs.result_cog import ResultSwitchView, _resolve_initial_format
+        from bot.cogs.result_cog import ResultOpenView, build_result_entry_embed, _resolve_initial_format
 
-        view = ResultSwitchView(
-            kukai,
-            results,
-            overall_comments,
-            guild,
-            initial_format=_resolve_initial_format(kukai, None),
-        )
         first_message_id: int | None = None
         try:
-            sent = await send_with_retry(lambda: channel.send(embed=view.current_embed(), view=view))
+            initial_format = _resolve_initial_format(kukai, None)
+            sent = await send_with_retry(
+                lambda: channel.send(
+                    embed=build_result_entry_embed(kukai, result_count=len(results)),
+                    view=ResultOpenView(kukai.id, initial_format=initial_format),
+                )
+            )
             first_message_id = sent.id
         except discord.Forbidden:
             return len(results), "公開チャンネルへの送信権限がないため、結果を投稿できません。", None

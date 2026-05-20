@@ -27,12 +27,18 @@ _RESULT_ALLOWED = {
 
 
 @dataclass
+class SelectCommentEntry:
+    selector_user_id: int
+    text: str
+
+
+@dataclass
 class LabelSelects:
     label: str
     point: int
     rank_priority: int
     count: int = 0
-    comments: list[str] = field(default_factory=list)
+    comments: list[SelectCommentEntry] = field(default_factory=list)
 
 
 @dataclass
@@ -97,7 +103,12 @@ async def compute_results(
             lv_map[selected.select_label_id].count += 1
             total_score += lbl.point
             if selected.comment:
-                lv_map[selected.select_label_id].comments.append(selected.comment.comment)
+                lv_map[selected.select_label_id].comments.append(
+                    SelectCommentEntry(
+                        selector_user_id=selected.selector_user_id,
+                        text=selected.comment.comment,
+                    )
+                )
 
         label_selects = sorted(
             [lv for lv in lv_map.values() if lv.count > 0],
@@ -114,26 +125,12 @@ async def compute_results(
             )
         )
 
-    # Sort: score desc, then tie-break by label rank_priority
-    def _sort_key(r: SubmissionResult) -> tuple:
-        # For tie-breaking: count of selects at each rank priority level
-        # Lower rank_priority = higher priority label
-        prio_counts = {
-            lv.rank_priority: lv.count
-            for lv in r.label_selects
-            if lv.label != "作者コメント"
-        }
-        # Create a tuple of counts at each priority level (lower index = higher priority)
-        max_prio = max((lbl.rank_priority for lbl in labels), default=1)
-        tie_breaker = tuple(-(prio_counts.get(p, 0)) for p in range(1, max_prio + 1))
-        return (-r.total_score,) + tie_breaker
-
-    results.sort(key=_sort_key)
+    results.sort(key=lambda r: (-r.total_score, r.number))
 
     # Assign ranks (ties share rank)
     rank = 1
     for i, r in enumerate(results):
-        if i > 0 and _sort_key(r) != _sort_key(results[i - 1]):
+        if i > 0 and r.total_score != results[i - 1].total_score:
             rank = i + 1
         r.rank = rank
 

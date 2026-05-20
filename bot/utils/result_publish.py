@@ -8,6 +8,11 @@ from bot.utils.embed_builder import COLOR_INFO, COLOR_RESULT
 from bot.utils.text import discord_safe
 
 
+def _comment_signature(user_id: int, guild: discord.Guild) -> str:
+    member = guild.get_member(user_id)
+    return discord_safe(member.display_name if member else f"UID:{user_id}")
+
+
 def _score_embeds(kukai, results, *, reveal_author_for_user: dict[int, bool], guild: discord.Guild) -> list[discord.Embed]:
     pages: list[discord.Embed] = []
     embed = discord.Embed(
@@ -30,7 +35,10 @@ def _score_embeds(kukai, results, *, reveal_author_for_user: dict[int, bool], gu
         body_lines = [f"> {discord_safe(result.text)}", label_str]
         for level in result.label_selects:
             for comment in level.comments[:3]:
-                body_lines.append(f"　💬 [{level.label}] {discord_safe(comment[:80])}")
+                body_lines.append(
+                    f"　💬 [{level.label}] {discord_safe(comment.text[:80])}"
+                    f"（{_comment_signature(comment.selector_user_id, guild)}）"
+                )
         body = "\n".join(body_lines)
 
         if len(embed.fields) >= 25 or char_count + len(header) + len(body) > 5800:

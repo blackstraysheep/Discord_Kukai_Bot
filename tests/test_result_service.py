@@ -91,7 +91,7 @@ async def test_compute_results_basic(db_session):
 
 @pytest.mark.asyncio
 async def test_compute_results_tie_breaking(db_session):
-    """Tied by total score; more 特選 (rank_priority=1) wins."""
+    """Tied by total score; rank remains tied regardless of label mix."""
     # Both user 2 and user 3 get 2pt
     # user 2 gets 特選(2pt), user 3 gets 並選(1pt)+並選(1pt) = 2pt
     kukai = await _setup_results(db_session, [
@@ -103,14 +103,12 @@ async def test_compute_results_tie_breaking(db_session):
     results = await result_service.compute_results(db_session, kukai)
     assert results[0].total_score == 2
     assert results[1].total_score == 2
-    # user 2 has 特選 → should win tiebreak
-    assert results[0].author_user_id == 2
     assert results[0].rank == 1
-    assert results[1].rank == 2
+    assert results[1].rank == 1
 
 
 @pytest.mark.asyncio
-async def test_compute_results_uses_custom_rank_priority_for_ties(db_session):
+async def test_compute_results_ignores_custom_rank_priority_for_ties(db_session):
     kukai = await kukai_service.create_kukai(
         db_session,
         guild_id=1,
@@ -160,8 +158,8 @@ async def test_compute_results_uses_custom_rank_priority_for_ties(db_session):
     await kukai_service.proceed(db_session, kukai)
 
     results = await result_service.compute_results(db_session, kukai)
-    assert [result.author_user_id for result in results] == [3, 2]
-    assert [result.rank for result in results] == [1, 2]
+    assert {result.author_user_id for result in results} == {2, 3}
+    assert [result.rank for result in results] == [1, 1]
 
 
 @pytest.mark.asyncio
