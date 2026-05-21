@@ -14,7 +14,13 @@ from bot.services.errors import (
 )
 from bot.state_machine.states import KukaiState
 
-_APPROVAL_ALLOWED = {KukaiState.ENTRY_OPEN, KukaiState.ENTRY_CLOSED}
+_ENTRY_ACCEPT_STATES = {KukaiState.ENTRY_OPEN, KukaiState.ENTRY_CLOSED, KukaiState.SUBMISSION_OPEN}
+_APPROVAL_ALLOWED = {
+    KukaiState.ENTRY_OPEN,
+    KukaiState.ENTRY_CLOSED,
+    KukaiState.SUBMISSION_OPEN,
+    KukaiState.SUBMISSION_CLOSED,
+}
 logger = logging.getLogger(__name__)
 
 
@@ -35,7 +41,7 @@ async def enter(
             kukai.entry_enabled,
         )
         raise InvalidStateError("この句会はエントリー制ではありません。")
-    if state not in {KukaiState.ENTRY_OPEN, KukaiState.ENTRY_CLOSED}:
+    if state not in _ENTRY_ACCEPT_STATES:
         logger.info(
             "event=entry_rejected_by_state kukai_id=%s user_id=%s state=%s entry_enabled=%s",
             kukai.id,
@@ -81,7 +87,9 @@ async def enter(
 
 async def withdraw(session: AsyncSession, kukai, user_id: int) -> Entry:
     """Cancel own entry (only during entry_open)."""
-    if KukaiState.from_value(kukai.state) != KukaiState.ENTRY_OPEN:
+    if KukaiState.from_value(kukai.state) not in {KukaiState.ENTRY_OPEN, KukaiState.SUBMISSION_OPEN}:
+        raise InvalidStateError("エントリーの取消は受付期間中のみ可能です。")
+    if is_late_entry_request(kukai):
         raise InvalidStateError("エントリーの取消は受付期間中のみ可能です。")
 
     entry = await entry_repo.get_by_user(session, kukai.id, user_id)
@@ -139,7 +147,9 @@ async def admin_remove(
 ) -> None:
     """Admin: hard-delete an entry after entry_closed."""
     state = KukaiState.from_value(kukai.state)
-    if state == KukaiState.ENTRY_OPEN:
+    if (state == KukaiState.ENTRY_OPEN and not is_late_entry_request(kukai)) or (
+        state == KukaiState.SUBMISSION_OPEN and not is_late_entry_request(kukai)
+    ):
         raise InvalidStateError(
             "受付期間中は管理者削除できません。"
             "ユーザー自身に取消させるか、締切後に操作してください。"
@@ -163,5 +173,17 @@ async def list_entries(
 
 
 def is_late_entry_request(kukai) -> bool:
-    """True when a new entry must be reviewed because entry phase has closed (state-based)."""
-    return KukaiState.from_value(kukai.state) == KukaiState.ENTRY_CLOSED
+    """True when a new entry must be reviewed because entry is past its deadline."""
+    state = KukaiState.from_value(kukai.state)
+    if state == KukaiState.ENTRY_CLOSED:
+        return True
+    deadline = effective_entry_close_at(kukai)
+    if deadline is None:
+        return False
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    return deadline <= now
+
+
+def effective_entry_close_at(kukai) -> datetime | None:
+    """Entry closes at explicit entry_close_at, falling back to submission_close_at."""
+    return kukai.entry_close_at or kukai.submission_close_at

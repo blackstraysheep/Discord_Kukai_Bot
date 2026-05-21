@@ -118,8 +118,7 @@ async def test_export_and_import_payload_roundtrip(db_session):
 
     await entry_service.enter(db_session, kukai, user_id=101, haigo="甲")
     await entry_service.approve(db_session, kukai, approver_id=100, target_user_id=101)
-    await kukai_service.proceed(db_session, kukai)  # entry_closed
-    await kukai_service.proceed(db_session, kukai)  # submission_open
+    await kukai_service.proceed(db_session, kukai)
 
     sub, _ = await submission_service.submit(db_session, kukai, user_id=101, text="春の海")
     await kukai_service.proceed(db_session, kukai)  # submission_closed

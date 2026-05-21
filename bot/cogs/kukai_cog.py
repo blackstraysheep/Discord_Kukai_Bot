@@ -72,6 +72,15 @@ STATE_LABEL: dict[str, str] = {
     "cancelled": "中止",
 }
 
+
+def _mode_label(mode: str | None) -> str:
+    return {
+        "manual": "手動",
+        "semi_auto": "半自動",
+        "full_auto": "全自動",
+        "auto": "自動",
+    }.get(str(mode), str(mode))
+
 ROLLBACK_TARGET_CHOICES = [
     app_commands.Choice(name="下書き", value=KukaiState.DRAFT.value),
     app_commands.Choice(name="エントリー受付中", value=KukaiState.ENTRY_OPEN.value),
@@ -107,7 +116,11 @@ class StageActionView(discord.ui.View):
                     current = KukaiState.from_value(kukai.state)
 
                     if self.state == KukaiState.ENTRY_OPEN:
-                        if current != KukaiState.ENTRY_OPEN:
+                        if current not in {
+                            KukaiState.ENTRY_OPEN,
+                            KukaiState.ENTRY_CLOSED,
+                            KukaiState.SUBMISSION_OPEN,
+                        }:
                             await interaction.response.send_message(
                                 embed=error_embed("現在はエントリー受付中ではありません。"),
                                 ephemeral=True,
@@ -360,6 +373,7 @@ class KukaiCog(commands.Cog):
                     "category_id",
                     "entry_enabled",
                     "entry_approval",
+                    "entry_mode",
                     "min_participants",
                     "entry_close_at",
                     "submission_close_at",
@@ -397,9 +411,12 @@ class KukaiCog(commands.Cog):
             entry_close_at = None
             entry_close_raw = first_value(fields, "entry_close_at")
             if entry_enabled:
-                if not entry_close_raw:
-                    raise BulkParseError("entry_enabled=true の場合 entry_close_at は必須です。")
-                entry_close_at = parse_datetime_field(entry_close_raw, name="entry_close_at")
+                if entry_close_raw:
+                    entry_close_at = parse_datetime_field(entry_close_raw, name="entry_close_at")
+
+            entry_mode = first_value(fields, "entry_mode", "manual") or "manual"
+            if entry_mode not in {"manual", "full_auto"}:
+                raise BulkParseError("entry_mode は manual/full_auto で指定してください。")
 
             submission_close_at = parse_datetime_field(submission_close_raw, name="submission_close_at")
             selecting_close_at = parse_datetime_field(selecting_close_raw, name="selecting_close_at")
@@ -576,6 +593,7 @@ class KukaiCog(commands.Cog):
                         first_value(fields, "entry_approval", "false") or "false",
                         name="entry_approval",
                     ),
+                    entry_mode=entry_mode,
                     min_participants=min_participants,
                     submission_min=submission_min,
                     submission_max=submission_max,
@@ -653,9 +671,21 @@ class KukaiCog(commands.Cog):
             inline=False,
         )
         if entry_enabled and entry_close_at:
-            info.add_field(name="エントリー締切", value=format_jst(entry_close_at), inline=False)
-        info.add_field(name="投句締切", value=format_jst(submission_close_at), inline=False)
-        info.add_field(name="選句締切", value=format_jst(selecting_close_at), inline=False)
+            info.add_field(
+                name=f"エントリー締切（{_mode_label(entry_mode)}）",
+                value=format_jst(entry_close_at),
+                inline=False,
+            )
+        info.add_field(
+            name=f"投句締切（{_mode_label(submission_mode)}）",
+            value=format_jst(submission_close_at),
+            inline=False,
+        )
+        info.add_field(
+            name=f"選句締切（{_mode_label(selecting_mode)}）",
+            value=format_jst(selecting_close_at),
+            inline=False,
+        )
         if voice_enabled and voice_channel_id is not None and voice_start_at is not None:
             voice_value = f"開始: {format_jst(voice_start_at)}\n場所: <#{voice_channel_id}>"
             if voice_end_at is not None:
@@ -670,7 +700,11 @@ class KukaiCog(commands.Cog):
                     color=COLOR_INFO,
                 )
                 if entry_close_at:
-                    entry_embed.add_field(name="エントリー締切", value=format_jst(entry_close_at), inline=False)
+                    entry_embed.add_field(
+                        name=f"エントリー締切（{_mode_label(entry_mode)}）",
+                        value=format_jst(entry_close_at),
+                        inline=False,
+                    )
                 entry_embed.set_footer(text=f"句会ID: {kukai_id}")
                 await channel.send(
                     embed=entry_embed,
@@ -984,9 +1018,24 @@ class KukaiCog(commands.Cog):
             return
         embed = discord.Embed(description=description, color=COLOR_INFO)
         if state == KukaiState.ENTRY_OPEN and kukai.entry_enabled and kukai.entry_close_at:
-            embed.add_field(name="エントリー締切", value=format_jst(kukai.entry_close_at), inline=False)
+            embed.add_field(
+                name=f"エントリー締切（{_mode_label(getattr(kukai, 'entry_mode', 'manual'))}）",
+                value=format_jst(kukai.entry_close_at),
+                inline=False,
+            )
+        elif state == KukaiState.ENTRY_CLOSED:
+            participant_lines = await _approved_entry_lines(interaction_guild=guild, kukai_id=kukai.id)
+            embed.add_field(
+                name=f"エントリー人数: {len(participant_lines)}名",
+                value=_limited_field_value(participant_lines),
+                inline=False,
+            )
         elif state == KukaiState.SUBMISSION_OPEN and kukai.submission_close_at:
-            embed.add_field(name="投句締切", value=format_jst(kukai.submission_close_at), inline=False)
+            embed.add_field(
+                name=f"投句締切（{_mode_label(kukai.submission_mode)}）",
+                value=format_jst(kukai.submission_close_at),
+                inline=False,
+            )
         elif state == KukaiState.SELECTING_OPEN:
             select_labels = []
             try:
@@ -1009,7 +1058,11 @@ class KukaiCog(commands.Cog):
                     inline=False,
                 )
             if kukai.selecting_close_at:
-                embed.add_field(name="選句締切", value=format_jst(kukai.selecting_close_at), inline=False)
+                embed.add_field(
+                    name=f"選句締切（{_mode_label(kukai.selecting_mode)}）",
+                    value=format_jst(kukai.selecting_close_at),
+                    inline=False,
+                )
         embed.set_footer(text=f"句会ID: {kukai.id}")
         view = StageActionView(kukai.id, state)
         try:
@@ -1187,6 +1240,7 @@ class KukaiCog(commands.Cog):
         submission_min="最小投句数",
         submission_max="最大投句数",
         submission_max_unlimited="最大投句数を無制限にする",
+        entry_mode="エントリー締切進行モード",
         submission_mode="投句進行モード",
         selecting_mode="選句進行モード",
         publish_mode="投句公開モード",
@@ -1206,6 +1260,7 @@ class KukaiCog(commands.Cog):
         submission_min: int | None = None,
         submission_max: int | None = None,
         submission_max_unlimited: bool | None = None,
+        entry_mode: Literal["manual", "full_auto"] | None = None,
         submission_mode: Literal["manual", "semi_auto", "full_auto"] | None = None,
         selecting_mode: Literal["manual", "semi_auto", "full_auto"] | None = None,
         publish_mode: Literal["manual", "auto"] | None = None,
@@ -1248,6 +1303,7 @@ class KukaiCog(commands.Cog):
                     "selecting_close_at": kukai.selecting_close_at,
                     "submission_min": kukai.submission_min,
                     "submission_max": kukai.submission_max,
+                    "entry_mode": kukai.entry_mode,
                     "submission_mode": kukai.submission_mode,
                     "selecting_mode": kukai.selecting_mode,
                     "publish_mode": kukai.publish_mode,
@@ -1267,6 +1323,7 @@ class KukaiCog(commands.Cog):
                     submission_min=submission_min,
                     submission_max=submission_max,
                     submission_max_unlimited=bool(submission_max_unlimited),
+                    entry_mode=entry_mode,
                     submission_mode=submission_mode,
                     selecting_mode=selecting_mode,
                     publish_mode=publish_mode,
@@ -1287,6 +1344,7 @@ class KukaiCog(commands.Cog):
                     "selecting_close_at": kukai.selecting_close_at,
                     "submission_min": kukai.submission_min,
                     "submission_max": kukai.submission_max,
+                    "entry_mode": kukai.entry_mode,
                     "submission_mode": kukai.submission_mode,
                     "selecting_mode": kukai.selecting_mode,
                     "publish_mode": kukai.publish_mode,
@@ -1311,6 +1369,11 @@ class KukaiCog(commands.Cog):
                     changed_lines.append(
                         f"投句進行モード: {mode_labels.get(str(before['submission_mode']), str(before['submission_mode']))}"
                         f" → {mode_labels.get(str(after['submission_mode']), str(after['submission_mode']))}"
+                    )
+                if before["entry_mode"] != after["entry_mode"]:
+                    changed_lines.append(
+                        f"エントリー締切進行モード: {_mode_label(str(before['entry_mode']))}"
+                        f" → {_mode_label(str(after['entry_mode']))}"
                     )
                 if before["selecting_mode"] != after["selecting_mode"]:
                     changed_lines.append(
@@ -1875,12 +1938,24 @@ def _build_info_embed(
 
     if kukai.entry_enabled:
         entry_deadline = format_jst(kukai.entry_close_at) if kukai.entry_close_at else "未定"
-        embed.add_field(name="エントリー締切", value=entry_deadline, inline=False)
+        embed.add_field(
+            name=f"エントリー締切（{_mode_label(getattr(kukai, 'entry_mode', 'manual'))}）",
+            value=entry_deadline,
+            inline=False,
+        )
 
     submission_deadline = format_jst(kukai.submission_close_at) if kukai.submission_close_at else "未定"
     selecting_deadline = format_jst(kukai.selecting_close_at) if kukai.selecting_close_at else "未定"
-    embed.add_field(name="投句締切", value=submission_deadline, inline=False)
-    embed.add_field(name="選句締切", value=selecting_deadline, inline=False)
+    embed.add_field(
+        name=f"投句締切（{_mode_label(getattr(kukai, 'submission_mode', 'manual'))}）",
+        value=submission_deadline,
+        inline=False,
+    )
+    embed.add_field(
+        name=f"選句締切（{_mode_label(getattr(kukai, 'selecting_mode', 'manual'))}）",
+        value=selecting_deadline,
+        inline=False,
+    )
 
     if voice_session is None:
         voice_session = getattr(kukai, "__dict__", {}).get("voice_session")
@@ -1927,6 +2002,28 @@ def _limited_field_value(lines: list[str], *, limit: int = 1024) -> str:
         value = candidate
         shown += 1
     return value or "（表示できる項目がありません）"
+
+
+async def _approved_entry_lines(*, interaction_guild: discord.Guild, kukai_id: int) -> list[str]:
+    from sqlalchemy import select as _sa_select
+
+    from bot.models.entry import Entry
+    from bot.utils.text import discord_safe
+
+    async with get_session() as session:
+        result = await session.execute(
+            _sa_select(Entry)
+            .where(Entry.kukai_id == kukai_id, Entry.status == "approved")
+            .order_by(Entry.created_at)
+        )
+        entries = list(result.scalars().all())
+
+    lines: list[str] = []
+    for entry in entries:
+        member = interaction_guild.get_member(entry.user_id)
+        name = entry.haigo or (member.display_name if member else f"UID:{entry.user_id}")
+        lines.append(discord_safe(name))
+    return lines
 
 
 def _format_destination(channel_id: int | None, mention: bool) -> str:

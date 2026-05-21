@@ -16,10 +16,13 @@ def build(state: WizardState) -> tuple[discord.Embed, discord.ui.View]:
     enabled_str = "✅ 有効（エントリー制）" if state.entry_enabled else "🚫 無効（全員参加可）"
     if state.entry_enabled:
         approval_str = "✅ 要" if state.entry_approval else "🚫 不要（自動承認）"
+        mode_str = "全自動" if state.entry_mode == "full_auto" else "手動"
     else:
         approval_str = "（エントリー無効時は常に不要）"
+        mode_str = "（エントリー無効時は適用外）"
     embed.add_field(name="エントリー機能", value=enabled_str, inline=False)
     embed.add_field(name="承認制", value=approval_str, inline=True)
+    embed.add_field(name="エントリー締切進行", value=mode_str, inline=True)
     embed.set_footer(text="設定後「次へ」で締切設定に進みます。")
     return embed, StepEntryView(state)
 
@@ -48,6 +51,7 @@ class _EntryEnabledSelect(discord.ui.Select):
         self.state.entry_enabled = self.values[0] == "true"
         if not self.state.entry_enabled:
             self.state.entry_approval = False
+            self.state.entry_mode = "manual"
         set_wizard(self.state)
         embed, view = build(self.state)
         await interaction.response.edit_message(embed=embed, view=view)
@@ -86,27 +90,61 @@ class _EntryApprovalSelect(discord.ui.Select):
         await interaction.response.edit_message(embed=embed, view=view)
 
 
+class _EntryModeSelect(discord.ui.Select):
+    def __init__(self, state: WizardState) -> None:
+        self.state = state
+        super().__init__(
+            placeholder="エントリー締切進行",
+            disabled=not state.entry_enabled,
+            options=[
+                discord.SelectOption(
+                    label="手動（締切時刻では進行しない）",
+                    value="manual",
+                    default=state.entry_mode == "manual",
+                ),
+                discord.SelectOption(
+                    label="全自動（締切時刻に成立判定）",
+                    value="full_auto",
+                    default=state.entry_mode == "full_auto",
+                ),
+            ],
+            row=2,
+        )
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        if not self.state.entry_enabled:
+            await interaction.response.send_message(
+                "エントリー無効時は締切進行を変更できません。", ephemeral=True
+            )
+            return
+        self.state.entry_mode = self.values[0]
+        set_wizard(self.state)
+        embed, view = build(self.state)
+        await interaction.response.edit_message(embed=embed, view=view)
+
+
 class StepEntryView(discord.ui.View):
     def __init__(self, state: WizardState) -> None:
         super().__init__(timeout=900)
         self.state = state
         self.add_item(_EntryEnabledSelect(state))
         self.add_item(_EntryApprovalSelect(state))
+        self.add_item(_EntryModeSelect(state))
 
         back_btn = discord.ui.Button(
-            label="← 戻る", style=discord.ButtonStyle.secondary, row=2
+            label="← 戻る", style=discord.ButtonStyle.secondary, row=3
         )
         back_btn.callback = self._back
         self.add_item(back_btn)
 
         next_btn = discord.ui.Button(
-            label="次へ ➜", style=discord.ButtonStyle.success, row=2
+            label="次へ ➜", style=discord.ButtonStyle.success, row=3
         )
         next_btn.callback = self._next
         self.add_item(next_btn)
 
         cancel_btn = discord.ui.Button(
-            label="❌ キャンセル", style=discord.ButtonStyle.danger, row=2
+            label="❌ キャンセル", style=discord.ButtonStyle.danger, row=3
         )
         cancel_btn.callback = self._cancel
         self.add_item(cancel_btn)

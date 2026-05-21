@@ -67,6 +67,7 @@ async def notification_job(schedule_id: int) -> None:
             "voice_start": "ボイス句会開始",
         }
         event_ja = EVENT_JA.get(ns.event_type, ns.event_type)
+        event_label = _event_label_with_mode(kukai, ns.event_type, event_ja)
         voice_session = None
         if ns.event_type == "voice_start":
             from bot.models.voice_session import VoiceSession
@@ -87,7 +88,7 @@ async def notification_job(schedule_id: int) -> None:
         time_str = format_jst(deadline_dt) if deadline_dt else "未定"
 
         embed_desc = (
-            f"⏰ 「**{kukai.title}**」の **{event_ja}** まで約 **{hours_left}時間** です。\n"
+            f"⏰ 「**{kukai.title}**」の **{event_label}** まで約 **{hours_left}時間** です。\n"
             f"締切: {time_str}"
         )
         if voice_session is not None:
@@ -124,7 +125,7 @@ async def notification_job(schedule_id: int) -> None:
                 _bot,
                 session,
                 kukai,
-                title=f"{event_ja}前の管理者通知",
+                title=f"{event_label}前の管理者通知",
                 description=embed_desc,
                 fields=fields,
                 mention_admins=ns.mention,
@@ -199,6 +200,39 @@ async def deadline_job(kukai_id: int, event_type: str) -> None:
             state = KukaiState.from_value(kukai.state)
 
             if event_type == "submission_close":
+                if (
+                    getattr(kukai, "entry_enabled", False)
+                    and getattr(kukai, "entry_mode", "manual") == "full_auto"
+                    and getattr(kukai, "entry_close_at", None) is None
+                ):
+                    approved_entries = await _approved_entries(session, kukai.id)
+                    if not approved_entries:
+                        await kukai_service.cancel(session, kukai)
+                        await notification_service.cancel_kukai_jobs(session, kukai.id)
+                        await admin_notice_service.send_admin_notice(
+                            _bot,
+                            session,
+                            kukai,
+                            title="エントリー人数不足のため句会不成立",
+                            description=(
+                                "投句締切時点で承認済みエントリーが0名のため、"
+                                "句会を中止しました。"
+                            ),
+                            mention_admins=True,
+                        )
+                        await _notify_channel(
+                            _bot,
+                            kukai,
+                            "投句締切時点で承認済みエントリーが0名のため、句会は不成立となりました。",
+                        )
+                        return
+                    await _notify_entry_closed(bot=_bot, session=session, kukai=kukai)
+                    if state == KukaiState.ENTRY_OPEN:
+                        kukai.state = KukaiState.ENTRY_CLOSED
+                        kukai.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
+                        await notification_service.schedule_kukai_jobs(session, kukai)
+                        return
+
                 mode = kukai.submission_mode
                 if mode == "manual":
                     return
@@ -277,7 +311,49 @@ async def deadline_job(kukai_id: int, event_type: str) -> None:
                         "投句条件を満たしていない参加者がいるため、自動進行しませんでした。管理者確認後に進行します。",
                     )
 
-            elif event_type == "selecting_close":
+            if event_type == "entry_close":
+                if not getattr(kukai, "entry_enabled", False):
+                    return
+                mode = getattr(kukai, "entry_mode", "manual")
+                if mode != "full_auto":
+                    await _notify_entry_closed(bot=_bot, session=session, kukai=kukai)
+                    return
+                if state not in {KukaiState.ENTRY_OPEN, KukaiState.SUBMISSION_OPEN}:
+                    return
+
+                approved_entries = await _approved_entries(session, kukai.id)
+                if not approved_entries:
+                    await kukai_service.cancel(session, kukai)
+                    await notification_service.cancel_kukai_jobs(session, kukai.id)
+                    await admin_notice_service.send_admin_notice(
+                        _bot,
+                        session,
+                        kukai,
+                        title="エントリー人数不足のため句会不成立",
+                        description=(
+                            "エントリー締切（全自動）時点で承認済みエントリーが0名のため、"
+                            "句会を中止しました。"
+                        ),
+                        mention_admins=True,
+                    )
+                    await _notify_channel(
+                        _bot,
+                        kukai,
+                        "エントリー締切時点で承認済みエントリーが0名のため、句会は不成立となりました。",
+                    )
+                    return
+
+                await _mark_past_deadline_notifications_fired(
+                    session, kukai.id, "entry_close"
+                )
+                await _notify_entry_closed(bot=_bot, session=session, kukai=kukai)
+                if state == KukaiState.ENTRY_OPEN:
+                    kukai.state = KukaiState.ENTRY_CLOSED
+                    kukai.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
+                await notification_service.schedule_kukai_jobs(session, kukai)
+                return
+
+            if event_type == "selecting_close":
                 mode = kukai.selecting_mode
                 if mode == "manual":
                     return
@@ -431,6 +507,76 @@ async def _notify_channel(bot, kukai, message: str) -> None:
             await send_with_retry(lambda: channel.send(embed=embed))
         except Exception as e:
             logger.error("_notify_channel failed: %s", e)
+
+
+def _mode_label(mode: str | None) -> str:
+    return {
+        "manual": "手動",
+        "semi_auto": "半自動",
+        "full_auto": "全自動",
+        "auto": "自動",
+    }.get(str(mode), str(mode))
+
+
+def _event_label_with_mode(kukai, event_type: str, fallback: str) -> str:
+    if event_type == "entry_close":
+        return f"{fallback}（{_mode_label(getattr(kukai, 'entry_mode', 'manual'))}）"
+    if event_type == "submission_close":
+        return f"{fallback}（{_mode_label(getattr(kukai, 'submission_mode', 'manual'))}）"
+    if event_type == "selecting_close":
+        return f"{fallback}（{_mode_label(getattr(kukai, 'selecting_mode', 'manual'))}）"
+    return fallback
+
+
+async def _approved_entries(session, kukai_id: int):
+    from sqlalchemy import select
+
+    from bot.models.entry import Entry
+
+    result = await session.execute(
+        select(Entry)
+        .where(Entry.kukai_id == kukai_id, Entry.status == "approved")
+        .order_by(Entry.created_at)
+    )
+    return list(result.scalars().all())
+
+
+async def _notify_entry_closed(*, bot, session, kukai) -> None:
+    import discord
+
+    from bot.utils.discord_retry import send_with_retry
+    from bot.utils.embed_builder import COLOR_INFO
+    from bot.utils.text import discord_safe
+
+    if not kukai.channel_id:
+        return
+    guild = bot.get_guild(kukai.guild_id) if bot else None
+    if not guild:
+        return
+    channel = guild.get_channel(kukai.channel_id)
+    if not channel or not hasattr(channel, "send"):
+        return
+
+    entries = await _approved_entries(session, kukai.id)
+    names: list[str] = []
+    for entry in entries:
+        member = guild.get_member(entry.user_id)
+        names.append(discord_safe(entry.haigo or (member.display_name if member else f"UID:{entry.user_id}")))
+
+    embed = discord.Embed(
+        description=f"句会「**{kukai.title}**」: エントリーが締め切られました。",
+        color=COLOR_INFO,
+    )
+    embed.add_field(
+        name=f"エントリー人数: {len(names)}名",
+        value=_limited_field_value(names),
+        inline=False,
+    )
+    embed.set_footer(text=f"句会ID: {kukai.id}")
+    try:
+        await send_with_retry(lambda: channel.send(embed=embed))
+    except Exception as error:
+        logger.error("_notify_entry_closed failed: %s", error)
 
 
 async def _notify_admins(bot, kukai, message: str) -> None:

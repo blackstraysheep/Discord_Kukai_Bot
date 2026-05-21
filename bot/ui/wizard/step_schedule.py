@@ -39,8 +39,7 @@ def build(state: WizardState) -> tuple[discord.Embed, discord.ui.View]:
         embed.add_field(name="エントリー締切", value=entry_str, inline=False)
     embed.add_field(name="投句締切", value=sub_str, inline=False)
     embed.add_field(name="選句締切", value=selecting_str, inline=False)
-    entry_note = "  ⚠️ エントリー有効のため締切必須" if state.entry_enabled and not state.entry_close_at else ""
-    embed.set_footer(text=f"書式: YYYY-MM-DD HH:MM（JST）／投句締切・選句締切は必須{entry_note}")
+    embed.set_footer(text="書式: YYYY-MM-DD HH:MM（JST）")
     return embed, StepScheduleView(state, filled=filled)
 
 
@@ -169,9 +168,9 @@ class StepScheduleModal(discord.ui.Modal, title="日程の入力"):
             )
             return
 
-        if entry_close is not None and sub_close <= entry_close:
+        if entry_close is not None and sub_close < entry_close:
             await interaction.response.send_message(
-                "投句締切はエントリー締切より後に設定してください。", ephemeral=True
+                "投句締切はエントリー締切以降に設定してください。", ephemeral=True
             )
             return
         if selecting_close <= sub_close:

@@ -50,20 +50,19 @@ async def test_enter_with_approval(db_session):
 
 
 @pytest.mark.asyncio
-async def test_entry_open_with_past_deadline_is_not_late(db_session):
-    """ENTRY_OPEN state: deadline passed in time but state not advanced → not late."""
+async def test_submission_open_with_past_entry_deadline_is_late(db_session):
     kukai = await _make_kukai(db_session, entry_approval=False)
     kukai.entry_close_at = _utc(-1)
     await db_session.commit()
 
     entry = await entry_service.enter(db_session, kukai, user_id=1)
-    assert entry.status == "approved"
+    assert entry.status == "pending"
 
 
 @pytest.mark.asyncio
 async def test_late_entry_allowed_in_entry_closed_as_pending(db_session):
     kukai = await _make_kukai(db_session, entry_approval=False)
-    await kukai_service.proceed(db_session, kukai)  # → entry_closed
+    kukai.state = KukaiState.ENTRY_CLOSED
     await db_session.commit()
 
     entry = await entry_service.enter(db_session, kukai, user_id=1)
@@ -74,7 +73,7 @@ async def test_late_entry_allowed_in_entry_closed_as_pending(db_session):
 async def test_approve_late_pending_without_approval_mode(db_session):
     """ENTRY_CLOSED state creates pending entry; admin can approve even without approval mode."""
     kukai = await _make_kukai(db_session, entry_approval=False)
-    await kukai_service.proceed(db_session, kukai)  # → entry_closed
+    kukai.state = KukaiState.ENTRY_CLOSED
     await db_session.commit()
 
     await entry_service.enter(db_session, kukai, user_id=1)
@@ -115,7 +114,7 @@ async def test_withdraw(db_session):
 async def test_withdraw_wrong_state_raises(db_session):
     kukai = await _make_kukai(db_session)
     await entry_service.enter(db_session, kukai, user_id=1)
-    await kukai_service.proceed(db_session, kukai)  # → entry_closed
+    kukai.entry_close_at = _utc(-1)
     await db_session.commit()
 
     with pytest.raises(InvalidStateError):
@@ -153,7 +152,7 @@ async def test_reentry_after_withdraw(db_session):
 async def test_admin_remove(db_session):
     kukai = await _make_kukai(db_session)
     await entry_service.enter(db_session, kukai, user_id=1)
-    await kukai_service.proceed(db_session, kukai)  # → entry_closed
+    kukai.entry_close_at = _utc(-1)
     await db_session.commit()
 
     await entry_service.admin_remove(db_session, kukai, target_user_id=1)

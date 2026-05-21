@@ -112,3 +112,72 @@ class EntryManageView(discord.ui.View):
         super().__init__(timeout=120)
         if entries:
             self.add_item(EntryActionSelect(kukai_id, entries, guild, action))
+
+
+class LateEntryReviewView(discord.ui.View):
+    """Persistent-enough admin buttons for one late entry request."""
+
+    def __init__(self, kukai_id: int, target_user_id: int, display_name: str) -> None:
+        super().__init__(timeout=86400)
+        self.kukai_id = kukai_id
+        self.target_user_id = target_user_id
+        self.display_name = display_name
+
+    @discord.ui.button(label="承認", style=discord.ButtonStyle.success)
+    async def approve_button(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ) -> None:
+        await self._apply(interaction, "approve")
+
+    @discord.ui.button(label="却下", style=discord.ButtonStyle.danger)
+    async def reject_button(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ) -> None:
+        await self._apply(interaction, "reject")
+
+    async def _apply(self, interaction: discord.Interaction, action: str) -> None:
+        assert interaction.guild is not None
+        try:
+            async with get_session() as session:
+                kukai = await kukai_service.get_kukai(
+                    session, self.kukai_id, interaction.guild.id
+                )
+                if action == "approve":
+                    entry = await entry_service.approve(
+                        session, kukai, interaction.user.id, self.target_user_id
+                    )
+                    approved = True
+                    verb = "承認"
+                else:
+                    entry = await entry_service.reject(
+                        session, kukai, interaction.user.id, self.target_user_id
+                    )
+                    approved = False
+                    verb = "却下"
+
+            member = interaction.guild.get_member(self.target_user_id)
+            name = entry.haigo or (member.display_name if member else self.display_name)
+            for child in self.children:
+                child.disabled = True  # type: ignore[attr-defined]
+            await interaction.response.edit_message(view=self)
+            await interaction.followup.send(
+                embed=success_embed(f"**{name}** さんを{verb}しました。"),
+                ephemeral=True,
+            )
+            if approved:
+                await notify_entry_approved(
+                    interaction.guild,
+                    kukai,
+                    user_id=self.target_user_id,
+                    display_name=name,
+                )
+            else:
+                await notify_entry_rejected(
+                    interaction.guild,
+                    kukai,
+                    display_name=name,
+                )
+        except ServiceError as e:
+            await interaction.response.send_message(
+                embed=error_embed(str(e)), ephemeral=True
+            )

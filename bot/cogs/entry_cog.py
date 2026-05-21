@@ -11,15 +11,12 @@ import logging
 import discord
 from discord import app_commands
 from discord.ext import commands
-from sqlalchemy import select
 
 from bot.database import get_session
-from bot.models.kukai import KukaiAdmin
-from bot.services import entry_service, kukai_service, permission_service
+from bot.services import admin_notice_service, entry_service, kukai_service, permission_service
 from bot.services.errors import ServiceError
-from bot.ui.entry_manage_view import EntryManageView
+from bot.ui.entry_manage_view import EntryManageView, LateEntryReviewView
 from bot.utils.channel import effective_channel_id
-from bot.utils.discord_retry import send_with_retry
 from bot.utils.embed_builder import (
     COLOR_INFO,
     error_embed,
@@ -52,7 +49,6 @@ class EntryHaigoModal(discord.ui.Modal, title="エントリー"):
         haigo = self.haigo.value.strip() or None
         try:
             late_entry = False
-            admin_ids: list[int] = []
             async with get_session() as session:
                 kukai = await kukai_service.resolve_kukai_in_channel(
                     session,
@@ -64,29 +60,33 @@ class EntryHaigoModal(discord.ui.Modal, title="エントリー"):
                 entry = await entry_service.enter(
                     session, kukai, interaction.user.id, haigo
                 )
-                if late_entry and entry.status == "pending":
-                    result = await session.execute(
-                        select(KukaiAdmin.user_id).where(KukaiAdmin.kukai_id == kukai.id)
-                    )
-                    admin_ids = [kukai.created_by, *result.scalars().all()]
             display_name = entry.haigo or interaction.user.display_name  # type: ignore[union-attr]
             if entry.status == "approved":
                 msg = f"「**{kukai.title}**」にエントリーしました。\n俳号: **{display_name}**"
+                title = "エントリー完了"
+            elif late_entry:
+                msg = (
+                    f"「**{kukai.title}**」に期限後エントリー申請を送信しました。\n"
+                    "期限後エントリーのため、句会作成者・管理者に通知しました。"
+                    "承認をお待ちください。\n"
+                    f"俳号: **{display_name}**"
+                )
+                title = "期限後エントリー申請送信済"
             else:
                 msg = (
                     f"「**{kukai.title}**」にエントリーしました（承認待ち）。\n"
                     f"俳号: **{display_name}**"
                 )
+                title = "エントリー申請送信済"
             await interaction.followup.send(
-                embed=success_embed(msg, title="エントリー完了"), ephemeral=True
+                embed=success_embed(msg, title=title), ephemeral=True
             )
             if late_entry and entry.status == "pending":
                 await _notify_late_entry_request(
                     interaction,
+                    bot=self.bot if hasattr(self, "bot") else interaction.client,
                     kukai_title=kukai.title,
                     kukai_id=kukai.id,
-                    channel_id=kukai.channel_id,
-                    admin_ids=admin_ids,
                     display_name=display_name,
                 )
         except ServiceError as e:
@@ -396,26 +396,19 @@ async def setup(bot: commands.Bot) -> None:
 async def _notify_late_entry_request(
     interaction: discord.Interaction,
     *,
+    bot,
     kukai_title: str,
     kukai_id: int,
-    channel_id: int | None,
-    admin_ids: list[int],
     display_name: str,
 ) -> None:
     """Notify kukai admins that a post-deadline entry needs approval."""
     assert interaction.guild is not None
 
-    target = interaction.guild.get_channel(channel_id) if channel_id else interaction.channel
-    if not target or not hasattr(target, "send"):
-        return
-
-    unique_admin_ids = list(dict.fromkeys(admin_ids))
-    mentions = " ".join(f"<@{user_id}>" for user_id in unique_admin_ids)
     embed = discord.Embed(
         title="締切後エントリー申請",
         description=(
             f"「**{kukai_title}**」に締切後のエントリー申請がありました。\n"
-            "承認する場合は `/entry approve`、却下する場合は `/entry reject` を実行してください。"
+            "下のボタンから承認または却下できます。"
         ),
         color=COLOR_INFO,
     )
@@ -427,12 +420,17 @@ async def _notify_late_entry_request(
     embed.set_footer(text=f"句会ID: {kukai_id}")
 
     try:
-        await send_with_retry(
-            lambda: target.send(
-                content=mentions or None,
-                embed=embed,
-                allowed_mentions=discord.AllowedMentions(users=True, roles=False, everyone=False),
+        async with get_session() as session:
+            kukai = await kukai_service.get_kukai(session, kukai_id, interaction.guild.id)
+            await admin_notice_service.send_admin_notice(
+                bot,
+                session,
+                kukai,
+                title=embed.title or "締切後エントリー申請",
+                description=embed.description or "",
+                fields=[("申請者", f"UID: `{interaction.user.id}`\n俳号: **{display_name}**")],
+                mention_admins=True,
+                view=LateEntryReviewView(kukai_id, interaction.user.id, display_name),
             )
-        )
-    except (discord.Forbidden, discord.HTTPException) as error:
+    except (discord.Forbidden, discord.HTTPException, ServiceError) as error:
         logger.warning("late entry admin notification failed: %s", error)

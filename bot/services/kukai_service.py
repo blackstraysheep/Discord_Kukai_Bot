@@ -1,7 +1,7 @@
 """Kukai CRUD and lifecycle operations."""
 
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -33,6 +33,7 @@ _SUBMISSION_LOCKED_STATES = {
 }
 
 _VALID_SUBMISSION_MODES = {"manual", "semi_auto", "full_auto"}
+_VALID_ENTRY_MODES = {"manual", "full_auto"}
 _VALID_SELECTING_MODES = {"manual", "semi_auto", "full_auto"}
 _VALID_PUBLISH_MODES = {"manual", "auto"}
 _VALID_RESULT_MODES = {"manual", "auto"}
@@ -53,6 +54,7 @@ async def create_kukai(
     # Optional settings (wizard-provided overrides)
     entry_enabled: bool = True,
     entry_approval: bool = False,
+    entry_mode: str = "manual",
     min_participants: int = 0,
     submission_min: int = 1,
     submission_max: int | None = 5,
@@ -68,14 +70,16 @@ async def create_kukai(
 ) -> Kukai:
     if not entry_enabled:
         entry_approval = False
+        entry_mode = "manual"
     if not author_reveal:
         author_reveal_zero = True
 
-    if entry_enabled and entry_close_at is None:
-        raise ValidationError("entry_enabled=true の場合 entry_close_at は必須です。")
+    if entry_mode not in _VALID_ENTRY_MODES:
+        raise ValidationError("entry_mode は manual/full_auto で指定してください。")
     _validate_deadlines(entry_close_at, submission_close_at, selecting_close_at)
+    _validate_future_deadlines(entry_close_at, submission_close_at, selecting_close_at)
 
-    initial_state = KukaiState.ENTRY_OPEN if entry_enabled else KukaiState.SUBMISSION_OPEN
+    initial_state = KukaiState.ENTRY_OPEN if entry_enabled else KukaiState.DRAFT
 
     kukai = Kukai(
         guild_id=guild_id,
@@ -90,6 +94,7 @@ async def create_kukai(
         selecting_close_at=selecting_close_at,
         entry_enabled=entry_enabled,
         entry_approval=entry_approval,
+        entry_mode=entry_mode,
         min_participants=min_participants,
         submission_min=submission_min,
         submission_max=submission_max,
@@ -238,6 +243,7 @@ async def edit_kukai(
     description: str | None = None,
     submission_close_at: datetime | None = None,
     selecting_close_at: datetime | None = None,
+    entry_mode: str | None = None,
     submission_min: int | None = None,
     submission_max: int | None = None,
     submission_max_unlimited: bool = False,
@@ -258,6 +264,7 @@ async def edit_kukai(
             for value in (
                 submission_min,
                 submission_max,
+                entry_mode,
                 submission_mode,
                 selecting_mode,
             )
@@ -288,6 +295,10 @@ async def edit_kukai(
         if selecting_mode not in _VALID_SELECTING_MODES:
             raise ValidationError("selecting_mode は manual/semi_auto/full_auto で指定してください。")
         kukai.selecting_mode = selecting_mode
+    if entry_mode is not None:
+        if entry_mode not in _VALID_ENTRY_MODES:
+            raise ValidationError("entry_mode は manual/full_auto で指定してください。")
+        kukai.entry_mode = entry_mode
 
     if publish_mode is not None:
         if publish_mode not in _VALID_PUBLISH_MODES:
@@ -308,6 +319,7 @@ async def edit_kukai(
 
     if not kukai.entry_enabled:
         kukai.entry_approval = False
+        kukai.entry_mode = "manual"
     if not kukai.author_reveal:
         kukai.author_reveal_zero = True
 
@@ -340,6 +352,7 @@ async def edit_kukai(
     )
     new_selecting_close_at = selecting_close_at if selecting_close_at is not None else kukai.selecting_close_at
     _validate_deadlines(None, new_submission_close_at, new_selecting_close_at)
+    _validate_future_deadlines(None, submission_close_at, selecting_close_at)
 
     if submission_close_at is not None:
         kukai.submission_close_at = submission_close_at
@@ -362,6 +375,7 @@ async def update_deadlines(
     selecting_close_at: datetime | None,
 ) -> None:
     _validate_deadlines(None, submission_close_at, selecting_close_at)
+    _validate_future_deadlines(None, submission_close_at, selecting_close_at)
     if submission_close_at is not None:
         kukai.submission_close_at = submission_close_at
     if selecting_close_at is not None:
@@ -376,12 +390,19 @@ def _validate_deadlines(
     if (
         entry_close_at is not None
         and submission_close_at is not None
-        and submission_close_at <= entry_close_at
+            and submission_close_at < entry_close_at
     ):
-        raise DeadlineConflictError("投句締切はエントリー締切より後に設定してください。")
+        raise DeadlineConflictError("投句締切はエントリー締切以降に設定してください。")
     if (
         submission_close_at is not None
         and selecting_close_at is not None
         and selecting_close_at <= submission_close_at
     ):
         raise DeadlineConflictError("選句締切は投句締切より後に設定してください。")
+
+
+def _validate_future_deadlines(*deadlines: datetime | None) -> None:
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    for deadline in deadlines:
+        if deadline is not None and deadline <= now:
+            raise DeadlineConflictError("締切は現在時刻より未来に設定してください。")

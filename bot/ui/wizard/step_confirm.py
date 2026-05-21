@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import re
+from datetime import datetime, timezone
 
 import discord
 
@@ -33,18 +34,34 @@ def build(state: WizardState) -> tuple[discord.Embed, discord.ui.View]:
 
     sub_str = format_jst(state.submission_close_at) if state.submission_close_at else "未設定"
     selecting_str = format_jst(state.selecting_close_at) if state.selecting_close_at else "未設定"
+    entry_mode_labels = {"manual": "手動", "full_auto": "全自動"}
+    sub_mode_labels = {"manual": "手動", "semi_auto": "半自動", "full_auto": "全自動"}
     if state.entry_enabled:
         entry_str = format_jst(state.entry_close_at) if state.entry_close_at else "未設定"
-        embed.add_field(name="エントリー締切", value=entry_str, inline=True)
-    embed.add_field(name="投句締切", value=sub_str, inline=True)
-    embed.add_field(name="選句締切", value=selecting_str, inline=True)
+        embed.add_field(
+            name=f"エントリー締切（{entry_mode_labels.get(state.entry_mode, state.entry_mode)}）",
+            value=entry_str,
+            inline=True,
+        )
+    embed.add_field(
+        name=f"投句締切（{sub_mode_labels.get(state.submission_mode, state.submission_mode)}）",
+        value=sub_str,
+        inline=True,
+    )
+    embed.add_field(
+        name=f"選句締切（{sub_mode_labels.get(state.selecting_mode, state.selecting_mode)}）",
+        value=selecting_str,
+        inline=True,
+    )
 
     entry_str = "有効" if state.entry_enabled else "無効"
     if state.entry_enabled:
-        entry_str += f"　承認: {'要' if state.entry_approval else '不要'}"
+        entry_str += (
+            f"　承認: {'要' if state.entry_approval else '不要'}"
+            f"　締切進行: {entry_mode_labels.get(state.entry_mode, state.entry_mode)}"
+        )
     embed.add_field(name="エントリー", value=entry_str, inline=True)
 
-    sub_mode_labels = {"manual": "手動", "semi_auto": "半自動", "full_auto": "全自動"}
     max_label = "∞（無制限）" if state.submission_max is None else str(state.submission_max)
     embed.add_field(
         name="投句設定",
@@ -96,7 +113,7 @@ def build(state: WizardState) -> tuple[discord.Embed, discord.ui.View]:
     notify_value = (
         f"{state.notify_preset_name}（{len(state.notification_specs)}件）"
         if state.notification_specs
-        else "デフォルト（投句・選句24時間前）"
+        else "デフォルト（エントリー・投句・選句24時間前）"
     )
     embed.add_field(name="通知", value=notify_value, inline=False)
     return embed, StepConfirmView(state)
@@ -146,8 +163,29 @@ class StepConfirmView(discord.ui.View):
         await interaction.response.defer(ephemeral=True)
         state = self.state
         state.result_mode = "manual" if state.selecting_mode == "manual" else "auto"
+        entry_mode_labels = {"manual": "手動", "full_auto": "全自動"}
+        sub_mode_labels = {"manual": "手動", "semi_auto": "半自動", "full_auto": "全自動"}
         guild = interaction.guild
         assert guild is not None
+
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        stale_deadlines = []
+        if state.entry_close_at is not None and state.entry_close_at <= now:
+            stale_deadlines.append("エントリー締切")
+        if state.submission_close_at is not None and state.submission_close_at <= now:
+            stale_deadlines.append("投句締切")
+        if state.selecting_close_at is not None and state.selecting_close_at <= now:
+            stale_deadlines.append("選句締切")
+        if stale_deadlines:
+            await interaction.edit_original_response(
+                embed=error_embed(
+                    "締切時刻が現在時刻を過ぎています。"
+                    f"\n対象: {', '.join(stale_deadlines)}"
+                    "\nステップ3で日程を設定し直してください。"
+                ),
+                view=None,
+            )
+            return
 
         ch_name = _sanitize_channel_name(state.channel_name or state.title)
         channel: discord.abc.GuildChannel | None = None
@@ -216,6 +254,7 @@ class StepConfirmView(discord.ui.View):
                     selecting_close_at=state.selecting_close_at,
                     entry_enabled=state.entry_enabled,
                     entry_approval=state.entry_approval,
+                    entry_mode=state.entry_mode,
                     min_participants=state.min_participants,
                     submission_min=state.submission_min,
                     submission_max=state.submission_max,
@@ -304,7 +343,7 @@ class StepConfirmView(discord.ui.View):
             f"句会「**{kukai_title}**」を作成しました。\n"
             f"チャンネル: {channel.mention}\n"
             f"句会ID: `{kukai_id}`\n\n"
-            "受付を開始しました。\n"
+            "投句受付は `/kukai proceed` で開始します。\n"
             "このウィザードは完了しました（再操作不可）。"
         )
         if name_collision_warning:
@@ -336,9 +375,21 @@ class StepConfirmView(discord.ui.View):
         info.add_field(name="句数", value=summary, inline=False)
         if state.entry_enabled:
             entry_deadline = format_jst(state.entry_close_at) if state.entry_close_at else "未定"
-            info.add_field(name="エントリー締切", value=entry_deadline, inline=False)
-        info.add_field(name="投句締切", value=sub_str, inline=False)
-        info.add_field(name="選句締切", value=selecting_str, inline=False)
+            info.add_field(
+                name=f"エントリー締切（{entry_mode_labels.get(state.entry_mode, state.entry_mode)}）",
+                value=entry_deadline,
+                inline=False,
+            )
+        info.add_field(
+            name=f"投句締切（{sub_mode_labels.get(state.submission_mode, state.submission_mode)}）",
+            value=sub_str,
+            inline=False,
+        )
+        info.add_field(
+            name=f"選句締切（{sub_mode_labels.get(state.selecting_mode, state.selecting_mode)}）",
+            value=selecting_str,
+            inline=False,
+        )
         if state.voice_enabled and state.voice_channel_id and state.voice_start_at:
             voice_value = f"開始: {format_jst(state.voice_start_at)}\n場所: <#{state.voice_channel_id}>"
             if state.voice_end_at:
@@ -357,7 +408,7 @@ class StepConfirmView(discord.ui.View):
             )
             if state.entry_close_at:
                 entry_embed.add_field(
-                    name="エントリー締切",
+                    name=f"エントリー締切（{entry_mode_labels.get(state.entry_mode, state.entry_mode)}）",
                     value=format_jst(state.entry_close_at),
                     inline=False,
                 )

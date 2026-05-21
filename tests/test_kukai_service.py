@@ -80,18 +80,38 @@ async def test_create_kukai_deadline_conflict(db_session):
 
 
 @pytest.mark.asyncio
-async def test_create_kukai_requires_entry_close_at_when_entry_enabled(db_session):
-    with pytest.raises(ValidationError):
-        await kukai_service.create_kukai(
-            db_session,
-            guild_id=1,
-            created_by=100,
-            channel_id=200,
-            title="エントリー締切なし",
-            submission_close_at=_utc(7),
-            selecting_close_at=_utc(14),
-            entry_enabled=True,
-        )
+async def test_create_kukai_allows_entry_enabled_without_explicit_entry_close(db_session):
+    kukai = await kukai_service.create_kukai(
+        db_session,
+        guild_id=1,
+        created_by=100,
+        channel_id=200,
+        title="エントリー締切なし",
+        submission_close_at=_utc(7),
+        selecting_close_at=_utc(14),
+        entry_enabled=True,
+    )
+
+    assert kukai.entry_enabled is True
+    assert kukai.entry_close_at is None
+
+
+@pytest.mark.asyncio
+async def test_create_kukai_allows_entry_close_equal_submission_close(db_session):
+    close_at = _utc(7)
+    kukai = await kukai_service.create_kukai(
+        db_session,
+        guild_id=1,
+        created_by=100,
+        channel_id=200,
+        title="同時締切",
+        entry_close_at=close_at,
+        submission_close_at=close_at,
+        selecting_close_at=_utc(14),
+        entry_enabled=True,
+    )
+
+    assert kukai.entry_close_at == kukai.submission_close_at
 
 
 @pytest.mark.asyncio
@@ -128,12 +148,12 @@ async def test_state_machine_proceed(db_session):
     assert kukai.state == KukaiState.ENTRY_OPEN
 
     new_state = await kukai_service.proceed(db_session, kukai)
-    assert new_state == KukaiState.ENTRY_CLOSED
-    assert kukai.state == KukaiState.ENTRY_CLOSED
+    assert new_state == KukaiState.SUBMISSION_OPEN
+    assert kukai.state == KukaiState.SUBMISSION_OPEN
 
 
 @pytest.mark.asyncio
-async def test_create_kukai_skip_entry_starts_submission_open(db_session):
+async def test_create_kukai_skip_entry_starts_draft_before_submission(db_session):
     kukai = await kukai_service.create_kukai(
         db_session,
         guild_id=1,
@@ -146,9 +166,9 @@ async def test_create_kukai_skip_entry_starts_submission_open(db_session):
     )
     await db_session.commit()
 
-    assert kukai.state == KukaiState.SUBMISSION_OPEN
+    assert kukai.state == KukaiState.DRAFT
     new_state = await kukai_service.proceed(db_session, kukai)
-    assert new_state == KukaiState.SUBMISSION_CLOSED
+    assert new_state == KukaiState.SUBMISSION_OPEN
 
 
 @pytest.mark.asyncio

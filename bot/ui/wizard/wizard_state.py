@@ -24,6 +24,7 @@ class WizardState:
     # Step 2: Entry
     entry_enabled: bool = True
     entry_approval: bool = False
+    entry_mode: str = "manual"
     min_participants: int = 0
 
     # Step 3: Schedule
@@ -74,8 +75,6 @@ class WizardState:
     @property
     def can_confirm(self) -> bool:
         if not (self.title and self.submission_close_at and self.selecting_close_at):
-            return False
-        if self.entry_enabled and self.entry_close_at is None:
             return False
         if self.use_existing_channel and self.existing_channel_id is None:
             return False

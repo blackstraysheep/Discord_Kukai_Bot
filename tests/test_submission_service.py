@@ -95,8 +95,7 @@ async def test_submit_requires_entry_approval(db_session):
 async def test_submit_with_approved_entry(db_session):
     kukai = await _make_kukai(db_session, entry_enabled=True)
     await entry_service.enter(db_session, kukai, user_id=1)
-    await kukai_service.proceed(db_session, kukai)  # → entry_closed
-    await kukai_service.proceed(db_session, kukai)  # → submission_open
+    await kukai_service.proceed(db_session, kukai)
     await db_session.commit()
 
     sub, _ = await submission_service.submit(db_session, kukai, user_id=1, text="春の海")

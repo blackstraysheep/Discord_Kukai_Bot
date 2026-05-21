@@ -6,8 +6,8 @@ The standard forward path:
         → results → ended
 
 Shortcuts driven by kukai settings:
-  - create_kukai() starts at entry_open when entry_enabled=True
-  - create_kukai() starts at submission_open when entry_enabled=False
+  - create_kukai() starts before submission_open; entry_enabled starts at entry_open,
+    otherwise draft proceeds directly to submission_open
   - draft remains a rollback/import state and proceeds by the same rules
   - publish_mode='auto'  : submission_closed → selecting_open (skip waiting_publish)
   - selecting_* 完了後    : selecting_closed → results（waiting_results は廃止）
@@ -20,7 +20,7 @@ from bot.state_machine.states import KukaiState
 # Standard forward transitions (one step at a time)
 FORWARD: dict[KukaiState, KukaiState] = {
     KukaiState.DRAFT: KukaiState.ENTRY_OPEN,
-    KukaiState.ENTRY_OPEN: KukaiState.ENTRY_CLOSED,
+    KukaiState.ENTRY_OPEN: KukaiState.SUBMISSION_OPEN,
     KukaiState.ENTRY_CLOSED: KukaiState.SUBMISSION_OPEN,
     KukaiState.SUBMISSION_OPEN: KukaiState.SUBMISSION_CLOSED,
     KukaiState.SUBMISSION_CLOSED: KukaiState.WAITING_PUBLISH,
@@ -42,8 +42,7 @@ def next_state(kukai) -> KukaiState:
     current = KukaiState.from_value(kukai.state)
 
     if current == KukaiState.DRAFT:
-        # Skip entry phase if not enabled
-        return KukaiState.SUBMISSION_OPEN if not kukai.entry_enabled else KukaiState.ENTRY_OPEN
+        return KukaiState.SUBMISSION_OPEN
 
     if current == KukaiState.SUBMISSION_CLOSED:
         return (

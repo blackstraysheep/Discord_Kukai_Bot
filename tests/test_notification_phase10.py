@@ -237,8 +237,7 @@ async def test_deadline_job_submission_close_semi_auto_incomplete_notifies_admin
 ):
     kukai = await _make_kukai(db_session, entry_enabled=True)
     await entry_service.enter(db_session, kukai, user_id=101)
-    await kukai_service.proceed(db_session, kukai)  # entry_closed
-    await kukai_service.proceed(db_session, kukai)  # submission_open
+    await kukai_service.proceed(db_session, kukai)
 
     kukai.submission_mode = "semi_auto"
     await db_session.flush()

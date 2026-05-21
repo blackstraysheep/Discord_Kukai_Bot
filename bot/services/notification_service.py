@@ -21,6 +21,7 @@ logger = logging.getLogger(__name__)
 
 # Default: send reminder 24 h before each deadline
 _DEFAULT_OFFSETS: list[tuple[str, int]] = [
+    ("entry_close", 86400),
     ("submission_close", 86400),
     ("selecting_close", 86400),
 ]
@@ -172,6 +173,7 @@ async def schedule_kukai_jobs(session: AsyncSession, kukai) -> None:
 
     # Schedule deadline jobs
     for event_type, deadline_dt in [
+        ("entry_close", kukai.entry_close_at),
         ("submission_close", kukai.submission_close_at),
         ("selecting_close", kukai.selecting_close_at),
     ]:
@@ -209,7 +211,7 @@ async def cancel_kukai_jobs(session: AsyncSession, kukai_id: int) -> None:
             except JobLookupError:
                 pass
 
-    for event_type in ("submission_close", "selecting_close"):
+    for event_type in ("entry_close", "submission_close", "selecting_close"):
         job_id = f"deadline_{kukai_id}_{event_type}"
         try:
             scheduler.remove_job(job_id)

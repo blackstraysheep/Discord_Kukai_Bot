@@ -31,6 +31,7 @@ async def send_admin_notice(
     description: str,
     fields: Iterable[tuple[str, str]] = (),
     mention_admins: bool = False,
+    view: discord.ui.View | None = None,
 ) -> bool:
     """Send a notice to the kukai private admin thread, creating it if needed."""
     guild = bot.get_guild(kukai.guild_id) if bot is not None else None
@@ -52,6 +53,7 @@ async def send_admin_notice(
                 lambda: thread.send(
                     content=content,
                     embed=embed,
+                    view=view,
                     allowed_mentions=discord.AllowedMentions(users=True, roles=False, everyone=False),
                 )
             )
@@ -59,7 +61,7 @@ async def send_admin_notice(
         except (discord.Forbidden, discord.HTTPException) as error:
             logger.warning("admin thread notice failed (kukai_id=%s): %s", kukai.id, error)
 
-    return await _fallback_admin_notice(guild, kukai, admin_ids, content=content, embed=embed)
+    return await _fallback_admin_notice(guild, kukai, admin_ids, content=content, embed=embed, view=view)
 
 
 async def ensure_admin_thread(bot, session: AsyncSession, kukai, *, admin_ids: list[int] | None = None):
@@ -130,11 +132,19 @@ async def _sync_thread_members(thread, guild, admin_ids: list[int]) -> None:
             logger.debug("failed to add admin %s to admin thread %s", user_id, getattr(thread, "id", None))
 
 
-async def _fallback_admin_notice(guild, kukai, admin_ids: list[int], *, content: str | None, embed) -> bool:
+async def _fallback_admin_notice(
+    guild,
+    kukai,
+    admin_ids: list[int],
+    *,
+    content: str | None,
+    embed,
+    view: discord.ui.View | None = None,
+) -> bool:
     creator = guild.get_member(kukai.created_by)
     if creator is not None:
         try:
-            await send_with_retry(lambda: creator.send(embed=embed))
+            await send_with_retry(lambda: creator.send(embed=embed, view=view))
             return True
         except Exception as error:
             logger.warning("admin notice creator DM failed (kukai_id=%s): %s", kukai.id, error)
@@ -147,6 +157,7 @@ async def _fallback_admin_notice(guild, kukai, admin_ids: list[int], *, content:
                     lambda: channel.send(
                         content=content,
                         embed=embed,
+                        view=view,
                         allowed_mentions=discord.AllowedMentions(users=True, roles=False, everyone=False),
                     )
                 )

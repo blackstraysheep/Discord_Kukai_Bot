@@ -43,6 +43,8 @@ class Kukai(Base, TimestampMixin):
     # --- Entry settings ---
     entry_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     entry_approval: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # 'manual' | 'full_auto' (entry has no semi-auto mode)
+    entry_mode: Mapped[str] = mapped_column(String(20), nullable=False, default="manual")
     min_participants: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     # 'admin' | 'auto_cancel'
     min_participants_action: Mapped[str] = mapped_column(String(20), nullable=False, default="admin")
