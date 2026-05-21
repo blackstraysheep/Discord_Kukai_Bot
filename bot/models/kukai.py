@@ -49,7 +49,7 @@ class Kukai(Base, TimestampMixin):
 
     # --- Submission settings ---
     submission_min: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
-    submission_max: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, default=5)
+    submission_max: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     submission_overflow: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     submission_underflow: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     # 'manual' | 'semi_auto' | 'full_auto'

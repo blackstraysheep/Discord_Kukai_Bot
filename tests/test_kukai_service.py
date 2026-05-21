@@ -46,6 +46,25 @@ async def test_create_kukai_creates_default_labels(db_session):
 
 
 @pytest.mark.asyncio
+async def test_create_kukai_can_set_submission_max_unlimited(db_session):
+    kukai = await kukai_service.create_kukai(
+        db_session,
+        guild_id=1,
+        created_by=100,
+        channel_id=200,
+        title="無制限句会",
+        entry_close_at=_utc(3),
+        submission_close_at=_utc(7),
+        selecting_close_at=_utc(14),
+        submission_max=None,
+    )
+    await db_session.commit()
+    await db_session.refresh(kukai)
+
+    assert kukai.submission_max is None
+
+
+@pytest.mark.asyncio
 async def test_create_kukai_deadline_conflict(db_session):
     with pytest.raises(DeadlineConflictError):
         await kukai_service.create_kukai(

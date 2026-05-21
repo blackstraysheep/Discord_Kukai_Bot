@@ -140,6 +140,29 @@ async def test_submit_unlimited_when_submission_max_none(db_session):
 
 
 @pytest.mark.asyncio
+async def test_submit_unlimited_when_created_with_submission_max_none(db_session):
+    kukai = await kukai_service.create_kukai(
+        db_session,
+        guild_id=1,
+        created_by=100,
+        channel_id=200,
+        title="無制限句会",
+        submission_close_at=_utc(7),
+        selecting_close_at=_utc(14),
+        entry_enabled=False,
+        submission_max=None,
+    )
+    await _advance_to_submission_open(db_session, kukai)
+
+    for idx in range(6):
+        sub, over = await submission_service.submit(
+            db_session, kukai, user_id=1, text=f"句{idx}"
+        )
+        assert sub is not None
+        assert over is False
+
+
+@pytest.mark.asyncio
 async def test_edit(db_session):
     kukai = await _make_kukai(db_session, entry_enabled=False)
     await _advance_to_submission_open(db_session, kukai)
