@@ -55,7 +55,7 @@ async def create_kukai(
     entry_approval: bool = False,
     min_participants: int = 0,
     submission_min: int = 1,
-    submission_max: int | None = 3,
+    submission_max: int | None = 5,
     submission_mode: str = "manual",
     selecting_mode: str = "manual",
     submission_overflow: bool = False,

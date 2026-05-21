@@ -45,7 +45,7 @@ def build(state: WizardState) -> tuple[discord.Embed, discord.ui.View]:
     embed.add_field(name="エントリー", value=entry_str, inline=True)
 
     sub_mode_labels = {"manual": "手動", "semi_auto": "半自動", "full_auto": "全自動"}
-    max_label = "∞" if state.submission_max is None else str(state.submission_max)
+    max_label = "∞（無制限）" if state.submission_max is None else str(state.submission_max)
     embed.add_field(
         name="投句設定",
         value=(
@@ -94,7 +94,7 @@ def build(state: WizardState) -> tuple[discord.Embed, discord.ui.View]:
             voice_lines.append(f"終了: {format_jst(state.voice_end_at)}")
         embed.add_field(name="ボイス句会", value="\n".join(voice_lines), inline=False)
     notify_value = (
-        f"カスタム {len(state.notification_specs)}件"
+        f"{state.notify_preset_name}（{len(state.notification_specs)}件）"
         if state.notification_specs
         else "デフォルト（投句・選句24時間前）"
     )

@@ -33,7 +33,7 @@ class WizardState:
 
     # Step 4: Submission
     submission_min: int = 1
-    submission_max: Optional[int] = 3
+    submission_max: Optional[int] = 5
     submission_overflow: bool = False
 
     # Step 5: Select rule
@@ -61,6 +61,7 @@ class WizardState:
     # Step 8: Notifications
     notification_specs: list[dict[str, Any]] = field(default_factory=list)
     notify_preset_options: list[dict[str, Any]] = field(default_factory=list)
+    notify_preset_name: str = "デフォルト"
 
     # Step 1 extras
     category_id: Optional[int] = None

@@ -444,7 +444,7 @@ async def import_payload(
                 rank_priority=int(row.get("rank_priority", 1)),
                 min_count=int(row.get("min_count", 0)),
                 max_count=row.get("max_count"),
-                comment_mode=row.get("comment_mode") or "none",
+                comment_mode=row.get("comment_mode") or "optional",
             )
             session.add(label)
             await session.flush()

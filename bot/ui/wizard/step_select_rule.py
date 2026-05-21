@@ -227,9 +227,10 @@ class CountCommentModal(discord.ui.Modal, title="選句数・コメント設定"
 
 class CustomLabelModal(discord.ui.Modal, title="選句種別の直接入力"):
     labels = discord.ui.TextInput(
-        label="1行1件: 名前,点数,最小,最大,コメント",
+        label="1行1件（上の行ほど上位）: 名前,点数,最小,最大,コメント",
         style=discord.TextStyle.paragraph,
         placeholder=(
+            "# 上の行ほど上位種別として扱われます\n"
             "特選,2,0,1,none\n"
             "並選,1,0,5,optional\n"
             "逆選,-1,0,1,required"

@@ -44,7 +44,7 @@ class SelectLabel(Base):
     min_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     max_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     # 'none' | 'optional' | 'required'
-    comment_mode: Mapped[str] = mapped_column(String(10), nullable=False, default="none")
+    comment_mode: Mapped[str] = mapped_column(String(10), nullable=False, default="optional")
 
     kukai: Mapped["Kukai"] = relationship("Kukai", back_populates="select_labels")
     selects: Mapped[list["Select"]] = relationship("Select", back_populates="select_label")

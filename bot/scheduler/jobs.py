@@ -213,6 +213,9 @@ async def deadline_job(kukai_id: int, event_type: str) -> None:
                     should_advance = report.complete
 
                 if should_advance:
+                    await _mark_past_deadline_notifications_fired(
+                        session, kukai.id, "submission_close"
+                    )
                     if mode == "full_auto" and not report.complete:
                         await admin_notice_service.send_admin_notice(
                             _bot,
@@ -457,6 +460,33 @@ async def _notify_admins(bot, kukai, message: str) -> None:
                         )
                     except Exception as channel_error:
                         logger.error("_notify_admins channel fallback failed: %s", channel_error)
+
+
+async def _mark_past_deadline_notifications_fired(session, kukai_id: int, event_type: str) -> None:
+    """Suppress reminder jobs for a deadline already handled by auto progression."""
+    from sqlalchemy import select
+    from apscheduler.jobstores.base import JobLookupError
+
+    from bot.models.notification import NotificationSchedule
+    from bot.scheduler.setup import get_scheduler, has_scheduler
+
+    result = await session.execute(
+        select(NotificationSchedule).where(
+            NotificationSchedule.kukai_id == kukai_id,
+            NotificationSchedule.event_type == event_type,
+            NotificationSchedule.fired == False,
+        )
+    )
+    schedules = list(result.scalars().all())
+    scheduler = get_scheduler() if has_scheduler() else None
+    for schedule in schedules:
+        if scheduler is not None and schedule.job_id:
+            try:
+                scheduler.remove_job(schedule.job_id)
+            except JobLookupError:
+                pass
+        schedule.job_id = None
+        schedule.fired = True
 
 
 async def _auto_publish_submission_list(session, kukai) -> None:

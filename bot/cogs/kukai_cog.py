@@ -251,8 +251,8 @@ class KukaiCog(commands.Cog):
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
     @app_commands.command(name="info", description="句会の詳細を表示します")
-    @app_commands.describe(kukai_id="句会ID")
-    async def kukai_info(self, interaction: discord.Interaction, kukai_id: int) -> None:
+    @app_commands.describe(kukai_id="句会ID（省略可: このチャンネルで1件なら自動特定）")
+    async def kukai_info(self, interaction: discord.Interaction, kukai_id: int | None = None) -> None:
         assert interaction.guild is not None
         try:
             from sqlalchemy import select as _sa_select
@@ -260,9 +260,15 @@ class KukaiCog(commands.Cog):
             from bot.models.kukai import Kukai as _Kukai
             from bot.models.voice_session import VoiceSession as _VoiceSession
             async with get_session() as session:
+                resolved = await kukai_service.resolve_kukai_in_channel(
+                    session,
+                    guild_id=interaction.guild.id,
+                    channel_id=effective_channel_id(interaction),
+                    kukai_id=kukai_id,
+                )
                 result = await session.execute(
                     _sa_select(_Kukai)
-                    .where(_Kukai.id == kukai_id, _Kukai.guild_id == interaction.guild.id)
+                    .where(_Kukai.id == resolved.id, _Kukai.guild_id == interaction.guild.id)
                     .options(
                         selectinload(_Kukai.select_labels),
                         selectinload(_Kukai.voice_session),
@@ -271,7 +277,7 @@ class KukaiCog(commands.Cog):
                 kukai = result.scalar_one_or_none()
                 if kukai is None:
                     await interaction.response.send_message(
-                        embed=error_embed(f"句会 ID {kukai_id} が見つかりません。"), ephemeral=True
+                        embed=error_embed(f"句会 ID {resolved.id} が見つかりません。"), ephemeral=True
                     )
                     return
                 select_labels = list(kukai.select_labels)
@@ -402,9 +408,9 @@ class KukaiCog(commands.Cog):
                 name="submission_min",
                 min_value=1,
             )
-            submission_max_raw = first_value(fields, "submission_max", "3")
+            submission_max_raw = first_value(fields, "submission_max", "5")
             submission_max = parse_optional_int(
-                submission_max_raw if submission_max_raw is not None else "3",
+                submission_max_raw if submission_max_raw is not None else "5",
                 name="submission_max",
                 min_value=1,
             )

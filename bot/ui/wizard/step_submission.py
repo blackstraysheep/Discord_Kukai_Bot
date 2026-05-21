@@ -12,9 +12,10 @@ def build(state: WizardState) -> tuple[discord.Embed, discord.ui.View]:
         title=f"ステップ 4/{STEP_COUNT}: 投句設定",
         color=discord.Color.blurple(),
     )
-    max_label = "∞" if state.submission_max is None else str(state.submission_max)
+    max_label = "∞（無制限）" if state.submission_max is None else str(state.submission_max)
     embed.add_field(name="最低投句数", value=str(state.submission_min), inline=True)
     embed.add_field(name="最大投句数", value=max_label, inline=True)
+    embed.set_footer(text="最大投句数は空欄または「∞」で無制限になります。")
     return embed, StepSubmissionView(state)
 
 
@@ -72,8 +73,8 @@ class SubmissionDetailModal(discord.ui.Modal, title="投句数制限の設定"):
         default="1",
     )
     max_count = discord.ui.TextInput(
-        label="最大投句数（∞可）",
-        placeholder="3 / ∞",
+        label="最大投句数（空欄=無制限）",
+        placeholder="例: 5 / ∞ / 空欄",
         required=False,
         max_length=8,
     )
@@ -83,7 +84,7 @@ class SubmissionDetailModal(discord.ui.Modal, title="投句数制限の設定"):
         self.state = state
         self.min_count.default = str(state.submission_min)
         if state.submission_max is None:
-            self.max_count.default = "∞"
+            self.max_count.default = ""
         else:
             self.max_count.default = str(state.submission_max)
 

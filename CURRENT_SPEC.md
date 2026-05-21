@@ -55,7 +55,7 @@
   - サーバー既定プリセットがある場合、開始時点で選句設定に自動適用
   - 選句設定ステップではプリセット選択に加えて、選句種別を直接入力可能
     - 書式: `名前,点数,rank,最小数,最大数,コメントモード`
-    - 例: `特選,2,1,0,1,none`
+    - 例: `特選,2,1,0,1,optional`
     - 直接入力した場合は句会固有の「カスタム」選句仕様として保存
   - ボイス句会設定ステップでボイス/ステージチャンネル、開始日時、終了日時を設定
   - 通知設定ステップで `event,offset,destination,target,mention` 形式の通知を複数登録
@@ -259,7 +259,7 @@
     - `entry_approval=false`
     - `min_participants=0`
     - `submission_min=1`
-    - `submission_max=3`（`∞`, `unlimited`, `none`, `null` で無制限）
+    - `submission_max=5`（`∞`, `unlimited`, `none`, `null` で無制限）
     - `submission_overflow=false`
     - `submission_mode=manual`（`manual` / `semi_auto` / `full_auto`）
     - `selecting_mode=manual`（`manual` / `semi_auto` / `full_auto`）
@@ -275,6 +275,7 @@
     - `label=名前,点数,rank,最小数,最大数,コメントモード`
     - rank省略: `label=名前,点数,最小数,最大数,コメントモード`
     - `comment_mode` は `none` / `optional` / `required`
+    - デフォルト選句ラベルの選評はすべて `optional`
     - `label=` がある場合は `preset_id` より優先
     - `label=` も `preset_id` も無い場合はデフォルト選句ラベルを使用
 - `/select-preset bulk` 例:
@@ -282,9 +283,9 @@
 name=標準
 points_enabled=true
 set_default=true
-label=特選,2,1,0,1,none
+label=特選,2,1,0,1,optional
 label=並選,1,2,0,5,optional
-label=予選,0,3,0,∞,none
+label=予選,0,3,0,∞,optional
 ```
 - `/kukai create` 例:
 ```text
@@ -312,7 +313,7 @@ entry_enabled=false
 submission_close_at=2026-07-10 23:59
 selecting_close_at=2026-07-12 23:59
 submission_min=1
-submission_max=3
+submission_max=5
 preset_id=1
 reminder=submission_close,24h,kukai,all,false
 reminder=selecting_close,1h,mention,incomplete,true
@@ -331,7 +332,7 @@ entry_close_at=2026-06-01 23:59
 submission_close_at=2026-06-03 23:59
 selecting_close_at=2026-06-05 23:59
 submission_min=1
-submission_max=3
+submission_max=5
 submission_overflow=false
 submission_mode=manual
 selecting_mode=manual
@@ -339,9 +340,9 @@ publish_mode=manual
 result_mode=manual
 author_reveal=true
 author_reveal_zero=true
-label=特選,2,1,0,1,none
+label=特選,2,1,0,1,optional
 label=並選,1,2,0,5,optional
-label=予選,0,3,0,∞,none
+label=予選,0,3,0,∞,optional
 voice_enabled=true
 voice_channel=<#123456789012345678>
 voice_start_at=2026-06-06 21:00

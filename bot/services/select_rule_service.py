@@ -23,7 +23,7 @@ DEFAULT_SELECT_LABEL_SPECS: list[dict[str, Any]] = [
         "display_order": 1,
         "min_count": 0,
         "max_count": 1,
-        "comment_mode": "none",
+        "comment_mode": "optional",
         "template_id": None,
     },
     {
@@ -33,7 +33,7 @@ DEFAULT_SELECT_LABEL_SPECS: list[dict[str, Any]] = [
         "display_order": 2,
         "min_count": 0,
         "max_count": 5,
-        "comment_mode": "none",
+        "comment_mode": "optional",
         "template_id": None,
     },
     {
@@ -43,7 +43,7 @@ DEFAULT_SELECT_LABEL_SPECS: list[dict[str, Any]] = [
         "display_order": 3,
         "min_count": 0,
         "max_count": None,
-        "comment_mode": "none",
+        "comment_mode": "optional",
         "template_id": None,
     },
     {
@@ -108,7 +108,7 @@ def _normalize_common(
         if max_count is not None and max_count < min_count:
             raise ValidationError(f"「{label}」の最大選句数は最小選句数以上にしてください。")
 
-        comment_mode = str(raw.get("comment_mode", "none")).strip().lower()
+        comment_mode = str(raw.get("comment_mode", "optional")).strip().lower()
         if comment_mode not in COMMENT_MODES:
             raise ValidationError(
                 f"「{label}」のcomment_modeは none/optional/required のいずれかにしてください。"

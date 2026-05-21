@@ -2,13 +2,26 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import discord
 
 from bot.ui.wizard.base import STEP_COUNT, cancel_wizard, goto_step
 from bot.ui.wizard.wizard_state import WizardState, set_wizard
-from bot.utils.datetime_utils import format_jst, parse_datetime
+from bot.utils.datetime_utils import JST, format_jst, parse_datetime
+
+
+def _placeholder_datetime(*, days_from_now: int, hour: int, minute: int) -> str:
+    now_jst = datetime.now(JST)
+    candidate = (now_jst + timedelta(days=days_from_now)).replace(
+        hour=hour,
+        minute=minute,
+        second=0,
+        microsecond=0,
+    )
+    if candidate <= now_jst:
+        candidate += timedelta(days=1)
+    return candidate.strftime("%Y-%m-%d %H:%M")
 
 
 def build(state: WizardState) -> tuple[discord.Embed, discord.ui.View]:
@@ -94,33 +107,39 @@ class StepScheduleModal(discord.ui.Modal, title="日程の入力"):
         if state.entry_enabled:
             self.entry_close = discord.ui.TextInput(
                 label="エントリー締切 (YYYY-MM-DD HH:MM)",
-                placeholder="2026-06-01 20:00",
+                placeholder=_placeholder_datetime(days_from_now=7, hour=20, minute=0),
                 required=False,
                 max_length=20,
             )
             if state.entry_close_at:
                 jst = to_jst(state.entry_close_at)
                 self.entry_close.default = jst.strftime("%Y-%m-%d %H:%M")
+            else:
+                self.entry_close.default = _placeholder_datetime(days_from_now=7, hour=20, minute=0)
             self.add_item(self.entry_close)
 
         self.submission_close = discord.ui.TextInput(
             label="投句締切 (YYYY-MM-DD HH:MM)",
-            placeholder="2026-06-01 23:59",
+            placeholder=_placeholder_datetime(days_from_now=7, hour=23, minute=59),
             max_length=20,
         )
         if state.submission_close_at:
             jst = to_jst(state.submission_close_at)
             self.submission_close.default = jst.strftime("%Y-%m-%d %H:%M")
+        else:
+            self.submission_close.default = _placeholder_datetime(days_from_now=7, hour=23, minute=59)
         self.add_item(self.submission_close)
 
         self.selecting_close = discord.ui.TextInput(
             label="選句締切 (YYYY-MM-DD HH:MM)",
-            placeholder="2026-06-08 23:59",
+            placeholder=_placeholder_datetime(days_from_now=14, hour=23, minute=59),
             max_length=20,
         )
         if state.selecting_close_at:
             jst = to_jst(state.selecting_close_at)
             self.selecting_close.default = jst.strftime("%Y-%m-%d %H:%M")
+        else:
+            self.selecting_close.default = _placeholder_datetime(days_from_now=14, hour=23, minute=59)
         self.add_item(self.selecting_close)
 
     async def on_submit(self, interaction: discord.Interaction) -> None:

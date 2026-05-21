@@ -46,13 +46,19 @@ async def goto_step(
 async def _ensure_notify_presets(state: WizardState) -> None:
     async with get_session() as session:
         presets = await notification_preset_repo.get_by_guild(session, state.guild_id)
-        state.notify_preset_options = [{"id": p.id, "name": p.name} for p in presets]
+        state.notify_preset_options = [
+            {"id": p.id, "name": p.name, "is_default": p.is_default}
+            for p in presets
+        ]
         if not state.notification_specs:
-            default_entries = await notification_preset_service.get_default_entries(
-                session, state.guild_id
-            )
-            if default_entries:
-                state.notification_specs = default_entries
+            default_preset = await notification_preset_repo.get_default(session, state.guild_id)
+            if default_preset is not None:
+                default_entries = notification_preset_service.entries_from_json(
+                    default_preset.entries_json
+                )
+                if default_entries:
+                    state.notification_specs = default_entries
+                    state.notify_preset_name = default_preset.name
     set_wizard(state)
 
 

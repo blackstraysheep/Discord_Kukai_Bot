@@ -34,6 +34,19 @@ def build(state: WizardState) -> tuple[discord.Embed, discord.ui.View]:
         title=f"ステップ 8/{STEP_COUNT}: 通知設定",
         color=discord.Color.blurple(),
     )
+    preset_count = len(state.notify_preset_options)
+    preset_value = f"選択中: {state.notify_preset_name}"
+    if preset_count:
+        names = []
+        for row in state.notify_preset_options[:8]:
+            marker = "（既定）" if row.get("is_default") else ""
+            names.append(f"{row['name']}{marker}")
+        preset_value += f"\n選択可能: {', '.join(names)}"
+        if preset_count > 8:
+            preset_value += f"\n他 {preset_count - 8} 件"
+    else:
+        preset_value += "\n登録済み通知プリセットはありません。"
+    embed.add_field(name="通知プリセット", value=preset_value, inline=False)
     if state.notification_specs:
         lines = []
         for row in state.notification_specs[:12]:
@@ -53,17 +66,33 @@ def build(state: WizardState) -> tuple[discord.Embed, discord.ui.View]:
 class _PresetSelect(discord.ui.Select):
     def __init__(self, state: WizardState) -> None:
         self.state = state
-        options = [discord.SelectOption(label="（手動入力）", value="__manual__")]
+        options = [
+            discord.SelectOption(
+                label="デフォルト通知",
+                value="__default__",
+                description="投句・選句の24時間前に句会チャンネルへ通知",
+                default=state.notify_preset_name == "デフォルト" and not state.notification_specs,
+            )
+        ]
         for row in state.notify_preset_options[:24]:
             options.append(
-                discord.SelectOption(label=str(row["name"]), value=str(row["id"]))
+                discord.SelectOption(
+                    label=str(row["name"]),
+                    value=str(row["id"]),
+                    description="既定プリセット" if row.get("is_default") else None,
+                    default=state.notify_preset_name == str(row["name"]),
+                )
             )
-        super().__init__(placeholder="プリセットから読み込む", options=options, row=0)
+        super().__init__(placeholder="通知プリセットを選択", options=options, row=0)
 
     async def callback(self, interaction: discord.Interaction) -> None:
         value = self.values[0]
-        if value == "__manual__":
-            await interaction.response.defer()
+        if value == "__default__":
+            self.state.notification_specs = []
+            self.state.notify_preset_name = "デフォルト"
+            set_wizard(self.state)
+            embed, view = build(self.state)
+            await interaction.response.edit_message(embed=embed, view=view)
             return
         assert interaction.guild is not None
         try:
@@ -78,6 +107,7 @@ class _PresetSelect(discord.ui.Select):
             await interaction.response.send_message("プリセットの読み込みに失敗しました。", ephemeral=True)
             return
         self.state.notification_specs = entries
+        self.state.notify_preset_name = target.name
         set_wizard(self.state)
         embed, view = build(self.state)
         await interaction.response.edit_message(embed=embed, view=view)
@@ -88,8 +118,7 @@ class StepNotifyView(discord.ui.View):
         super().__init__(timeout=900)
         self.state = state
 
-        if state.notify_preset_options:
-            self.add_item(_PresetSelect(state))
+        self.add_item(_PresetSelect(state))
 
         edit_btn = discord.ui.Button(label="通知を入力", style=discord.ButtonStyle.primary, row=1)
         edit_btn.callback = self._edit
@@ -121,6 +150,7 @@ class StepNotifyView(discord.ui.View):
 
     async def _clear(self, interaction: discord.Interaction) -> None:
         self.state.notification_specs = []
+        self.state.notify_preset_name = "デフォルト"
         set_wizard(self.state)
         embed, view = build(self.state)
         await interaction.response.edit_message(embed=embed, view=view)
@@ -178,6 +208,7 @@ class NotificationModal(discord.ui.Modal, title="通知設定"):
                     await interaction.response.send_message(str(e), ephemeral=True)
                 return
         self.state.notification_specs = specs
+        self.state.notify_preset_name = "カスタム" if specs else "デフォルト"
         set_wizard(self.state)
         embed, view = build(self.state)
         try:
