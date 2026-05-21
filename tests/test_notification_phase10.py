@@ -10,7 +10,7 @@ from sqlalchemy import select
 import bot.database as database_mod
 from bot.models.notification import NotificationSchedule
 from bot.scheduler import jobs
-from bot.services import entry_service, kukai_service, notification_service, voice_service
+from bot.services import admin_notice_service, entry_service, kukai_service, notification_service, voice_service
 from bot.state_machine.states import KukaiState
 
 
@@ -205,6 +205,12 @@ def _patch_deadline_env(monkeypatch, db_session):
 
     monkeypatch.setattr(jobs, "_notify_channel", _fake_notify_channel)
     monkeypatch.setattr(jobs, "_notify_admins", _fake_notify_admins)
+
+    async def _fake_send_admin_notice(bot, session, kukai, **kwargs):
+        called["admins"].append((kukai.id, kwargs))
+        return True
+
+    monkeypatch.setattr(admin_notice_service, "send_admin_notice", _fake_send_admin_notice)
     return called
 
 
@@ -241,7 +247,7 @@ async def test_deadline_job_submission_close_semi_auto_incomplete_notifies_admin
     await jobs.deadline_job(kukai.id, "submission_close")
 
     assert KukaiState(kukai.state) == KukaiState.SUBMISSION_OPEN
-    assert called["channel"] == []
+    assert called["channel"]
     assert called["admins"]
 
 

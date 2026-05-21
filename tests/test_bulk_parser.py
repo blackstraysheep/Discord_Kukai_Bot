@@ -71,3 +71,15 @@ def test_parse_reminder_spec_with_mention_destination():
         "target": "incomplete",
         "mention": True,
     }
+
+
+def test_parse_reminder_spec_with_admin_thread_destination():
+    spec = parse_reminder_spec("submission_close,1h,admin,incomplete,true")
+
+    assert spec == {
+        "event_type": "submission_close",
+        "offset_secs": 3600,
+        "channel_id": -2,
+        "target": "incomplete",
+        "mention": True,
+    }

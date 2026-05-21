@@ -110,7 +110,27 @@ async def notification_job(schedule_id: int) -> None:
         sent_count = 0
         error_msg = None
 
-        if ns.channel_id == -1:
+        if ns.channel_id == -2:
+            from bot.services import admin_notice_service, progress_service
+
+            fields = []
+            if ns.target == "incomplete" and ns.event_type == "submission_close":
+                report = await progress_service.submission_report(session, kukai)
+                fields.append(("未達状況", "\n".join(report.admin_lines())))
+            elif ns.target == "incomplete" and ns.event_type == "selecting_close":
+                report = await progress_service.selecting_report(session, kukai)
+                fields.append(("未達状況", "\n".join(report.admin_lines())))
+            sent = await admin_notice_service.send_admin_notice(
+                _bot,
+                session,
+                kukai,
+                title=f"{event_ja}前の管理者通知",
+                description=embed_desc,
+                fields=fields,
+                mention_admins=ns.mention,
+            )
+            sent_count = 1 if sent else 0
+        elif ns.channel_id == -1:
             if guild:
                 for user_id in target_user_ids:
                     member = guild.get_member(user_id)
@@ -161,7 +181,7 @@ async def deadline_job(kukai_id: int, event_type: str) -> None:
     await _bot.wait_until_ready()
 
     from bot.database import get_session
-    from bot.services import kukai_service, notification_service
+    from bot.services import admin_notice_service, kukai_service, notification_service, progress_service
     from bot.services.errors import ServiceError
     from bot.state_machine.states import KukaiState
     from bot.utils.embed_builder import COLOR_INFO
@@ -185,13 +205,24 @@ async def deadline_job(kukai_id: int, event_type: str) -> None:
                 if state != KukaiState.SUBMISSION_OPEN:
                     return
 
+                report = await progress_service.submission_report(session, kukai)
                 should_advance = False
                 if mode == "full_auto":
                     should_advance = True
                 elif mode == "semi_auto":
-                    should_advance = await _all_submitted(session, kukai)
+                    should_advance = report.complete
 
                 if should_advance:
+                    if mode == "full_auto" and not report.complete:
+                        await admin_notice_service.send_admin_notice(
+                            _bot,
+                            session,
+                            kukai,
+                            title="投句未達警告",
+                            description="全自動設定のため、投句条件未達の参加者がいても締切処理を続行します。",
+                            fields=[("未達状況", "\n".join(report.admin_lines()))],
+                            mention_admins=True,
+                        )
                     await kukai_service.proceed(session, kukai)
                     logger.info(
                         "deadline_job: auto-advanced kukai %d to submission_closed", kukai_id
@@ -218,11 +249,29 @@ async def deadline_job(kukai_id: int, event_type: str) -> None:
                             _bot, kukai,
                             "投句期間が終了したため、投句一覧を番号付きで公開して選句を開始しました。",
                         )
+                        if mode == "full_auto" and not report.complete:
+                            await admin_notice_service.send_admin_notice(
+                                _bot,
+                                session,
+                                kukai,
+                                title="投句未達のまま進行しました",
+                                description="全自動設定により、投句条件未達の参加者がいる状態で選句受付へ進行しました。",
+                                fields=[("未達状況", "\n".join(report.admin_lines()))],
+                            )
                 else:
-                    await _notify_admins(
-                        _bot, kukai,
-                        "投句締切になりましたが、未投句の参加者がいます。"
-                        f"\n句会「{kukai.title}」(ID: {kukai.id}) を確認してください。",
+                    await admin_notice_service.send_admin_notice(
+                        _bot,
+                        session,
+                        kukai,
+                        title="投句条件未達のため自動進行を停止しました",
+                        description="半自動設定の締切時点で、投句条件を満たしていない参加者がいます。手動で確認してください。",
+                        fields=[("未達状況", "\n".join(report.admin_lines()))],
+                        mention_admins=True,
+                    )
+                    await _notify_channel(
+                        _bot,
+                        kukai,
+                        "投句条件を満たしていない参加者がいるため、自動進行しませんでした。管理者確認後に進行します。",
                     )
 
             elif event_type == "selecting_close":
@@ -230,15 +279,37 @@ async def deadline_job(kukai_id: int, event_type: str) -> None:
                 if mode == "manual":
                     return
                 if state != KukaiState.SELECTING_OPEN:
+                    await admin_notice_service.send_admin_notice(
+                        _bot,
+                        session,
+                        kukai,
+                        title="選句締切の自動処理を実行できませんでした",
+                        description=(
+                            f"選句締切の自動処理時刻になりましたが、現在状態は `{state.value}` です。"
+                            "前段階が手動確認待ちで止まっている可能性があります。"
+                        ),
+                        mention_admins=True,
+                    )
                     return
 
+                report = await progress_service.selecting_report(session, kukai)
                 should_advance = False
                 if mode == "full_auto":
                     should_advance = True
                 elif mode == "semi_auto":
-                    should_advance = await _all_selected(session, kukai)
+                    should_advance = report.complete
 
                 if should_advance:
+                    if mode == "full_auto" and not report.complete:
+                        await admin_notice_service.send_admin_notice(
+                            _bot,
+                            session,
+                            kukai,
+                            title="選句未達警告",
+                            description="全自動設定のため、選句条件未達の参加者がいても締切処理を続行します。",
+                            fields=[("未達状況", "\n".join(report.admin_lines()))],
+                            mention_admins=True,
+                        )
                     await kukai_service.proceed(session, kukai)
                     await kukai_service.proceed(session, kukai)
                     await notification_service.schedule_kukai_jobs(session, kukai)
@@ -255,11 +326,29 @@ async def deadline_job(kukai_id: int, event_type: str) -> None:
                         _bot, kukai,
                         message,
                     )
+                    if mode == "full_auto" and not report.complete:
+                        await admin_notice_service.send_admin_notice(
+                            _bot,
+                            session,
+                            kukai,
+                            title="選句未達のまま進行しました",
+                            description="全自動設定により、選句条件未達の参加者がいる状態で結果公開へ進行しました。",
+                            fields=[("未達状況", "\n".join(report.admin_lines()))],
+                        )
                 else:
-                    await _notify_admins(
-                        _bot, kukai,
-                        "選句締切になりましたが、未選句の参加者がいます。"
-                        f"\n句会「{kukai.title}」(ID: {kukai.id}) を確認してください。",
+                    await admin_notice_service.send_admin_notice(
+                        _bot,
+                        session,
+                        kukai,
+                        title="選句条件未達のため自動進行を停止しました",
+                        description="半自動設定の締切時点で、選句条件を満たしていない参加者がいます。手動で確認してください。",
+                        fields=[("未達状況", "\n".join(report.admin_lines()))],
+                        mention_admins=True,
+                    )
+                    await _notify_channel(
+                        _bot,
+                        kukai,
+                        "選句条件を満たしていない参加者がいるため、自動進行しませんでした。管理者確認後に進行します。",
                     )
 
         except ServiceError as e:

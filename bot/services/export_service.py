@@ -130,6 +130,7 @@ async def export_payload(
                 "author_reveal_zero": kukai.author_reveal_zero,
                 "result_display_default": kukai.result_display_default,
                 "notify_channel_id": kukai.notify_channel_id,
+                "admin_thread_id": kukai.admin_thread_id,
                 "submission_message_id": kukai.submission_message_id,
                 "result_message_id": kukai.result_message_id,
                 "created_at": _dt_to_str(kukai.created_at),
@@ -408,6 +409,7 @@ async def import_payload(
             author_reveal_zero=bool(source_kukai.get("author_reveal_zero", True)),
             result_display_default=source_kukai.get("result_display_default") or "score",
             notify_channel_id=source_kukai.get("notify_channel_id"),
+            admin_thread_id=source_kukai.get("admin_thread_id"),
             submission_message_id=None,
             result_message_id=None,
         )

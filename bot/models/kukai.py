@@ -73,8 +73,10 @@ class Kukai(Base, TimestampMixin):
     result_display_default: Mapped[str] = mapped_column(String(10), nullable=False, default="score")
 
     # --- Notification ---
-    # NULL = kukai channel, -1 = DM, positive int = specific channel ID
+    # NULL = kukai channel, -1 = DM, -2 = admin thread, positive int = specific channel ID
     notify_channel_id: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
+    # Private thread used for operation/admin-only notices.
+    admin_thread_id: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
 
     # --- Stored Discord message IDs ---
     submission_message_id: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)

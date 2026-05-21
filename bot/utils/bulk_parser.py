@@ -148,6 +148,8 @@ def parse_channel_destination(value: str, *, name: str = "通知先") -> tuple[i
     normalized = value.strip().lower()
     if normalized in {"", "kukai", "channel", "default"}:
         return None, False
+    if normalized in {"admin", "admin_thread", "admin-thread", "thread"}:
+        return -2, True
     if normalized == "dm":
         return -1, False
     if normalized == "mention":
@@ -157,7 +159,7 @@ def parse_channel_destination(value: str, *, name: str = "通知先") -> tuple[i
     try:
         return int(normalized), False
     except ValueError:
-        raise BulkParseError(f"{name} は kukai/dm/mention/<#channel_id> で指定してください。") from None
+        raise BulkParseError(f"{name} は kukai/admin/dm/mention/<#channel_id> で指定してください。") from None
 
 
 def parse_reminder_spec(value: str, *, line_no: int | None = None) -> dict[str, object]:

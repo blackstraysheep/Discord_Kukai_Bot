@@ -13,9 +13,11 @@ from discord.ext import commands
 from bot.database import get_session
 from bot.repositories import select_repo
 from bot.services import (
+    admin_notice_service,
     kukai_service,
     notification_service,
     permission_service,
+    progress_service,
     result_service,
     select_rule_service,
     submission_service,
@@ -713,6 +715,35 @@ class KukaiCog(commands.Cog):
                     getattr(interaction, "id", None),
                     interaction_channel_id,
                 )
+                override_report = await progress_service.report_for_state(session, kukai, current_state)
+                if override_report is not None and not override_report.complete:
+                    view = ConfirmView(timeout=60)
+                    if view.children:
+                        view.children[0].label = "それでも進める"  # type: ignore[attr-defined]
+                    warning = discord.Embed(
+                        title="条件未達の参加者がいます",
+                        description=(
+                            f"{override_report.summary()}\n"
+                            "このまま進行すると、未達の参加者がいる状態で次の段階へ進みます。"
+                        ),
+                        color=COLOR_INFO,
+                    )
+                    warning.add_field(
+                        name="未達状況",
+                        value=_limited_field_value(override_report.admin_lines()),
+                        inline=False,
+                    )
+                    warning.set_footer(text=f"句会ID: {kukai.id}")
+                    await interaction.followup.send(embed=warning, view=view, ephemeral=True)
+                    await view.wait()
+                    if not view.confirmed:
+                        await interaction.followup.send(
+                            embed=success_embed("進行をキャンセルしました。"),
+                            ephemeral=True,
+                        )
+                        return
+                else:
+                    override_report = None
                 if current_state in {KukaiState.SUBMISSION_CLOSED, KukaiState.WAITING_PUBLISH}:
                     await kukai_service.jump(session, kukai, KukaiState.WAITING_PUBLISH)
                     published = await submission_service.publish(session, kukai)
@@ -731,6 +762,18 @@ class KukaiCog(commands.Cog):
                         )
                         if result_message_id is not None:
                             kukai.result_message_id = result_message_id
+                if override_report is not None:
+                    await admin_notice_service.send_admin_notice(
+                        self.bot,
+                        session,
+                        kukai,
+                        title="条件未達のまま手動進行しました",
+                        description=(
+                            f"<@{interaction.user.id}> が `/kukai proceed` で確認し、"
+                            "条件未達の参加者がいる状態で句会を進行しました。"
+                        ),
+                        fields=[("未達状況", "\n".join(override_report.admin_lines()))],
+                    )
                 await notification_service.schedule_kukai_jobs(session, kukai)
                 logger.info(
                     "event=kukai_proceed_command kukai_id=%s actor_user_id=%s "
@@ -1690,6 +1733,8 @@ class KukaiCog(commands.Cog):
                 return f"{s}s"
 
             def _fmt_dest(ch_id: int | None, mention: bool) -> str:
+                if ch_id == -2:
+                    return "管理者スレッド" + (" + mention" if mention else "")
                 if ch_id == -1:
                     return "DM"
                 base = "句会チャンネル" if ch_id is None else f"<#{ch_id}>"
@@ -1860,7 +1905,27 @@ def _format_offset(seconds: int) -> str:
     return f"{seconds}s"
 
 
+def _limited_field_value(lines: list[str], *, limit: int = 1024) -> str:
+    if not lines:
+        return "（なし）"
+    value = ""
+    shown = 0
+    for line in lines:
+        candidate = f"{value}\n{line}" if value else line
+        if len(candidate) > limit:
+            remaining = len(lines) - shown
+            suffix = f"\n...他 {remaining} 件"
+            if value and len(value) + len(suffix) <= limit:
+                value += suffix
+            break
+        value = candidate
+        shown += 1
+    return value or "（表示できる項目がありません）"
+
+
 def _format_destination(channel_id: int | None, mention: bool) -> str:
+    if channel_id == -2:
+        return "管理者スレッド" + (" + mention" if mention else "")
     if channel_id == -1:
         return "DM"
     base = "句会チャンネル" if channel_id is None else f"<#{channel_id}>"

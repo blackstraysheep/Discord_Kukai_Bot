@@ -25,7 +25,7 @@ class NotificationSchedule(Base, TimestampMixin):
     offset_secs: Mapped[int] = mapped_column(Integer, nullable=False)
     # 'all' | 'incomplete' | 'admin'
     target: Mapped[str] = mapped_column(String(20), nullable=False, default="all")
-    # NULL = kukai channel, -1 = DM, positive int = specific channel ID
+    # NULL = kukai channel, -1 = DM, -2 = admin thread, positive int = specific channel ID
     channel_id: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
     mention: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     fired: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
