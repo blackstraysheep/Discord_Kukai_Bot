@@ -347,6 +347,26 @@ class StepConfirmView(discord.ui.View):
         info.set_footer(text=f"句会ID: {kukai_id}")
         await channel.send(embed=info)
 
+        if state.entry_enabled:
+            from bot.cogs.kukai_cog import StageActionView
+            from bot.state_machine.states import KukaiState
+
+            entry_embed = discord.Embed(
+                description=f"句会「**{kukai_title}**」の **エントリー受付** を開始しました。",
+                color=COLOR_INFO,
+            )
+            if state.entry_close_at:
+                entry_embed.add_field(
+                    name="エントリー締切",
+                    value=format_jst(state.entry_close_at),
+                    inline=False,
+                )
+            entry_embed.set_footer(text=f"句会ID: {kukai_id}")
+            await channel.send(
+                embed=entry_embed,
+                view=StageActionView(kukai_id, KukaiState.ENTRY_OPEN),
+            )
+
         if interaction.channel and interaction.channel.id != channel.id:
             try:
                 await interaction.channel.send(

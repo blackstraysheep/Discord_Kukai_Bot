@@ -71,7 +71,9 @@ async def create_kukai(
     if not author_reveal:
         author_reveal_zero = True
 
-    _validate_deadlines(submission_close_at, selecting_close_at)
+    if entry_enabled and entry_close_at is None:
+        raise ValidationError("entry_enabled=true の場合 entry_close_at は必須です。")
+    _validate_deadlines(entry_close_at, submission_close_at, selecting_close_at)
 
     initial_state = KukaiState.ENTRY_OPEN if entry_enabled else KukaiState.SUBMISSION_OPEN
 
@@ -337,7 +339,7 @@ async def edit_kukai(
         submission_close_at if submission_close_at is not None else kukai.submission_close_at
     )
     new_selecting_close_at = selecting_close_at if selecting_close_at is not None else kukai.selecting_close_at
-    _validate_deadlines(new_submission_close_at, new_selecting_close_at)
+    _validate_deadlines(None, new_submission_close_at, new_selecting_close_at)
 
     if submission_close_at is not None:
         kukai.submission_close_at = submission_close_at
@@ -359,7 +361,7 @@ async def update_deadlines(
     submission_close_at: datetime | None,
     selecting_close_at: datetime | None,
 ) -> None:
-    _validate_deadlines(submission_close_at, selecting_close_at)
+    _validate_deadlines(None, submission_close_at, selecting_close_at)
     if submission_close_at is not None:
         kukai.submission_close_at = submission_close_at
     if selecting_close_at is not None:
@@ -367,9 +369,16 @@ async def update_deadlines(
 
 
 def _validate_deadlines(
+    entry_close_at: datetime | None,
     submission_close_at: datetime | None,
     selecting_close_at: datetime | None,
 ) -> None:
+    if (
+        entry_close_at is not None
+        and submission_close_at is not None
+        and submission_close_at <= entry_close_at
+    ):
+        raise DeadlineConflictError("投句締切はエントリー締切より後に設定してください。")
     if (
         submission_close_at is not None
         and selecting_close_at is not None

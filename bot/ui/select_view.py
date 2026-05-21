@@ -22,6 +22,8 @@ if TYPE_CHECKING:
 
 _AUTHOR_COMMENT_LABEL = "作者コメント"
 _OVERALL_VALUE = "__overall__"
+SELECT_COMMENT_PREVIEW_LIMIT = 120
+OVERALL_COMMENT_PREVIEW_LIMIT = 300
 logger = logging.getLogger(__name__)
 
 
@@ -52,10 +54,10 @@ def _select_snapshot(pub_subs: list[PublishedSubmission], selects_by_sub: dict[i
         )
         comment_part = ""
         if selected.comment:
-            comment_part = f" — {discord_safe(selected.comment.comment[:40])}"
+            comment_part = f" — {discord_safe(selected.comment.comment[:SELECT_COMMENT_PREVIEW_LIMIT])}"
         rows.append(f"No.{item.number} **{label_name}**{comment_part}")
     if overall_comment:
-        rows.append(f"総評 — {discord_safe(overall_comment[:80])}")
+        rows.append(f"総評 — {discord_safe(overall_comment[:OVERALL_COMMENT_PREVIEW_LIMIT])}")
     if not rows:
         return "（未登録）"
     if len(rows) > 10:
@@ -164,7 +166,7 @@ class OverallSelectCommentModal(discord.ui.Modal, title="総評を入力"):
             await interaction.followup.send(
                 embed=discord.Embed(
                     title="✅ 総評を保存しました",
-                    description=discord_safe(self._comment.value[:200]),
+                    description=discord_safe(self._comment.value[:OVERALL_COMMENT_PREVIEW_LIMIT]),
                     color=COLOR_SUCCESS,
                 ),
                 ephemeral=True,
@@ -380,7 +382,7 @@ class SelectView(discord.ui.View):
                 label_name = "作者コメント"
             status = f"現在: **{label_name}**"
             if current_select.comment:
-                status += f"\n> {discord_safe(current_select.comment.comment[:200])}"
+                status += f"\n> {discord_safe(current_select.comment.comment[:SELECT_COMMENT_PREVIEW_LIMIT])}"
         else:
             status = "現在: （未選択）"
         if is_own:
@@ -589,10 +591,10 @@ class SelectView(discord.ui.View):
                 )
                 comment_part = ""
                 if selected.comment:
-                    comment_part = f" — {discord_safe(selected.comment.comment[:40])}"
+                    comment_part = f" — {discord_safe(selected.comment.comment[:SELECT_COMMENT_PREVIEW_LIMIT])}"
                 lines.append(f"No.{ps.number} **{label_name}**{comment_part}")
             if self._overall_comment:
-                lines.append(f"総評 — {discord_safe(self._overall_comment[:80])}")
+                lines.append(f"総評 — {discord_safe(self._overall_comment[:OVERALL_COMMENT_PREVIEW_LIMIT])}")
             desc = "\n".join(lines[:40])
 
         embed = discord.Embed(

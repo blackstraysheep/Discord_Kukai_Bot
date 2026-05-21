@@ -656,6 +656,18 @@ class KukaiCog(commands.Cog):
         info.set_footer(text=f"句会ID: {kukai_id}")
         try:
             await channel.send(embed=info)
+            if entry_enabled:
+                entry_embed = discord.Embed(
+                    description=f"句会「**{kukai_title}**」の **エントリー受付** を開始しました。",
+                    color=COLOR_INFO,
+                )
+                if entry_close_at:
+                    entry_embed.add_field(name="エントリー締切", value=format_jst(entry_close_at), inline=False)
+                entry_embed.set_footer(text=f"句会ID: {kukai_id}")
+                await channel.send(
+                    embed=entry_embed,
+                    view=StageActionView(kukai_id, KukaiState.ENTRY_OPEN),
+                )
         except discord.Forbidden:
             name_collision_warning = (name_collision_warning or "") + "\n開催チャンネルへの投稿権限がありません。"
 
@@ -771,6 +783,7 @@ class KukaiCog(commands.Cog):
                 embed=success_embed(f"句会「{kukai.title}」を一時停止しました。"),
                 ephemeral=True,
             )
+            await self._announce_to_kukai_channel(interaction.guild, kukai, KukaiState.PAUSED)
         except ServiceError as e:
             await interaction.response.send_message(embed=error_embed(str(e)), ephemeral=True)
 
@@ -798,6 +811,7 @@ class KukaiCog(commands.Cog):
                 embed=success_embed(f"句会「{kukai.title}」を再開しました。\n状態: **{state_ja}**"),
                 ephemeral=True,
             )
+            await self._announce_to_kukai_channel(interaction.guild, kukai, restored)
         except ServiceError as e:
             await interaction.response.send_message(embed=error_embed(str(e)), ephemeral=True)
 
@@ -847,6 +861,7 @@ class KukaiCog(commands.Cog):
                 embed=success_embed(f"句会「{kukai.title}」を中止しました。"),
                 view=None,
             )
+            await self._announce_to_kukai_channel(interaction.guild, kukai, KukaiState.CANCELLED)
         except ServiceError as e:
             if interaction.response.is_done():
                 await interaction.edit_original_response(embed=error_embed(str(e)), view=None)
@@ -890,23 +905,62 @@ class KukaiCog(commands.Cog):
         }
         return mapping.get(state)
 
+    @staticmethod
+    def _state_announcement_description(kukai, state: KukaiState) -> str | None:
+        stage = KukaiCog._state_stage_label(state)
+        if stage:
+            return f"句会「**{kukai.title}**」の **{stage}** を開始しました。"
+        mapping = {
+            KukaiState.ENTRY_CLOSED: "エントリーが締め切られました。",
+            KukaiState.SUBMISSION_CLOSED: "投句が締め切られました。",
+            KukaiState.WAITING_PUBLISH: "投句公開待ちになりました。",
+            KukaiState.SELECTING_CLOSED: "選句が締め切られました。",
+            KukaiState.ENDED: "句会が終了しました。",
+            KukaiState.PAUSED: "句会が一時停止されました。",
+            KukaiState.CANCELLED: "句会が中止されました。",
+        }
+        message = mapping.get(state)
+        if message is None:
+            return None
+        return f"句会「**{kukai.title}**」: {message}"
+
     async def _announce_to_kukai_channel(self, guild: discord.Guild, kukai, state: KukaiState) -> None:
-        stage = self._state_stage_label(state)
-        if not stage:
+        description = self._state_announcement_description(kukai, state)
+        if not description:
             return
         if not kukai.channel_id:
             return
         channel = guild.get_channel(kukai.channel_id)
         if not isinstance(channel, discord.TextChannel):
             return
-        description = f"句会「**{kukai.title}**」の **{stage}** を開始しました。"
         embed = discord.Embed(description=description, color=COLOR_INFO)
         if state == KukaiState.ENTRY_OPEN and kukai.entry_enabled and kukai.entry_close_at:
             embed.add_field(name="エントリー締切", value=format_jst(kukai.entry_close_at), inline=False)
         elif state == KukaiState.SUBMISSION_OPEN and kukai.submission_close_at:
             embed.add_field(name="投句締切", value=format_jst(kukai.submission_close_at), inline=False)
-        elif state == KukaiState.SELECTING_OPEN and kukai.selecting_close_at:
-            embed.add_field(name="選句締切", value=format_jst(kukai.selecting_close_at), inline=False)
+        elif state == KukaiState.SELECTING_OPEN:
+            select_labels = []
+            try:
+                from bot.models.select_rule import SelectLabel
+                from sqlalchemy import select as _sa_select
+
+                async with get_session() as session:
+                    result = await session.execute(
+                        _sa_select(SelectLabel)
+                        .where(SelectLabel.kukai_id == kukai.id)
+                        .order_by(SelectLabel.display_order)
+                    )
+                    select_labels = list(result.scalars().all())
+            except Exception:
+                logger.exception("Failed to load select labels for stage announcement")
+            if select_labels:
+                embed.add_field(
+                    name="句数",
+                    value=build_select_summary(kukai.submission_min, kukai.submission_max, select_labels),
+                    inline=False,
+                )
+            if kukai.selecting_close_at:
+                embed.add_field(name="選句締切", value=format_jst(kukai.selecting_close_at), inline=False)
         embed.set_footer(text=f"句会ID: {kukai.id}")
         view = StageActionView(kukai.id, state)
         try:

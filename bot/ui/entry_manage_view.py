@@ -11,6 +11,7 @@ from bot.services import entry_service, kukai_service
 from bot.services.errors import ServiceError
 from bot.utils.embed_builder import error_embed, success_embed
 from bot.utils.entry_notifications import notify_entry_approved
+from bot.utils.entry_notifications import notify_entry_rejected
 
 if TYPE_CHECKING:
     from bot.models.entry import Entry
@@ -84,6 +85,12 @@ class EntryActionSelect(discord.ui.Select):
                     interaction.guild,
                     kukai,
                     user_id=target_user_id,
+                    display_name=name,
+                )
+            else:
+                await notify_entry_rejected(
+                    interaction.guild,
+                    kukai,
                     display_name=name,
                 )
         except ServiceError as e:

@@ -7,7 +7,7 @@ import pytest
 from bot.models.kukai import Kukai
 from bot.models.select_rule import SelectLabel
 from bot.services import kukai_service
-from bot.services.errors import DeadlineConflictError, InvalidStateError, NotFoundError
+from bot.services.errors import DeadlineConflictError, InvalidStateError, NotFoundError, ValidationError
 from bot.state_machine.states import KukaiState
 
 
@@ -23,6 +23,7 @@ async def test_create_kukai_creates_default_labels(db_session):
         created_by=100,
         channel_id=200,
         title="テスト句会",
+        entry_close_at=_utc(3),
         submission_close_at=_utc(7),
         selecting_close_at=_utc(14),
     )
@@ -53,8 +54,24 @@ async def test_create_kukai_deadline_conflict(db_session):
             created_by=100,
             channel_id=200,
             title="締切逆転",
+            entry_close_at=_utc(3),
             submission_close_at=_utc(14),
             selecting_close_at=_utc(7),  # before submission
+        )
+
+
+@pytest.mark.asyncio
+async def test_create_kukai_requires_entry_close_at_when_entry_enabled(db_session):
+    with pytest.raises(ValidationError):
+        await kukai_service.create_kukai(
+            db_session,
+            guild_id=1,
+            created_by=100,
+            channel_id=200,
+            title="エントリー締切なし",
+            submission_close_at=_utc(7),
+            selecting_close_at=_utc(14),
+            entry_enabled=True,
         )
 
 
@@ -66,6 +83,7 @@ async def test_get_kukai_wrong_guild(db_session):
         created_by=100,
         channel_id=200,
         title="別ギルド",
+        entry_close_at=_utc(3),
         submission_close_at=_utc(7),
         selecting_close_at=_utc(14),
     )
@@ -83,6 +101,7 @@ async def test_state_machine_proceed(db_session):
         created_by=100,
         channel_id=200,
         title="状態遷移テスト",
+        entry_close_at=_utc(3),
         submission_close_at=_utc(7),
         selecting_close_at=_utc(14),
     )
@@ -121,6 +140,7 @@ async def test_pause_and_resume(db_session):
         created_by=100,
         channel_id=200,
         title="ポーズテスト",
+        entry_close_at=_utc(3),
         submission_close_at=_utc(7),
         selecting_close_at=_utc(14),
     )
@@ -144,6 +164,7 @@ async def test_cancel(db_session):
         created_by=100,
         channel_id=200,
         title="中止テスト",
+        entry_close_at=_utc(3),
         submission_close_at=_utc(7),
         selecting_close_at=_utc(14),
     )
@@ -160,6 +181,7 @@ async def test_cannot_proceed_from_terminal(db_session):
         created_by=100,
         channel_id=200,
         title="終了後テスト",
+        entry_close_at=_utc(3),
         submission_close_at=_utc(7),
         selecting_close_at=_utc(14),
     )
@@ -178,6 +200,7 @@ async def test_list_kukais_excludes_results_state(db_session):
         created_by=100,
         channel_id=200,
         title="開催中",
+        entry_close_at=_utc(3),
         submission_close_at=_utc(7),
         selecting_close_at=_utc(14),
     )
@@ -189,6 +212,7 @@ async def test_list_kukais_excludes_results_state(db_session):
         created_by=100,
         channel_id=200,
         title="結果公開中",
+        entry_close_at=_utc(3),
         submission_close_at=_utc(7),
         selecting_close_at=_utc(14),
     )
@@ -200,6 +224,7 @@ async def test_list_kukais_excludes_results_state(db_session):
         created_by=100,
         channel_id=200,
         title="終了済み",
+        entry_close_at=_utc(3),
         submission_close_at=_utc(7),
         selecting_close_at=_utc(14),
     )

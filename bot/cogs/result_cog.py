@@ -7,7 +7,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from bot.database import get_session
-from bot.repositories import select_repo
+from bot.repositories import entry_repo, select_repo
 from bot.services import kukai_service, permission_service, result_service
 from bot.services.errors import ServiceError
 from bot.state_machine.states import KukaiState
@@ -17,6 +17,8 @@ from bot.utils.embed_builder import COLOR_INFO, COLOR_RESULT, error_embed
 from bot.utils.text import discord_safe
 
 logger = logging.getLogger(__name__)
+COMMENT_PREVIEW_LIMIT = 300
+OVERALL_PREVIEW_LIMIT = 1000
 
 _PREVIEW_ALLOWED = {
     KukaiState.SELECTING_CLOSED,
@@ -37,6 +39,7 @@ def _score_embed(
     *,
     reveal_author_for_user: dict[int, bool],
     guild: discord.Guild,
+    display_names: dict[int, str],
 ) -> list[discord.Embed]:
     """Build result embeds sorted by rank (score desc)."""
     pages: list[discord.Embed] = []
@@ -49,8 +52,7 @@ def _score_embed(
     for r in results:
         author_line = ""
         if reveal_author_for_user.get(r.author_user_id, False):
-            member = guild.get_member(r.author_user_id)
-            author_name = member.display_name if member else f"UID:{r.author_user_id}"
+            author_name = _display_name(r.author_user_id, guild, display_names)
             author_line = f"　作者: {discord_safe(author_name)}"
 
         label_parts = [f"{lv.label}×{lv.count}" for lv in r.label_selects]
@@ -65,8 +67,8 @@ def _score_embed(
         for lv in r.label_selects:
             for comment in lv.comments[:3]:
                 body_lines.append(
-                    f"　💬 [{lv.label}] {discord_safe(comment.text[:80])}"
-                    f"（{_comment_signature(comment.selector_user_id, guild)}）"
+                    f"　💬 [{lv.label}] {discord_safe(comment.text[:COMMENT_PREVIEW_LIMIT])}"
+                    f"（{_comment_signature(comment.selector_user_id, guild, display_names)}）"
                 )
 
         field_value = "\n".join(body_lines)
@@ -85,7 +87,12 @@ def _score_embed(
     return pages
 
 
-def _number_embed(kukai, results, guild: discord.Guild) -> list[discord.Embed]:
+def _number_embed(
+    kukai,
+    results,
+    guild: discord.Guild,
+    display_names: dict[int, str],
+) -> list[discord.Embed]:
     """Build result embeds sorted by submission number."""
     sorted_r = sorted(results, key=lambda r: r.number)
     embed = discord.Embed(
@@ -98,7 +105,7 @@ def _number_embed(kukai, results, guild: discord.Guild) -> list[discord.Embed]:
         line = f"`No.{r.number}` {discord_safe(r.text)}　— {label_str} ({r.total_score}点)"
         author_comments = [c for lv in r.label_selects if lv.label == "作者コメント" for c in lv.comments[:1]]
         if author_comments:
-            line += f"\n　🖊 作者コメント: {discord_safe(author_comments[0].text[:80])}"
+            line += f"\n　🖊 作者コメント: {discord_safe(author_comments[0].text[:COMMENT_PREVIEW_LIMIT])}"
         lines.append(line)
     embed.description = "\n".join(lines[:40])
     if len(sorted_r) > 40:
@@ -114,6 +121,7 @@ def _author_embed(
     guild: discord.Guild,
     *,
     visible_author_ids: set[int],
+    display_names: dict[int, str],
 ) -> list[discord.Embed]:
     """Build result embeds grouped by author."""
     from collections import defaultdict
@@ -128,15 +136,14 @@ def _author_embed(
         color=COLOR_RESULT,
     )
     for user_id, subs in by_author.items():
-        member = guild.get_member(user_id)
-        author_name = member.display_name if member else f"UID:{user_id}"
+        author_name = _display_name(user_id, guild, display_names)
         total = sum(r.total_score for r in subs)
         lines = []
         for r in subs:
             line = f"`No.{r.number}` {discord_safe(r.text)} — {r.total_score}点 ({r.rank}位)"
             author_comments = [c for lv in r.label_selects if lv.label == "作者コメント" for c in lv.comments[:1]]
             if author_comments:
-                line += f"\n　🖊 作者コメント: {discord_safe(author_comments[0].text[:80])}"
+                line += f"\n　🖊 作者コメント: {discord_safe(author_comments[0].text[:COMMENT_PREVIEW_LIMIT])}"
             lines.append(line)
         embed.add_field(
             name=f"{discord_safe(author_name)} (合計 {total}点)",
@@ -150,7 +157,12 @@ def _author_embed(
     return [embed]
 
 
-def _overall_embeds(kukai, overall_comments, guild: discord.Guild) -> list[discord.Embed]:
+def _overall_embeds(
+    kukai,
+    overall_comments,
+    guild: discord.Guild,
+    display_names: dict[int, str],
+) -> list[discord.Embed]:
     if not overall_comments:
         return []
 
@@ -162,10 +174,9 @@ def _overall_embeds(kukai, overall_comments, guild: discord.Guild) -> list[disco
     char_count = len(embed.title)
 
     for overall in overall_comments:
-        member = guild.get_member(overall.user_id)
-        user_name = member.display_name if member else f"UID:{overall.user_id}"
+        user_name = _display_name(overall.user_id, guild, display_names)
         header = discord_safe(user_name)
-        body = discord_safe(overall.comment[:1000])
+        body = discord_safe(overall.comment[:OVERALL_PREVIEW_LIMIT])
 
         if len(embed.fields) >= 25 or char_count + len(header) + len(body) > 5800:
             pages.append(embed)
@@ -205,9 +216,24 @@ def _resolve_initial_format(kukai, requested: str | None) -> str:
     return available[0]
 
 
-def _comment_signature(user_id: int, guild: discord.Guild) -> str:
+def _display_name(user_id: int, guild: discord.Guild, display_names: dict[int, str]) -> str:
+    if user_id in display_names:
+        return display_names[user_id]
     member = guild.get_member(user_id)
-    return discord_safe(member.display_name if member else f"UID:{user_id}")
+    return member.display_name if member else f"UID:{user_id}"
+
+
+def _comment_signature(user_id: int, guild: discord.Guild, display_names: dict[int, str]) -> str:
+    return discord_safe(_display_name(user_id, guild, display_names))
+
+
+async def _load_display_names(session, kukai_id: int, guild: discord.Guild) -> dict[int, str]:
+    entries = await entry_repo.list_by_kukai(session, kukai_id)
+    names: dict[int, str] = {}
+    for entry in entries:
+        member = guild.get_member(entry.user_id)
+        names[entry.user_id] = entry.haigo or (member.display_name if member else f"UID:{entry.user_id}")
+    return names
 
 
 def build_result_entry_embed(kukai, *, result_count: int) -> discord.Embed:
@@ -257,6 +283,7 @@ class ResultOpenView(discord.ui.View):
                     return
                 results = await result_service.compute_results(session, kukai)
                 overall_comments = await select_repo.list_overall_comments(session, kukai.id)
+                display_names = await _load_display_names(session, kukai.id, interaction.guild)
         except ServiceError as e:
             await interaction.edit_original_response(embed=error_embed(str(e)))
             return
@@ -272,6 +299,7 @@ class ResultOpenView(discord.ui.View):
             results,
             overall_comments,
             interaction.guild,
+            display_names,
             initial_format=_resolve_initial_format(kukai, self.initial_format),
         )
         await interaction.edit_original_response(
@@ -310,12 +338,22 @@ class _ResultFormatSelect(discord.ui.Select):
 
 
 class ResultSwitchView(discord.ui.View):
-    def __init__(self, kukai, results, overall_comments, guild: discord.Guild, *, initial_format: str) -> None:
+    def __init__(
+        self,
+        kukai,
+        results,
+        overall_comments,
+        guild: discord.Guild,
+        display_names: dict[int, str],
+        *,
+        initial_format: str,
+    ) -> None:
         super().__init__(timeout=1800)
         self.kukai = kukai
         self.results = results
         self.overall_comments = overall_comments
         self.guild = guild
+        self.display_names = display_names
         self.available_formats = _available_formats(kukai)
         self.current_format = _resolve_initial_format(kukai, initial_format)
         self.current_page = 0
@@ -343,9 +381,15 @@ class ResultSwitchView(discord.ui.View):
                 self.results,
                 reveal_author_for_user=reveal_map,
                 guild=self.guild,
+                display_names=self.display_names,
             )
         elif fmt == "number":
-            pages = _number_embed(self.kukai, self.results, guild=self.guild)
+            pages = _number_embed(
+                self.kukai,
+                self.results,
+                guild=self.guild,
+                display_names=self.display_names,
+            )
         elif fmt == "author":
             totals: dict[int, int] = {}
             for r in self.results:
@@ -367,11 +411,19 @@ class ResultSwitchView(discord.ui.View):
                     self.results,
                     guild=self.guild,
                     visible_author_ids=visible_author_ids,
+                    display_names=self.display_names,
                 )
         else:
             pages = [discord.Embed(description="不明な表示形式です。", color=COLOR_INFO)]
 
-        pages.extend(_overall_embeds(self.kukai, self.overall_comments, guild=self.guild))
+        pages.extend(
+            _overall_embeds(
+                self.kukai,
+                self.overall_comments,
+                guild=self.guild,
+                display_names=self.display_names,
+            )
+        )
         self._pages_cache[fmt] = pages
         return pages
 
@@ -471,6 +523,7 @@ class ResultCog(commands.Cog):
 
                 results = await result_service.compute_results(session, kukai)
                 overall_comments = await select_repo.list_overall_comments(session, kukai.id)
+                display_names = await _load_display_names(session, kukai.id, interaction.guild)
 
             if not results:
                 await interaction.response.send_message(
@@ -498,6 +551,7 @@ class ResultCog(commands.Cog):
                 results,
                 overall_comments,
                 interaction.guild,
+                display_names,
                 initial_format=_resolve_initial_format(kukai, requested_format),
             )
 

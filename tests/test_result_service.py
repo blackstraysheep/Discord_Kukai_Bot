@@ -185,6 +185,7 @@ async def test_compute_results_wrong_state_raises(db_session):
         created_by=100,
         channel_id=200,
         title="テスト",
+        entry_close_at=_utc(3),
         submission_close_at=_utc(7),
         selecting_close_at=_utc(14),
     )

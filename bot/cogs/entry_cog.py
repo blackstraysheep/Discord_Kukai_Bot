@@ -26,6 +26,7 @@ from bot.utils.embed_builder import (
     success_embed,
 )
 from bot.utils.entry_notifications import notify_entry_approved
+from bot.utils.entry_notifications import notify_entries_approved, notify_entry_rejected
 
 logger = logging.getLogger(__name__)
 
@@ -212,6 +213,57 @@ class EntryCog(commands.Cog):
     ) -> None:
         await self._admin_action(interaction, effective_channel_id(interaction), kukai_id, user, "approve")
 
+    @entry.command(name="approve-all", description="【句会管理者】審査待ちエントリーを一括承認します")
+    @app_commands.describe(kukai_id="句会ID（省略可: このチャンネルで1件なら自動特定）")
+    async def entry_approve_all(
+        self,
+        interaction: discord.Interaction,
+        kukai_id: int | None = None,
+    ) -> None:
+        assert interaction.guild is not None
+        await interaction.response.defer(ephemeral=True)
+        try:
+            approved_names: list[str] = []
+            async with get_session() as session:
+                kukai = await kukai_service.resolve_kukai_in_channel(
+                    session,
+                    guild_id=interaction.guild.id,
+                    channel_id=effective_channel_id(interaction),
+                    kukai_id=kukai_id,
+                )
+                if not await permission_service.is_kukai_admin(session, kukai, interaction.user):  # type: ignore[arg-type]
+                    await interaction.followup.send(
+                        embed=error_embed("この操作は句会管理者のみ実行できます。"), ephemeral=True
+                    )
+                    return
+                entries = await entry_service.list_entries(session, kukai.id, status="pending")
+                for entry in entries:
+                    approved = await entry_service.approve(
+                        session,
+                        kukai,
+                        interaction.user.id,
+                        entry.user_id,
+                    )
+                    member = interaction.guild.get_member(approved.user_id)
+                    approved_names.append(
+                        approved.haigo or (member.display_name if member else f"UID:{approved.user_id}")
+                    )
+
+            if not approved_names:
+                await interaction.followup.send(
+                    embed=discord.Embed(description="審査待ちのエントリーはありません。", color=COLOR_INFO),
+                    ephemeral=True,
+                )
+                return
+
+            await interaction.followup.send(
+                embed=success_embed(f"{len(approved_names)}件のエントリーを承認しました。"),
+                ephemeral=True,
+            )
+            await notify_entries_approved(interaction.guild, kukai, display_names=approved_names)
+        except ServiceError as e:
+            await interaction.followup.send(embed=error_embed(str(e)), ephemeral=True)
+
     @entry.command(name="reject", description="【句会管理者】エントリーを却下します")
     @app_commands.describe(kukai_id="句会ID（省略可: このチャンネルで1件なら自動特定）", user="却下するユーザー（省略でリストから選択）")
     async def entry_reject(
@@ -303,6 +355,12 @@ class EntryCog(commands.Cog):
                             user_id=user.id,
                             display_name=name,
                         )
+                    else:
+                        await notify_entry_rejected(
+                            interaction.guild,
+                            kukai,
+                            display_name=name,
+                        )
                     return
 
                 entries = await entry_service.list_entries(session, kukai.id, status="pending")
@@ -363,7 +421,7 @@ async def _notify_late_entry_request(
     )
     embed.add_field(
         name="申請者",
-        value=f"{interaction.user.mention} (`{interaction.user.id}`)\n俳号: **{display_name}**",
+        value=f"UID: `{interaction.user.id}`\n俳号: **{display_name}**",
         inline=False,
     )
     embed.set_footer(text=f"句会ID: {kukai_id}")

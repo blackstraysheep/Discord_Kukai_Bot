@@ -7,13 +7,28 @@ import discord
 from bot.utils.embed_builder import COLOR_INFO, COLOR_RESULT
 from bot.utils.text import discord_safe
 
+COMMENT_PREVIEW_LIMIT = 300
+OVERALL_PREVIEW_LIMIT = 1000
 
-def _comment_signature(user_id: int, guild: discord.Guild) -> str:
+def _display_name(user_id: int, guild: discord.Guild, display_names: dict[int, str]) -> str:
+    if user_id in display_names:
+        return display_names[user_id]
     member = guild.get_member(user_id)
-    return discord_safe(member.display_name if member else f"UID:{user_id}")
+    return member.display_name if member else f"UID:{user_id}"
 
 
-def _score_embeds(kukai, results, *, reveal_author_for_user: dict[int, bool], guild: discord.Guild) -> list[discord.Embed]:
+def _comment_signature(user_id: int, guild: discord.Guild, display_names: dict[int, str]) -> str:
+    return discord_safe(_display_name(user_id, guild, display_names))
+
+
+def _score_embeds(
+    kukai,
+    results,
+    *,
+    reveal_author_for_user: dict[int, bool],
+    guild: discord.Guild,
+    display_names: dict[int, str],
+) -> list[discord.Embed]:
     pages: list[discord.Embed] = []
     embed = discord.Embed(
         title=f"🏆 選句結果 — {kukai.title}",
@@ -24,8 +39,7 @@ def _score_embeds(kukai, results, *, reveal_author_for_user: dict[int, bool], gu
     for result in results:
         author_line = ""
         if reveal_author_for_user.get(result.author_user_id, False):
-            member = guild.get_member(result.author_user_id)
-            author_name = member.display_name if member else f"UID:{result.author_user_id}"
+            author_name = _display_name(result.author_user_id, guild, display_names)
             author_line = f"　作者: {discord_safe(author_name)}"
 
         label_parts = [f"{level.label}×{level.count}" for level in result.label_selects]
@@ -36,8 +50,8 @@ def _score_embeds(kukai, results, *, reveal_author_for_user: dict[int, bool], gu
         for level in result.label_selects:
             for comment in level.comments[:3]:
                 body_lines.append(
-                    f"　💬 [{level.label}] {discord_safe(comment.text[:80])}"
-                    f"（{_comment_signature(comment.selector_user_id, guild)}）"
+                    f"　💬 [{level.label}] {discord_safe(comment.text[:COMMENT_PREVIEW_LIMIT])}"
+                    f"（{_comment_signature(comment.selector_user_id, guild, display_names)}）"
                 )
         body = "\n".join(body_lines)
 
@@ -73,7 +87,7 @@ def _number_embeds(kukai, results) -> list[discord.Embed]:
     return [embed]
 
 
-def _overall_embeds(kukai, overall_comments, guild: discord.Guild) -> list[discord.Embed]:
+def _overall_embeds(kukai, overall_comments, guild: discord.Guild, display_names: dict[int, str]) -> list[discord.Embed]:
     if not overall_comments:
         return []
 
@@ -82,10 +96,9 @@ def _overall_embeds(kukai, overall_comments, guild: discord.Guild) -> list[disco
     char_count = len(embed.title)
 
     for overall in overall_comments:
-        member = guild.get_member(overall.user_id)
-        user_name = member.display_name if member else f"UID:{overall.user_id}"
+        user_name = _display_name(overall.user_id, guild, display_names)
         header = discord_safe(user_name)
-        body = discord_safe(overall.comment[:1000])
+        body = discord_safe(overall.comment[:OVERALL_PREVIEW_LIMIT])
         if len(embed.fields) >= 25 or char_count + len(header) + len(body) > 5800:
             pages.append(embed)
             embed = discord.Embed(color=COLOR_INFO)
@@ -98,7 +111,14 @@ def _overall_embeds(kukai, overall_comments, guild: discord.Guild) -> list[disco
     return pages
 
 
-def _author_embeds(kukai, results, guild: discord.Guild, *, visible_author_ids: set[int]) -> list[discord.Embed]:
+def _author_embeds(
+    kukai,
+    results,
+    guild: discord.Guild,
+    *,
+    visible_author_ids: set[int],
+    display_names: dict[int, str],
+) -> list[discord.Embed]:
     from collections import defaultdict
 
     by_author: dict[int, list] = defaultdict(list)
@@ -115,8 +135,7 @@ def _author_embeds(kukai, results, guild: discord.Guild, *, visible_author_ids: 
         color=COLOR_RESULT,
     )
     for user_id, subs in by_author.items():
-        member = guild.get_member(user_id)
-        author_name = member.display_name if member else f"UID:{user_id}"
+        author_name = _display_name(user_id, guild, display_names)
         total = sum(item.total_score for item in subs)
         lines = [f"`No.{item.number}` {discord_safe(item.text)} — {item.total_score}点 ({item.rank}位)" for item in subs]
         embed.add_field(
@@ -130,7 +149,15 @@ def _author_embeds(kukai, results, guild: discord.Guild, *, visible_author_ids: 
     return [embed]
 
 
-def build_result_publish_embeds(kukai, results, overall_comments, guild: discord.Guild) -> list[discord.Embed]:
+def build_result_publish_embeds(
+    kukai,
+    results,
+    overall_comments,
+    guild: discord.Guild,
+    *,
+    display_names: dict[int, str] | None = None,
+) -> list[discord.Embed]:
+    display_names = display_names or {}
     totals: dict[int, int] = {}
     for result in results:
         totals[result.author_user_id] = totals.get(result.author_user_id, 0) + result.total_score
@@ -145,9 +172,25 @@ def build_result_publish_embeds(kukai, results, overall_comments, guild: discord
 
     pages: list[discord.Embed] = []
     if kukai.points_enabled:
-        pages.extend(_score_embeds(kukai, results, reveal_author_for_user=reveal_map, guild=guild))
+        pages.extend(
+            _score_embeds(
+                kukai,
+                results,
+                reveal_author_for_user=reveal_map,
+                guild=guild,
+                display_names=display_names,
+            )
+        )
     pages.extend(_number_embeds(kukai, results))
     if kukai.author_reveal:
-        pages.extend(_author_embeds(kukai, results, guild, visible_author_ids=visible_author_ids))
-    pages.extend(_overall_embeds(kukai, overall_comments, guild))
+        pages.extend(
+            _author_embeds(
+                kukai,
+                results,
+                guild,
+                visible_author_ids=visible_author_ids,
+                display_names=display_names,
+            )
+        )
+    pages.extend(_overall_embeds(kukai, overall_comments, guild, display_names))
     return pages
