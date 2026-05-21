@@ -109,6 +109,40 @@ timeoutを設定する
 
 フォント指定もゆくゆくはできれば。
 
+## テーマシステム（フォーマット・フォント拡張）
+
+フォント・用紙・レイアウトは「テーマ」単位で管理する。
+新テーマはディレクトリを追加するだけで拡張できる。初回は `default` のみ実装。
+
+```
+bot/templates/pdf/
+  default/
+    theme.toml                  ← フォント・用紙設定
+    submission_list.tex.j2      ← 投句一覧テンプレート
+    result.tex.j2               ← 結果テンプレート
+  elegant/                      ← 将来追加するテーマ例
+    theme.toml
+    ...
+```
+
+theme.toml の例：
+
+```toml
+[font]
+main = "Noto Serif CJK JP"
+bold = "Noto Serif CJK JP Bold"
+size = "10pt"
+
+[page]
+paper        = "a4"
+writing_mode = "tate"   # tate / yoko
+margin_top   = "20mm"
+margin_side  = "15mm"
+```
+
+テンプレート内でフォント名・用紙設定を直書きせず `{{ theme.font.main }}` のように変数で受け取る。
+`/pdf submission theme:elegant` のようにコマンドパラメータでテーマを指定可能。
+
 ## Discordコマンド設計
 
 ```
