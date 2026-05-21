@@ -237,25 +237,33 @@ class ResultOpenView(discord.ui.View):
     async def _on_open(self, interaction: discord.Interaction) -> None:
         assert interaction.guild is not None
         try:
+            await interaction.response.defer(ephemeral=True, thinking=True)
+        except discord.NotFound:
+            logger.warning(
+                "ResultOpenView interaction expired before defer (kukai_id=%s interaction_id=%s)",
+                self.kukai_id,
+                getattr(interaction, "id", None),
+            )
+            return
+
+        try:
             async with get_session() as session:
                 kukai = await kukai_service.get_kukai(session, self.kukai_id, interaction.guild.id)
                 state = KukaiState.from_value(kukai.state)
                 if state not in {KukaiState.RESULTS, KukaiState.ENDED}:
-                    await interaction.response.send_message(
+                    await interaction.edit_original_response(
                         embed=error_embed("結果はまだ公開されていません。"),
-                        ephemeral=True,
                     )
                     return
                 results = await result_service.compute_results(session, kukai)
                 overall_comments = await select_repo.list_overall_comments(session, kukai.id)
         except ServiceError as e:
-            await interaction.response.send_message(embed=error_embed(str(e)), ephemeral=True)
+            await interaction.edit_original_response(embed=error_embed(str(e)))
             return
 
         if not results:
-            await interaction.response.send_message(
+            await interaction.edit_original_response(
                 embed=discord.Embed(description="集計対象の投句がありません。", color=COLOR_INFO),
-                ephemeral=True,
             )
             return
 
@@ -266,10 +274,9 @@ class ResultOpenView(discord.ui.View):
             interaction.guild,
             initial_format=_resolve_initial_format(kukai, self.initial_format),
         )
-        await interaction.response.send_message(
+        await interaction.edit_original_response(
             embed=view.current_embed(),
             view=view,
-            ephemeral=True,
         )
 
 
