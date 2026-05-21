@@ -1,7 +1,7 @@
 """add admin thread id to kukais
 
 Revision ID: 0008_admin_thread_id
-Revises: 0007_notification_presets
+Revises: 0007
 Create Date: 2026-05-21 00:00:00.000000
 """
 
@@ -10,7 +10,7 @@ import sqlalchemy as sa
 
 
 revision = "0008_admin_thread_id"
-down_revision = "0007_notification_presets"
+down_revision = "0007"
 branch_labels = None
 depends_on = None
 
