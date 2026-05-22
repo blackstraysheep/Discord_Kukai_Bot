@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import secrets
 import shutil
@@ -14,6 +15,8 @@ from typing import TYPE_CHECKING
 
 import jinja2
 from sqlalchemy.ext.asyncio import AsyncSession
+
+logger = logging.getLogger(__name__)
 
 from bot.repositories import entry_repo, select_repo, submission_repo
 from bot.services import result_service
@@ -114,6 +117,9 @@ async def _compile(tex_source: str) -> bytes:
             tex_path = Path(tmpdir) / "main.tex"
             tex_path.write_text(tex_source, encoding="utf-8")
 
+            for sty_file in TEMPLATES_DIR.glob("*.sty"):
+                shutil.copy(sty_file, tmpdir)
+
             proc = await asyncio.create_subprocess_exec(
                 LUALATEX_BIN,
                 "--interaction=nonstopmode",
@@ -135,6 +141,7 @@ async def _compile(tex_source: str) -> bytes:
             pdf_path = Path(tmpdir) / "main.pdf"
             if not pdf_path.exists():
                 log = stdout.decode(errors="replace") if stdout else ""
+                logger.error("LuaLaTeX compile failed:\n%s", log)
                 raise PdfError("PDFのコンパイルに失敗しました。", log=log)
 
             return pdf_path.read_bytes()
@@ -182,12 +189,13 @@ async def build_submission_pdf(
     if not published:
         raise PdfError("投句一覧がまだ公開されていません。")
 
-    haigo_map = await _build_haigo_map(session, kukai.id, guild) if show_author else {}
+    haigo_map = await _build_haigo_map(session, kukai.id, guild)
 
     data = {
         "title": kukai.title,
         "kukai_theme": kukai.theme,
         "date": _format_date(kukai),
+        "participants": list(haigo_map.values()),
         "submissions": [
             {
                 "number": ps.number,

@@ -23,7 +23,7 @@
 {% for r in results -%}
 %% --- {{ r.rank }}位 ---
 \noindent
-{\normalsize \rensuji{ {{ r.rank }} }位\quad \rensuji{ {{ r.score }} }点\quad No.\rensuji{ {{ r.number }} }}\\[0.3\zh]
+{\normalsize \tatechuyoko{ {{ r.rank }} }位\quad \tatechuyoko{ {{ r.score }} }点\quad No.\tatechuyoko{ {{ r.number }} }}\\[0.3\zh]
 {\large\bfseries {{ r.text | tex }}}%
 {% if r.author -%}
 \hfill{\small {{ r.author | tex }}}%
@@ -34,7 +34,7 @@
 {% if r.label_selects -%}
 \noindent{\small
 {%- for ls in r.label_selects %}
-{{ ls.label | tex }}\(\times\)\rensuji{ {{ ls.count }} }\quad
+{{ ls.label | tex }}\(\times\)\tatechuyoko{ {{ ls.count }} }\quad
 {%- endfor %}
 }\par\smallskip
 {%- endif %}

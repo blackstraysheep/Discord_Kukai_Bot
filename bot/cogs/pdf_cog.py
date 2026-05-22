@@ -12,9 +12,13 @@ from bot.database import get_session
 from bot.services import kukai_service, pdf_service, permission_service
 from bot.services.errors import ServiceError
 from bot.services.pdf_service import PdfError
-from bot.utils.embed_builder import error_embed, success_embed
+from bot.state_machine.states import KukaiState
+from bot.utils.embed_builder import error_embed
 
 _DISCORD_MAX_BYTES = 25 * 1024 * 1024
+
+# 結果公開後のみ作者名を出せる
+_AUTHOR_VISIBLE_STATES = {KukaiState.RESULTS, KukaiState.ENDED}
 
 
 async def _send_pdf(
@@ -22,17 +26,19 @@ async def _send_pdf(
     pdf_bytes: bytes,
     filename: str,
     kukai_id: int,
+    *,
+    ephemeral: bool,
 ) -> None:
     if len(pdf_bytes) <= _DISCORD_MAX_BYTES:
         await interaction.followup.send(
             file=discord.File(io.BytesIO(pdf_bytes), filename=filename),
-            ephemeral=True,
+            ephemeral=ephemeral,
         )
     else:
         url = await pdf_service.publish_temp(pdf_bytes, filename, kukai_id)
         await interaction.followup.send(
             content=f"PDFサイズが大きいため一時URLで提供します:\n{url}",
-            ephemeral=True,
+            ephemeral=ephemeral,
         )
 
 
@@ -40,13 +46,14 @@ class PdfCog(commands.Cog):
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
 
-    pdf = app_commands.Group(name="pdf", description="PDF生成（管理者限定）")
+    pdf = app_commands.Group(name="pdf", description="PDF生成")
 
     @pdf.command(name="submission", description="投句一覧PDFを生成します（publish後から利用可）")
     @app_commands.describe(
         kukai_id="句会ID（省略時はチャンネルから自動解決）",
-        show_author="俳号を表示するか（デフォルト: True）",
+        show_author="作者名を表示するか（結果公開前は強制的に非表示）",
         theme="テーマ名（デフォルト: default）",
+        public="チャンネルに投稿するか（管理者のみ・デフォルト: False）",
     )
     async def pdf_submission(
         self,
@@ -54,6 +61,7 @@ class PdfCog(commands.Cog):
         kukai_id: int | None = None,
         show_author: bool = True,
         theme: str = "default",
+        public: bool = False,
     ) -> None:
         if not pdf_service.is_available():
             await interaction.response.send_message(
@@ -62,7 +70,7 @@ class PdfCog(commands.Cog):
             )
             return
 
-        await interaction.response.defer(ephemeral=True)
+        await interaction.response.defer(ephemeral=not public)
 
         try:
             async with get_session() as session:
@@ -73,14 +81,19 @@ class PdfCog(commands.Cog):
                     channel_id=interaction.channel_id,
                     kukai_id=kukai_id,
                 )
-                if not await permission_service.is_kukai_admin(
+
+                if public and not await permission_service.is_kukai_admin(
                     session, kukai, interaction.user
                 ):
                     await interaction.followup.send(
-                        embed=error_embed("この操作は句会管理者のみ実行できます。"),
+                        embed=error_embed("チャンネルへの投稿は句会管理者のみ実行できます。"),
                         ephemeral=True,
                     )
                     return
+
+                # 結果公開前は作者名を強制非表示
+                if kukai.state not in _AUTHOR_VISIBLE_STATES:
+                    show_author = False
 
                 pdf_bytes = await pdf_service.build_submission_pdf(
                     session,
@@ -98,11 +111,13 @@ class PdfCog(commands.Cog):
             await interaction.followup.send(embed=error_embed(str(e)), ephemeral=True)
             return
 
+        label = "named" if show_author else "anonymous"
         await _send_pdf(
             interaction,
             pdf_bytes,
-            filename=f"投句一覧_{kid}.pdf",
+            filename=f"submission_{kid}_{label}.pdf",
             kukai_id=kid,
+            ephemeral=not public,
         )
 
     @pdf.command(name="result", description="結果PDFを生成します（選句締切後から利用可）")
@@ -110,6 +125,7 @@ class PdfCog(commands.Cog):
         kukai_id="句会ID（省略時はチャンネルから自動解決）",
         show_author="作者名を表示するか（デフォルト: True）",
         theme="テーマ名（デフォルト: default）",
+        public="チャンネルに投稿するか（管理者のみ・デフォルト: False）",
     )
     async def pdf_result(
         self,
@@ -117,6 +133,7 @@ class PdfCog(commands.Cog):
         kukai_id: int | None = None,
         show_author: bool = True,
         theme: str = "default",
+        public: bool = False,
     ) -> None:
         if not pdf_service.is_available():
             await interaction.response.send_message(
@@ -125,7 +142,7 @@ class PdfCog(commands.Cog):
             )
             return
 
-        await interaction.response.defer(ephemeral=True)
+        await interaction.response.defer(ephemeral=not public)
 
         try:
             async with get_session() as session:
@@ -136,11 +153,12 @@ class PdfCog(commands.Cog):
                     channel_id=interaction.channel_id,
                     kukai_id=kukai_id,
                 )
-                if not await permission_service.is_kukai_admin(
+
+                if public and not await permission_service.is_kukai_admin(
                     session, kukai, interaction.user
                 ):
                     await interaction.followup.send(
-                        embed=error_embed("この操作は句会管理者のみ実行できます。"),
+                        embed=error_embed("チャンネルへの投稿は句会管理者のみ実行できます。"),
                         ephemeral=True,
                     )
                     return
@@ -161,11 +179,13 @@ class PdfCog(commands.Cog):
             await interaction.followup.send(embed=error_embed(str(e)), ephemeral=True)
             return
 
+        label = "named" if show_author else "anonymous"
         await _send_pdf(
             interaction,
             pdf_bytes,
-            filename=f"結果_{kid}.pdf",
+            filename=f"result_{kid}_{label}.pdf",
             kukai_id=kid,
+            ephemeral=not public,
         )
 
 

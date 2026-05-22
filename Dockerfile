@@ -16,4 +16,8 @@ COPY . .
 
 RUN mkdir -p data
 
+RUN printf '%s\n' '\documentclass{jlreq}' '\begin{document}' 'test' '\end{document}' > /tmp/warmup.tex \
+ && cd /tmp && lualatex --interaction=nonstopmode warmup.tex \
+ && rm -f /tmp/warmup.*
+
 CMD ["sh", "-c", "alembic upgrade head && python -m bot.main"]

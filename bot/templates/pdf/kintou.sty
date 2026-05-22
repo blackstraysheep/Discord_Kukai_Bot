@@ -1,0 +1,26 @@
+\NeedsTeXFormat{LaTeX2e}[1994/06/01]
+\ProvidesPackage{kintou}[2020/07/27 Kintou waritsuke Package]
+
+\RequirePackage{calc}
+\RequirePackage{ifthen}
+\RequirePackage{graphicx}
+
+\makeatletter
+\newlength{\wtarget}
+\newlength{\wactual}
+\newcommand*{\kintou}[2]{%
+    \ifthenelse{\isundefined{\zw}}{\kintouwidth{#1zw}{#2}}{\kintouwidth{#1\zw}{#2}}%
+}
+\newcommand*{\kintouwidth}[2]{%
+    \setlength{\wtarget}{#1}%
+    \settowidth{\wactual}{#2}%
+    \ifthenelse{\lengthtest{\wtarget < \wactual}}{%
+        \setlength{\wtarget}{1pt * \real{\strip@pt\wtarget} / \real{\strip@pt\wactual}}%
+        \scalebox{\strip@pt\wtarget}[1]{#2}%
+    }{%
+        \makebox[\wtarget][s]{#2}%
+    }%
+}
+\makeatother
+
+\endinput
