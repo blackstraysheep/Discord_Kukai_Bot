@@ -394,3 +394,54 @@ overall=全体に春らしい句が多かったです
 - 起動時:
   - グローバル同期
   - グローバル運用時はギルドスコープの同名コマンドを掃除（重複表示防止）
+
+## 16. PDF生成
+
+### コマンド
+```
+/pdf submission [kukai_id] [show_author] [theme] [public]
+/pdf result     [kukai_id] [show_author] [theme] [public]
+```
+
+### アクセス制御
+- 基本的に誰でも実行可能
+- `public=True` 時はチャンネルへ投稿（句会管理者のみ）
+- `public=False`（デフォルト）は自分だけに見える ephemeral 返信
+
+### `show_author` の制限（投句一覧のみ）
+- 句会ステートが `results` または `ended` の場合のみ `show_author=True` が有効
+- それ以前のステートでは `show_author` の指定に関わらず強制的に `False`（無記名）
+
+### ファイル名
+- 投句一覧: `submission_{kukai_id}_{named|anonymous}.pdf`
+- 結果: `result_{kukai_id}_{named|anonymous}.pdf`
+
+### 日付表示
+- `submission_close_at`（投句締切）を優先し、なければ `entry_close_at`（参加締切）をJSTで表示
+
+### テンプレートシステム
+- テーマ単位で管理: `bot/templates/pdf/{theme}/`
+- `theme.toml` にフォント・用紙設定を記述
+- `.tex.j2` は Jinja2 テンプレート。`{{ var | tex }}` でユーザー入力をTeXエスケープ
+- カスタム `.sty` ファイルは `bot/templates/pdf/` 直下に配置（コンパイル時に自動コピー）
+
+### 投句一覧レイアウト（defaultテーマ）
+- `ltjtarticle` クラス、A4横置き横書き
+- `longtable` で行数に応じてページ分割
+- 列構成: №（1列）/ 選者（5列、空欄）/ 俳句（26列、`\kintou` 均等割り）/ 作者（5列）/ 予備（5列）
+- ヘッダー: 句会名・兼題・日付・参加者一覧
+
+### 結果レイアウト（defaultテーマ）
+- `jlreq` クラス、A4縦組み縦書き
+- 順位・得点・投句番号・俳句本文・作者
+- 選評（ラベル別得票数・コメント）
+- 総評セクション
+
+### 環境変数
+| 変数 | 説明 | デフォルト |
+|------|------|----------|
+| `LUALATEX_BIN` | LuaLaTeX実行パス（空で機能無効） | `lualatex` |
+| `PDF_MAX_CONCURRENT` | 同時コンパイル数 | `2` |
+| `PDF_COMPILE_TIMEOUT` | タイムアウト秒数 | `60` |
+| `PDF_SERVE_BASE_URL` | 25MB超過時の公開URL | （空） |
+| `PDF_SERVE_DIR` | 公開ディレクトリ | `/srv/pdfs` |

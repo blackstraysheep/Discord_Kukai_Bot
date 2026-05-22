@@ -2,7 +2,6 @@
 \usepackage[no-math,deluxe,expert]{luatexja-preset}
 \usepackage{geometry}
 \usepackage{array}
-\usepackage{longtable}
 \usepackage{kintou}
 \renewcommand{\baselinestretch}{1}
 \pagestyle{empty}
@@ -21,16 +20,27 @@
 \setlength{\tabcolsep}{1em}
 \renewcommand{\arraystretch}{1.25}
 
-\begin{longtable}{|>{\centering\arraybackslash}p{1\zw}|>{\raggedright\arraybackslash}p{5\zw}|>{\raggedright\arraybackslash}p{26\zw}|>{\raggedright\arraybackslash}p{5\zw}|>{\raggedright\arraybackslash}p{5\zw}|}
+{% for group in submissions | batch(theme.submission.rows_per_page, {'number': '', 'text': '', 'author': ''}) %}
+{%- if not loop.first %}
+\newpage
+
+\begin{center}
+{\gtfamily \large {{ title | tex }}\quad 投句一覧}%
+{%- if kukai_theme %}\quad（兼題：{{ kukai_theme | tex }}）{% endif %}
+\end{center}
+
+\vspace{1\baselineskip}
+{% endif %}
+\begin{tabular}{|>{\centering\arraybackslash}p{1\zw}|>{\raggedright\arraybackslash}p{5\zw}|>{\raggedright\arraybackslash}p{26\zw}|>{\raggedright\arraybackslash}p{5\zw}|>{\raggedright\arraybackslash}p{5\zw}|}
 \hline
 \multicolumn{1}{|>{\centering\arraybackslash}p{1\zw}|}{№} &
 \multicolumn{1}{>{\centering\arraybackslash}m{5\zw}|}{選　者} &
 \multicolumn{1}{>{\centering\arraybackslash}m{26\zw}|}{俳　句} &
 \multicolumn{1}{>{\centering\arraybackslash}m{5\zw}|}{作　者} &
 \multicolumn{1}{>{\centering\arraybackslash}m{5\zw}|}{\strut} \\ \hline
-\endhead
-{% for s in submissions -%}
-\hbox{\yoko {{ s.number }}} & \strut & \kintou{20}{ {{ s.text | tex }} } & { {% if s.author %}{{ s.author | tex }}{% endif %} } & \strut \\ \hline
+{% for s in group -%}
+\hbox{\yoko {{ s.number }}} & \strut & {% if s.text %}\kintou{20}{ {{- s.text | tex -}} }{% endif %} & { {{- s.author | tex if s.author -}} } & \strut \\ \hline
 {% endfor %}
-\end{longtable}
+\end{tabular}
+{% endfor %}
 \end{document}

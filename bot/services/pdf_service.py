@@ -117,6 +117,7 @@ async def _compile(tex_source: str) -> bytes:
             tex_path = Path(tmpdir) / "main.tex"
             tex_path.write_text(tex_source, encoding="utf-8")
 
+            logger.debug("TeX source:\n%s", tex_source)
             for sty_file in TEMPLATES_DIR.glob("*.sty"):
                 shutil.copy(sty_file, tmpdir)
 

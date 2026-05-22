@@ -6,3 +6,6 @@ size = "10pt"
 [page]
 paper = "a4"
 writing_mode = "tate"
+
+[submission]
+rows_per_page = 30

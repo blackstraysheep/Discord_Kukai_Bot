@@ -1,179 +1,131 @@
-# Discord句会bot PDF生成 実装メモ
+# PDF生成機能 実装メモ
 
-## 目的
-
-Discord句会botで、句会結果・投句一覧・選評などをLuaLaTeXでPDF化する。
-
-**運用モデル**: セルフホスト。導入者が各自の環境（Oracle Free Tier など）でbotを運用する。
-Dockerイメージで配布し、導入者は `git clone → .env 設定 → docker compose up` で起動できる。
+最終更新: 2026-05-22
 
 ## 技術スタック
 
-| 要素 | 選択 |
-|-----|------|
-| TeXエンジン | LuaLaTeX |
-| 文書クラス | jlreq（縦書きモード） |
-| フォント | Noto Serif CJK JP |
-| テンプレート | Jinja2 (.tex.j2) |
-| コンテナ | Docker（ローカル＝本番の同一イメージ） |
-| PDF公開 | Caddy（Discord 25MB 超過時のみ） |
+| 要素 | 選択 | 備考 |
+|-----|------|------|
+| TeXエンジン | LuaLaTeX | Unicode完全対応 |
+| 投句一覧クラス | `ltjtarticle` + `luatexja-preset` | 横書き・landscape |
+| 結果クラス | `jlreq` + `luatexja-fontspec` | 縦書き |
+| 均等割り | `kintou.sty`（カスタム） | `bot/templates/pdf/` に配置 |
+| テンプレート | Jinja2 (`.tex.j2`) | `\| tex` フィルタでエスケープ |
+| コンテナ | Docker（`python:3.11` + apt LuaLaTeX） | ローカル＝本番の同一イメージ |
+| PDF公開 | Caddy（Discord 25MB 超過時のみ） | 未設定時は超過でエラー |
 
-## 基本構成
+## ファイル構成
 
-Discord Bot
-  ↓
-PDF生成要求
-  ↓
-LuaLaTeX worker
-  ↓
-PDF生成
-  ↓
-Discordへ添付
-  ↓
-サイズ超過時は一時URLを投稿←ここは要検討
+```
+bot/
+  cogs/pdf_cog.py               ← コマンド定義
+  services/pdf_service.py       ← コンパイル・公開ロジック
+  templates/pdf/
+    kintou.sty                  ← 共有スタイルファイル（コンパイル時に自動コピー）
+    default/
+      theme.toml                ← フォント・用紙設定
+      submission_list.tex.j2    ← 投句一覧テンプレート
+      result.tex.j2             ← 結果テンプレート
+tests/
+  test_pdf_service.py           ← TeX生成・エスケープのテスト（LuaLaTeX不要）
+Dockerfile                      ← LuaLaTeX込みイメージ（フォントキャッシュ事前生成）
+```
 
-## 推奨サーバ構成
-第一候補
+## 環境変数
 
-Oracle Cloud Always Free VM
+```bash
+LUALATEX_BIN=/usr/bin/lualatex   # 空にするとPDF機能を無効化
+PDF_MAX_CONCURRENT=2              # 同時コンパイル数（プロセス内セマフォ）
+PDF_COMPILE_TIMEOUT=60            # タイムアウト秒数
+PDF_SERVE_BASE_URL=               # Caddy公開URL（省略時はサイズ超過でエラー）
+PDF_SERVE_DIR=/srv/pdfs           # 公開ディレクトリ
+```
 
-Discord botを常時起動
-LuaLaTeXを同一VMにインストール
-PDF生成も同一VMで実行
-サイズ超過PDFはVM上で一時公開
-PDF公開
-/srv/pdfs/
-  ├ random-id-1.pdf
-  ├ random-id-2.pdf
+## コマンド
 
-CaddyでHTTPS公開する。
+```
+/pdf submission [kukai_id] [show_author] [theme] [public]
+/pdf result     [kukai_id] [show_author] [theme] [public]
+```
 
+### アクセス制御
+- 誰でも実行可能（`public=False` 時は自分だけに見える ephemeral）
+- `public=True` でチャンネル投稿 → 句会管理者のみ
+
+### `show_author` の制限（投句一覧のみ）
+- ステートが `results` / `ended` の場合のみ `show_author=True` が有効
+- それ以前は強制的に `False`（無記名）
+
+### ファイル名
+```
+submission_{kukai_id}_{named|anonymous}.pdf
+result_{kukai_id}_{named|anonymous}.pdf
+```
+
+### 日付
+`submission_close_at` 優先、なければ `entry_close_at`（JST表示）
+
+## テンプレートシステム
+
+### テーマ構造
+```
+bot/templates/pdf/{theme}/
+  theme.toml           ← フォント・用紙設定
+  submission_list.tex.j2
+  result.tex.j2
+```
+
+### Jinja2 利用パターン
+```jinja2
+{{ var | tex }}          ← ユーザー入力のTeXエスケープ（必須）
+{% for s in submissions %}...{% endfor %}
+{% if s.author %}...{% endif %}
+{{ submissions | batch(20, fill) }}  ← ページ分割
+{{- var -}}              ← 前後のスペースを除去（\kintouの引数など）
+```
+
+### カスタム .sty の配置
+`bot/templates/pdf/*.sty` は `_compile()` 内でコンパイル用一時ディレクトリへ自動コピーされる。
+テーマ固有ではなく全テーマ共通として扱う。
+
+## セキュリティ
+
+- ユーザー入力は必ず `{{ var | tex }}` でエスケープ
+- `--shell-escape` は使用しない
+- エスケープ対象: `\ { } % # & _ $ ^ ~`
+
+## 投句一覧レイアウト（defaultテーマ）
+
+- `ltjtarticle` クラス、A4横置き（landscape）
+- `longtable` でページ分割対応
+- 列: №(1zw) / 選者(5zw, 空欄) / 俳句(26zw, kintou均等割り) / 作者(5zw) / 予備(5zw)
+- ヘッダー行はページごとに繰り返し（`\endhead`）
+- 参加者一覧を右揃えで表示
+
+## 結果レイアウト（defaultテーマ）
+
+- `jlreq` クラス、A4縦組み（tate）
+- 順位・得点・投句番号 → 俳句本文 → 作者名
+- ラベル別得票数（`\tatechuyoko` で縦中横）
+- 選評コメント一覧
+- 総評セクション（コメントがある場合のみ表示）
+
+## Caddy による大容量PDF公開（オプション）
+
+```
+PDF_SERVE_BASE_URL=https://pdf.example.com
+PDF_SERVE_DIR=/srv/pdfs
+```
+
+```
+# Caddyfile
 pdf.example.com {
     root * /srv/pdfs
     file_server
 }
+```
 
-PDF URL例：
-
-https://pdf.example.com/7f3d91c8a2.pdf
-サイズ超過時の処理
-PDFを生成
-ファイルサイズ確認
-Discord添付上限以下なら添付送信
-超過なら /srv/pdfs/ に保存
-ランダムURLをDiscordに投稿
-cronで一定期間後に削除
-
-例：
-
+```
+# 1日後に削除
 find /srv/pdfs -type f -mtime +1 -delete
-LuaLaTeX導入例
-
-Ubuntu系の場合：
-
-sudo apt update
-sudo apt install -y \
-  texlive-luatex \
-  texlive-lang-japanese \
-  texlive-fonts-recommended \
-  latexmk \
-  fonts-noto-cjk \
-  ghostscript
-PDF生成コマンド例
-lualatex -interaction=nonstopmode main.tex
-
-または：
-
-latexmk -lualatex -interaction=nonstopmode main.tex
-セキュリティ注意
-
-Discord入力をTeXに直接埋め込まない。
-＊texでそのまま出せない文字の対応も。
-
-最低限エスケープする文字：
-
-\ { } % # & _ $ ^
-
-また、基本的に --shell-escape は使わない。
-
-実装方針
-TeXテンプレートは固定
-(縦書き)
-bot側でJSONデータを生成
-JSONから .tex を生成
-一時ディレクトリでコンパイル
-成功時のみPDFを返す
-失敗時はログを管理者向けに返す
-timeoutを設定する
-同時実行数を制限する
-
-フォント指定もゆくゆくはできれば。
-
-## テーマシステム（フォーマット・フォント拡張）
-
-フォント・用紙・レイアウトは「テーマ」単位で管理する。
-新テーマはディレクトリを追加するだけで拡張できる。初回は `default` のみ実装。
-
 ```
-bot/templates/pdf/
-  default/
-    theme.toml                  ← フォント・用紙設定
-    submission_list.tex.j2      ← 投句一覧テンプレート
-    result.tex.j2               ← 結果テンプレート
-  elegant/                      ← 将来追加するテーマ例
-    theme.toml
-    ...
-```
-
-theme.toml の例：
-
-```toml
-[font]
-main = "Noto Serif CJK JP"
-bold = "Noto Serif CJK JP Bold"
-size = "10pt"
-
-[page]
-paper        = "a4"
-writing_mode = "tate"   # tate / yoko
-margin_top   = "20mm"
-margin_side  = "15mm"
-```
-
-テンプレート内でフォント名・用紙設定を直書きせず `{{ theme.font.main }}` のように変数で受け取る。
-`/pdf submission theme:elegant` のようにコマンドパラメータでテーマを指定可能。
-
-## Discordコマンド設計
-
-```
-/pdf submission [kukai_id] [show_author]   ← 投句一覧PDF（管理者限定、publish後から）
-/pdf result     [kukai_id] [show_author]   ← 結果PDF（管理者限定、selecting後から）
-```
-
-- `kukai_id` 省略時はチャンネルから自動解決
-- `show_author`（bool, default=True）: 投句一覧・結果で独立して俳号表示を制御
-- `LUALATEX_BIN` が未設定の場合は「有効化されていません」エラーを返す
-
-## 環境切り替え対応
-
-```bash
-# .env.example
-LUALATEX_BIN=/usr/bin/lualatex   # 空にするとPDF機能を無効化
-PDF_SERVE_BASE_URL=               # Caddy公開URL（省略時はサイズ超過でエラー）
-PDF_SERVE_DIR=/srv/pdfs
-```
-
-ローカル開発時は `LUALATEX_BIN=` で無効化し、Docker環境でのみ有効にする運用が基本。
-同一Dockerイメージをローカル・クラウドで共用するため環境差分ゼロ。
-
-## 新規ファイル一覧
-
-| ファイル | 役割 |
-|---------|------|
-| `Dockerfile` | LuaLaTeX込みのbotイメージ |
-| `docker-compose.yml` | ローカル開発・本番共用 |
-| `bot/cogs/pdf_cog.py` | コマンド定義 |
-| `bot/services/pdf_service.py` | コンパイル・ファイル公開ロジック |
-| `bot/templates/pdf/submission_list.tex.j2` | 投句一覧テンプレート |
-| `bot/templates/pdf/result.tex.j2` | 結果テンプレート |
-| `tests/test_pdf_service.py` | TeX生成・エスケープのテスト |
