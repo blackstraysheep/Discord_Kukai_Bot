@@ -1,4 +1,11 @@
-FROM python:3.11-slim
+FROM python:3.11
+
+RUN apt-get update && apt-get install -y \
+    texlive-luatex \
+    texlive-lang-japanese \
+    texlive-fonts-recommended \
+    fonts-noto-cjk \
+ && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 

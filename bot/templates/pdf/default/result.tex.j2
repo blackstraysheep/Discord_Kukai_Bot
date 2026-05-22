@@ -1,0 +1,65 @@
+\documentclass[{{ theme.page.writing_mode }},paper={{ theme.page.paper }},fontsize={{ theme.font.size }}]{jlreq}
+\usepackage{luatexja-fontspec}
+\setmainjfont[BoldFont={{ theme.font.bold }}]{ {{ theme.font.main }} }
+
+\pagestyle{plain}
+
+\begin{document}
+
+%% ヘッダー
+\begin{center}
+{\Large\bfseries {{ title | tex }}\quad 結果}\\[1\zh]
+{%- if kukai_theme %}
+兼題\quad {{ kukai_theme | tex }}\\[0.5\zh]
+{%- endif %}
+{{ date }}
+\end{center}
+
+\bigskip
+\noindent\rule{\linewidth}{0.4pt}
+\bigskip
+
+%% 結果一覧
+{% for r in results -%}
+%% --- {{ r.rank }}位 ---
+\noindent
+{\normalsize \rensuji{ {{ r.rank }} }位\quad \rensuji{ {{ r.score }} }点\quad No.\rensuji{ {{ r.number }} }}\\[0.3\zh]
+{\large\bfseries {{ r.text | tex }}}%
+{% if r.author -%}
+\hfill{\small {{ r.author | tex }}}%
+{%- endif %}
+\par\smallskip
+
+%% 得票サマリ
+{% if r.label_selects -%}
+\noindent{\small
+{%- for ls in r.label_selects %}
+{{ ls.label | tex }}\(\times\)\rensuji{ {{ ls.count }} }\quad
+{%- endfor %}
+}\par\smallskip
+{%- endif %}
+
+%% 選評コメント
+{% for ls in r.label_selects -%}
+{% for c in ls.comments -%}
+\noindent{\small 【{{ ls.label | tex }}】{{ c.author | tex }}：{{ c.text | tex }}}\par
+{% endfor -%}
+{% endfor %}
+
+\noindent\rule{\linewidth}{0.2pt}
+\addvspace{2\zh}
+{% endfor %}
+
+{% if overall_comments -%}
+%% 総評
+\bigskip
+\noindent\rule{\linewidth}{0.4pt}
+\bigskip
+\noindent{\large\bfseries 総評}\par\medskip
+{% for oc in overall_comments -%}
+\noindent{\small\bfseries {{ oc.author | tex }}：}\par
+\noindent{{ oc.text | tex }}\par\medskip
+{% endfor %}
+{%- endif %}
+
+\end{document}

@@ -1,0 +1,33 @@
+\documentclass[{{ theme.page.writing_mode }},paper={{ theme.page.paper }},fontsize={{ theme.font.size }}]{jlreq}
+\usepackage{luatexja-fontspec}
+\setmainjfont[BoldFont={{ theme.font.bold }}]{ {{ theme.font.main }} }
+
+\pagestyle{plain}
+
+\begin{document}
+
+%% ヘッダー
+\begin{center}
+{\Large\bfseries {{ title | tex }}}\\[1\zh]
+{%- if kukai_theme %}
+兼題\quad {{ kukai_theme | tex }}\\[0.5\zh]
+{%- endif %}
+{{ date }}
+\end{center}
+
+\bigskip
+\noindent\rule{\linewidth}{0.4pt}
+\bigskip
+
+%% 投句一覧
+{% for s in submissions -%}
+\noindent
+\hspace{1\zw}{\normalsize \rensuji{ {{ s.number }} }.}%
+\hspace{0.5\zw}{\large {{ s.text | tex }}}%
+{% if s.author -%}
+\hfill{\small {{ s.author | tex }}}%
+{%- endif %}
+\par\addvspace{2\zh}
+{% endfor %}
+
+\end{document}

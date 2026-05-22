@@ -1,0 +1,8 @@
+[font]
+main = "Noto Serif CJK JP"
+bold = "Noto Serif CJK JP Bold"
+size = "10pt"
+
+[page]
+paper = "a4"
+writing_mode = "tate"

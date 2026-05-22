@@ -22,6 +22,7 @@ COGS = [
     "bot.cogs.check_cog",
     "bot.cogs.result_cog",
     "bot.cogs.admin_cog",
+    "bot.cogs.pdf_cog",
 ]
 
 
