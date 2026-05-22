@@ -5,6 +5,7 @@ from bot.models.guild_settings import GuildSettings
 from bot.models.kukai import Kukai, KukaiAdmin
 from bot.models.notification import NotificationLog, NotificationSchedule
 from bot.models.notification_preset import NotificationPreset
+from bot.models.participant import KukaiParticipant
 from bot.models.submission import PublishedSubmission, Submission
 from bot.models.voice_session import VoiceSession
 from bot.models.select import OverallSelectComment, Select, SelectComment
@@ -25,5 +26,6 @@ __all__ = [
     "NotificationSchedule",
     "NotificationLog",
     "NotificationPreset",
+    "KukaiParticipant",
     "VoiceSession",
 ]

@@ -115,6 +115,41 @@ async def test_create_kukai_allows_entry_close_equal_submission_close(db_session
 
 
 @pytest.mark.asyncio
+async def test_create_kukai_normalizes_legacy_entry_full_auto(db_session):
+    kukai = await kukai_service.create_kukai(
+        db_session,
+        guild_id=1,
+        created_by=100,
+        channel_id=200,
+        title="旧エントリーモード",
+        entry_close_at=_utc(3),
+        submission_close_at=_utc(7),
+        selecting_close_at=_utc(14),
+        entry_enabled=True,
+        entry_mode="full_auto",
+    )
+
+    assert kukai.entry_mode == "auto"
+
+
+@pytest.mark.asyncio
+async def test_create_kukai_validates_submission_open_at(db_session):
+    close_at = _utc(7)
+    with pytest.raises(DeadlineConflictError):
+        await kukai_service.create_kukai(
+            db_session,
+            guild_id=1,
+            created_by=100,
+            channel_id=200,
+            title="投句開始逆転",
+            submission_open_at=close_at,
+            submission_close_at=close_at,
+            selecting_close_at=_utc(14),
+            entry_enabled=False,
+        )
+
+
+@pytest.mark.asyncio
 async def test_get_kukai_wrong_guild(db_session):
     kukai = await kukai_service.create_kukai(
         db_session,

@@ -33,7 +33,7 @@ _SUBMISSION_LOCKED_STATES = {
 }
 
 _VALID_SUBMISSION_MODES = {"manual", "semi_auto", "full_auto"}
-_VALID_ENTRY_MODES = {"manual", "full_auto"}
+_VALID_ENTRY_MODES = {"manual", "auto"}
 _VALID_SELECTING_MODES = {"manual", "semi_auto", "full_auto"}
 _VALID_PUBLISH_MODES = {"manual", "auto"}
 _VALID_RESULT_MODES = {"manual", "auto"}
@@ -49,6 +49,7 @@ async def create_kukai(
     theme: str | None = None,
     description: str | None = None,
     entry_close_at: datetime | None = None,
+    submission_open_at: datetime | None = None,
     submission_close_at: datetime | None = None,
     selecting_close_at: datetime | None = None,
     # Optional settings (wizard-provided overrides)
@@ -74,10 +75,9 @@ async def create_kukai(
     if not author_reveal:
         author_reveal_zero = True
 
-    if entry_mode not in _VALID_ENTRY_MODES:
-        raise ValidationError("entry_mode は manual/full_auto で指定してください。")
-    _validate_deadlines(entry_close_at, submission_close_at, selecting_close_at)
-    _validate_future_deadlines(entry_close_at, submission_close_at, selecting_close_at)
+    entry_mode = normalize_entry_mode(entry_mode)
+    _validate_deadlines(entry_close_at, submission_open_at, submission_close_at, selecting_close_at)
+    _validate_future_deadlines(entry_close_at, submission_open_at, submission_close_at, selecting_close_at)
 
     initial_state = KukaiState.ENTRY_OPEN if entry_enabled else KukaiState.DRAFT
 
@@ -90,6 +90,7 @@ async def create_kukai(
         description=description,
         state=initial_state,
         entry_close_at=entry_close_at,
+        submission_open_at=submission_open_at,
         submission_close_at=submission_close_at,
         selecting_close_at=selecting_close_at,
         entry_enabled=entry_enabled,
@@ -241,6 +242,7 @@ async def edit_kukai(
     title: str | None = None,
     theme: str | None = None,
     description: str | None = None,
+    submission_open_at: datetime | None = None,
     submission_close_at: datetime | None = None,
     selecting_close_at: datetime | None = None,
     entry_mode: str | None = None,
@@ -296,9 +298,7 @@ async def edit_kukai(
             raise ValidationError("selecting_mode は manual/semi_auto/full_auto で指定してください。")
         kukai.selecting_mode = selecting_mode
     if entry_mode is not None:
-        if entry_mode not in _VALID_ENTRY_MODES:
-            raise ValidationError("entry_mode は manual/full_auto で指定してください。")
-        kukai.entry_mode = entry_mode
+        kukai.entry_mode = normalize_entry_mode(entry_mode)
 
     if publish_mode is not None:
         if publish_mode not in _VALID_PUBLISH_MODES:
@@ -345,23 +345,31 @@ async def edit_kukai(
         kukai.submission_max = submission_max
 
     old_submission_close_at = kukai.submission_close_at
+    old_submission_open_at = kukai.submission_open_at
     old_selecting_close_at = kukai.selecting_close_at
 
+    new_submission_open_at = (
+        submission_open_at if submission_open_at is not None else kukai.submission_open_at
+    )
     new_submission_close_at = (
         submission_close_at if submission_close_at is not None else kukai.submission_close_at
     )
     new_selecting_close_at = selecting_close_at if selecting_close_at is not None else kukai.selecting_close_at
-    _validate_deadlines(None, new_submission_close_at, new_selecting_close_at)
-    _validate_future_deadlines(None, submission_close_at, selecting_close_at)
+    _validate_deadlines(kukai.entry_close_at, new_submission_open_at, new_submission_close_at, new_selecting_close_at)
+    _validate_future_deadlines(None, submission_open_at, submission_close_at, selecting_close_at)
 
+    if submission_open_at is not None:
+        kukai.submission_open_at = submission_open_at
     if submission_close_at is not None:
         kukai.submission_close_at = submission_close_at
     if selecting_close_at is not None:
         kukai.selecting_close_at = selecting_close_at
 
     return (
-        submission_close_at is not None
-        and submission_close_at != old_submission_close_at
+        submission_open_at is not None
+        and submission_open_at != old_submission_open_at
+    ) or (
+        submission_close_at is not None and submission_close_at != old_submission_close_at
     ) or (
         selecting_close_at is not None
         and selecting_close_at != old_selecting_close_at
@@ -374,7 +382,7 @@ async def update_deadlines(
     submission_close_at: datetime | None,
     selecting_close_at: datetime | None,
 ) -> None:
-    _validate_deadlines(None, submission_close_at, selecting_close_at)
+    _validate_deadlines(None, None, submission_close_at, selecting_close_at)
     _validate_future_deadlines(None, submission_close_at, selecting_close_at)
     if submission_close_at is not None:
         kukai.submission_close_at = submission_close_at
@@ -384,6 +392,7 @@ async def update_deadlines(
 
 def _validate_deadlines(
     entry_close_at: datetime | None,
+    submission_open_at: datetime | None,
     submission_close_at: datetime | None,
     selecting_close_at: datetime | None,
 ) -> None:
@@ -393,6 +402,12 @@ def _validate_deadlines(
             and submission_close_at < entry_close_at
     ):
         raise DeadlineConflictError("投句締切はエントリー締切以降に設定してください。")
+    if (
+        submission_open_at is not None
+        and submission_close_at is not None
+        and submission_open_at >= submission_close_at
+    ):
+        raise DeadlineConflictError("投句開始は投句締切より前に設定してください。")
     if (
         submission_close_at is not None
         and selecting_close_at is not None
@@ -405,4 +420,18 @@ def _validate_future_deadlines(*deadlines: datetime | None) -> None:
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     for deadline in deadlines:
         if deadline is not None and deadline <= now:
-            raise DeadlineConflictError("締切は現在時刻より未来に設定してください。")
+            raise DeadlineConflictError("締切/開始時刻は現在時刻より未来に設定してください。")
+
+
+def normalize_entry_mode(mode: str | None) -> str:
+    """Return the canonical entry mode while accepting the old full_auto value."""
+    normalized = (mode or "manual").strip()
+    if normalized == "full_auto":
+        return "auto"
+    if normalized not in _VALID_ENTRY_MODES:
+        raise ValidationError("entry_mode は manual/auto で指定してください。")
+    return normalized
+
+
+def is_entry_mode_auto(mode: str | None) -> bool:
+    return normalize_entry_mode(mode) == "auto"

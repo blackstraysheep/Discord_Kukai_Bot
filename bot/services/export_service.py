@@ -15,6 +15,7 @@ from sqlalchemy.orm import selectinload
 from bot.models.entry import Entry
 from bot.models.kukai import Kukai, KukaiAdmin
 from bot.models.notification import NotificationLog, NotificationSchedule
+from bot.models.participant import KukaiParticipant
 from bot.models.submission import PublishedSubmission, Submission
 from bot.models.select import OverallSelectComment, Select, SelectComment
 from bot.models.select_rule import SelectLabel
@@ -31,6 +32,10 @@ def _str_to_dt(value: str | None) -> datetime | None:
     if not value:
         return None
     return datetime.fromisoformat(value)
+
+
+def _normalize_entry_mode_value(value: str | None) -> str:
+    return "auto" if value == "full_auto" else (value or "manual")
 
 
 def _serialize_results(results: list[result_service.SubmissionResult]) -> list[dict[str, Any]]:
@@ -69,6 +74,7 @@ async def export_payload(
             selectinload(Kukai.admins),
             selectinload(Kukai.select_labels),
             selectinload(Kukai.entries),
+            selectinload(Kukai.participants),
             selectinload(Kukai.submissions).selectinload(Submission.published),
             selectinload(Kukai.selects).selectinload(Select.comment),
             selectinload(Kukai.overall_comments),
@@ -113,6 +119,7 @@ async def export_payload(
                 "results_at": _dt_to_str(kukai.results_at),
                 "entry_enabled": kukai.entry_enabled,
                 "entry_approval": kukai.entry_approval,
+                "entry_mode": _normalize_entry_mode_value(getattr(kukai, "entry_mode", "manual")),
                 "min_participants": kukai.min_participants,
                 "min_participants_action": kukai.min_participants_action,
                 "submission_min": kukai.submission_min,
@@ -176,6 +183,17 @@ async def export_payload(
                     "updated_at": _dt_to_str(row.updated_at),
                 }
                 for row in sorted(kukai.entries, key=lambda x: x.id)
+            ],
+            "participants": [
+                {
+                    "id": row.id,
+                    "kukai_id": row.kukai_id,
+                    "user_id": row.user_id,
+                    "haigo": row.haigo,
+                    "created_at": _dt_to_str(row.created_at),
+                    "updated_at": _dt_to_str(row.updated_at),
+                }
+                for row in sorted(kukai.participants, key=lambda x: x.id)
             ],
             "submissions": [
                 {
@@ -305,6 +323,7 @@ def payload_to_csv(payload: dict[str, Any]) -> str:
             "admins",
             "select_labels",
             "entries",
+            "participants",
             "submissions",
             "published_submissions",
             "selects",
@@ -380,6 +399,7 @@ async def import_payload(
             results_at=_str_to_dt(source_kukai.get("results_at")),
             entry_enabled=bool(source_kukai.get("entry_enabled", True)),
             entry_approval=bool(source_kukai.get("entry_approval", False)),
+            entry_mode=_normalize_entry_mode_value(source_kukai.get("entry_mode") or "manual"),
             min_participants=int(source_kukai.get("min_participants", 0)),
             min_participants_action=source_kukai.get("min_participants_action") or "admin",
             submission_min=int(source_kukai.get("submission_min", 1)),
@@ -460,6 +480,15 @@ async def import_payload(
                     is_special=bool(row.get("is_special", False)),
                     approved_by=row.get("approved_by"),
                     approved_at=_str_to_dt(row.get("approved_at")),
+                )
+            )
+
+        for row in _require_list(bundle.get("participants"), "participants"):
+            session.add(
+                KukaiParticipant(
+                    kukai_id=kukai.id,
+                    user_id=int(row["user_id"]),
+                    haigo=row.get("haigo"),
                 )
             )
 

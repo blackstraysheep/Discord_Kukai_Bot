@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.models.submission import PublishedSubmission, Submission
 from bot.models.select import OverallSelectComment, Select, SelectComment
-from bot.repositories import entry_repo, submission_repo
+from bot.repositories import entry_repo, participant_repo, submission_repo
 from bot.services.errors import InvalidStateError, NotFoundError, ValidationError
 from bot.state_machine.states import KukaiState
 from bot.utils.text import normalize
@@ -34,6 +34,8 @@ async def submit(
     kukai,
     user_id: int,
     text: str,
+    *,
+    haigo: str | None = None,
 ) -> tuple[Submission, bool]:
     """Register a haiku. Returns (submission, over_limit_warning)."""
     if KukaiState.from_value(kukai.state) != _SUBMISSION_OPEN:
@@ -47,6 +49,8 @@ async def submit(
         entry = await entry_repo.get_by_user(session, kukai.id, user_id)
         if not entry or entry.status != "approved":
             raise InvalidStateError("この句会への参加登録（承認済み）が必要です。")
+    else:
+        await _ensure_participant_profile(session, kukai.id, user_id, haigo=haigo)
 
     current_count = await submission_repo.count_user_submissions(session, kukai.id, user_id)
     over_limit = False
@@ -59,6 +63,32 @@ async def submit(
     session.add(sub)
     await session.flush()
     return sub, over_limit
+
+
+async def get_participant_profile(session: AsyncSession, kukai_id: int, user_id: int):
+    return await participant_repo.get_by_user(session, kukai_id, user_id)
+
+
+async def _ensure_participant_profile(
+    session: AsyncSession,
+    kukai_id: int,
+    user_id: int,
+    *,
+    haigo: str | None,
+) -> None:
+    cleaned = haigo.strip() if haigo else None
+    if cleaned:
+        conflict = await participant_repo.has_haigo_conflict(
+            session, kukai_id, cleaned, exclude_user_id=user_id
+        )
+        if conflict:
+            raise ValidationError("その俳号はこの句会ですでに使われています。別の俳号を指定してください。")
+        entry_conflict = await entry_repo.has_haigo_conflict(
+            session, kukai_id, cleaned, exclude_user_id=user_id
+        )
+        if entry_conflict:
+            raise ValidationError("その俳号はこの句会ですでに使われています。別の俳号を指定してください。")
+    await participant_repo.upsert(session, kukai_id, user_id, haigo=cleaned)
 
 
 async def edit(

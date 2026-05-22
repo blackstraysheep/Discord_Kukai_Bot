@@ -171,9 +171,9 @@ def parse_reminder_spec(value: str, *, line_no: int | None = None) -> dict[str, 
         )
 
     event_type = parts[0].lower()
-    if event_type not in {"entry_close", "submission_close", "selecting_close", "voice_start"}:
+    if event_type not in {"entry_close", "submission_open", "submission_close", "selecting_close", "voice_start"}:
         raise BulkParseError(
-            f"{prefix}event は entry_close/submission_close/selecting_close/voice_start で指定してください。"
+            f"{prefix}event は entry_close/submission_open/submission_close/selecting_close/voice_start で指定してください。"
         )
     try:
         offset_secs = parse_offset(parts[1])

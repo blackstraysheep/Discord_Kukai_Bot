@@ -8,6 +8,7 @@ from sqlalchemy import func, select
 from bot.models.select import Select
 from bot.models.select_rule import SelectLabel
 from bot.models.submission import PublishedSubmission, Submission
+from bot.repositories import participant_repo
 from bot.services import kukai_service, select_service, submission_service, entry_service
 from bot.services.errors import InvalidStateError, NotFoundError, ValidationError
 from bot.state_machine.states import KukaiState
@@ -71,6 +72,34 @@ async def test_submit_normalizes_text(db_session):
     # NFC normalization: combining character sequence → precomposed
     sub, _ = await submission_service.submit(db_session, kukai, user_id=1, text="  春の海  ")
     assert sub.text == "春の海"
+
+
+@pytest.mark.asyncio
+async def test_submit_non_entry_saves_participant_haigo(db_session):
+    kukai = await _make_kukai(db_session, entry_enabled=False)
+    await _advance_to_submission_open(db_session, kukai)
+
+    await submission_service.submit(
+        db_session, kukai, user_id=1, text="春の海", haigo="春風"
+    )
+
+    participant = await participant_repo.get_by_user(db_session, kukai.id, 1)
+    assert participant is not None
+    assert participant.haigo == "春風"
+
+
+@pytest.mark.asyncio
+async def test_submit_non_entry_rejects_duplicate_haigo(db_session):
+    kukai = await _make_kukai(db_session, entry_enabled=False)
+    await _advance_to_submission_open(db_session, kukai)
+
+    await submission_service.submit(
+        db_session, kukai, user_id=1, text="春の海", haigo="春風"
+    )
+    with pytest.raises(ValidationError):
+        await submission_service.submit(
+            db_session, kukai, user_id=2, text="夏の川", haigo="春風"
+        )
 
 
 @pytest.mark.asyncio

@@ -18,17 +18,21 @@ def _utc(days: int) -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(days=days)
 
 
-async def _make_kukai(session, *, entry_enabled: bool = False):
+async def _make_kukai(session, *, entry_enabled: bool = False, **kwargs):
+    entry_close_at = kwargs.pop("entry_close_at", _utc(3) if entry_enabled else None)
+    submission_close_at = kwargs.pop("submission_close_at", _utc(7))
+    selecting_close_at = kwargs.pop("selecting_close_at", _utc(14))
     kukai = await kukai_service.create_kukai(
         session,
         guild_id=1,
         created_by=100,
         channel_id=200,
         title="通知テスト句会",
-        entry_close_at=_utc(3) if entry_enabled else None,
-        submission_close_at=_utc(7),
-        selecting_close_at=_utc(14),
+        entry_close_at=entry_close_at,
+        submission_close_at=submission_close_at,
+        selecting_close_at=selecting_close_at,
         entry_enabled=entry_enabled,
+        **kwargs,
     )
     await session.flush()
     return kukai
@@ -195,7 +199,7 @@ def _patch_deadline_env(monkeypatch, db_session):
     monkeypatch.setattr(database_mod, "get_session", _fake_get_session)
     jobs.set_bot(_FakeBot())
 
-    called = {"channel": [], "admins": []}
+    called = {"channel": [], "admins": [], "submission_open": []}
 
     async def _fake_notify_channel(bot, kukai, message: str):
         called["channel"].append((kukai.id, message))
@@ -206,12 +210,114 @@ def _patch_deadline_env(monkeypatch, db_session):
     monkeypatch.setattr(jobs, "_notify_channel", _fake_notify_channel)
     monkeypatch.setattr(jobs, "_notify_admins", _fake_notify_admins)
 
+    async def _fake_notify_submission_open(*, bot, kukai):
+        called["submission_open"].append(kukai.id)
+
+    monkeypatch.setattr(jobs, "_notify_submission_open", _fake_notify_submission_open)
+
     async def _fake_send_admin_notice(bot, session, kukai, **kwargs):
         called["admins"].append((kukai.id, kwargs))
         return True
 
     monkeypatch.setattr(admin_notice_service, "send_admin_notice", _fake_send_admin_notice)
     return called
+
+
+@pytest.mark.asyncio
+async def test_deadline_job_entry_close_auto_opens_submission_with_approved_entry(
+    db_session, monkeypatch
+):
+    kukai = await _make_kukai(db_session, entry_enabled=True, entry_mode="auto")
+    await entry_service.enter(db_session, kukai, user_id=101, haigo="山田太郎")
+    await db_session.flush()
+
+    called = _patch_deadline_env(monkeypatch, db_session)
+    await jobs.deadline_job(kukai.id, "entry_close")
+
+    assert KukaiState(kukai.state) == KukaiState.SUBMISSION_OPEN
+    assert called["submission_open"] == [kukai.id]
+
+
+@pytest.mark.asyncio
+async def test_deadline_job_entry_close_auto_cancels_without_approved_entries(
+    db_session, monkeypatch
+):
+    kukai = await _make_kukai(db_session, entry_enabled=True, entry_mode="auto")
+    called = _patch_deadline_env(monkeypatch, db_session)
+
+    await jobs.deadline_job(kukai.id, "entry_close")
+
+    assert KukaiState(kukai.state) == KukaiState.CANCELLED
+    assert called["admins"]
+    assert called["channel"]
+
+
+@pytest.mark.asyncio
+async def test_deadline_job_entry_close_auto_waits_for_submission_open_at(
+    db_session, monkeypatch
+):
+    kukai = await _make_kukai(
+        db_session,
+        entry_enabled=True,
+        entry_mode="auto",
+        submission_open_at=_utc(5),
+    )
+    await entry_service.enter(db_session, kukai, user_id=101)
+    await db_session.flush()
+
+    called = _patch_deadline_env(monkeypatch, db_session)
+    await jobs.deadline_job(kukai.id, "entry_close")
+
+    assert KukaiState(kukai.state) == KukaiState.ENTRY_CLOSED
+    assert called["submission_open"] == []
+
+    await jobs.deadline_job(kukai.id, "submission_open")
+
+    assert KukaiState(kukai.state) == KukaiState.SUBMISSION_OPEN
+    assert called["submission_open"] == [kukai.id]
+
+
+@pytest.mark.asyncio
+async def test_deadline_job_submission_open_allows_entry_to_continue_until_entry_close(
+    db_session, monkeypatch
+):
+    kukai = await _make_kukai(
+        db_session,
+        entry_enabled=True,
+        entry_mode="auto",
+        entry_close_at=_utc(7),
+        submission_open_at=_utc(3),
+        submission_close_at=_utc(10),
+        selecting_close_at=_utc(14),
+    )
+    called = _patch_deadline_env(monkeypatch, db_session)
+
+    await jobs.deadline_job(kukai.id, "submission_open")
+    entry = await entry_service.enter(db_session, kukai, user_id=101, haigo="testaro")
+
+    assert KukaiState(kukai.state) == KukaiState.SUBMISSION_OPEN
+    assert entry.status == "approved"
+    assert called["submission_open"] == [kukai.id]
+
+
+@pytest.mark.asyncio
+async def test_deadline_job_entry_close_without_explicit_deadline_does_not_auto_start(
+    db_session, monkeypatch
+):
+    kukai = await _make_kukai(
+        db_session,
+        entry_enabled=True,
+        entry_close_at=None,
+        entry_mode="auto",
+        submission_mode="full_auto",
+    )
+    await entry_service.enter(db_session, kukai, user_id=101)
+    await db_session.flush()
+
+    _patch_deadline_env(monkeypatch, db_session)
+    await jobs.deadline_job(kukai.id, "submission_close")
+
+    assert KukaiState(kukai.state) == KukaiState.ENTRY_OPEN
 
 
 @pytest.mark.asyncio

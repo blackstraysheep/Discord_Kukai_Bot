@@ -14,6 +14,7 @@ from bot.utils.bulk_parser import BulkParseError, parse_reminder_spec
 
 _EVENT_LABELS = {
     "entry_close": "エントリー",
+    "submission_open": "投句開始",
     "submission_close": "投句",
     "selecting_close": "選句",
     "voice_start": "ボイス",

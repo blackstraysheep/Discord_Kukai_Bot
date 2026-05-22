@@ -75,11 +75,28 @@ async def _send_submission_status_message(
 
 
 class SubmitBulkModal(discord.ui.Modal):
-    def __init__(self, kukai_id: int, slots: int) -> None:
+    def __init__(
+        self,
+        kukai_id: int,
+        slots: int,
+        *,
+        collect_haigo: bool = False,
+        current_haigo: str | None = None,
+    ) -> None:
         super().__init__(title="投句（追加）")
         self.kukai_id = kukai_id
         self._inputs: list[discord.ui.TextInput] = []
-        safe_slots = max(1, min(GUI_BULK_LIMIT, slots))
+        self._haigo_input: discord.ui.TextInput | None = None
+        if collect_haigo:
+            self._haigo_input = discord.ui.TextInput(
+                label="俳号（任意）",
+                placeholder="空欄の場合はサーバーの表示名を使用します",
+                required=False,
+                max_length=100,
+                default=current_haigo,
+            )
+            self.add_item(self._haigo_input)
+        safe_slots = max(1, min(GUI_BULK_LIMIT - (1 if collect_haigo else 0), slots))
         for index in range(safe_slots):
             item = discord.ui.TextInput(
                 label=f"俳句{index + 1}",
@@ -107,9 +124,10 @@ class SubmitBulkModal(discord.ui.Modal):
         try:
             async with get_session() as session:
                 kukai = await kukai_service.get_kukai(session, self.kukai_id, interaction.guild.id)
+                haigo = self._haigo_input.value.strip() if self._haigo_input is not None else None
                 for poem in poems:
                     _, over_limit = await submission_service.submit(
-                        session, kukai, interaction.user.id, poem
+                        session, kukai, interaction.user.id, poem, haigo=haigo
                     )
                     accepted += 1
                     if over_limit:
@@ -297,7 +315,23 @@ class SubmissionView(discord.ui.View):
                 ephemeral=True,
             )
             return
-        await interaction.response.send_modal(SubmitBulkModal(self.kukai_id, self._add_slots))
+        collect_haigo = bool(self._kukai is not None and not self._kukai.entry_enabled)
+        current_haigo = None
+        if collect_haigo:
+            assert interaction.guild is not None
+            async with get_session() as session:
+                profile = await submission_service.get_participant_profile(
+                    session, self.kukai_id, interaction.user.id
+                )
+                current_haigo = profile.haigo if profile is not None else None
+        await interaction.response.send_modal(
+            SubmitBulkModal(
+                self.kukai_id,
+                self._add_slots,
+                collect_haigo=collect_haigo,
+                current_haigo=current_haigo,
+            )
+        )
 
     async def _on_edit(self, interaction: discord.Interaction) -> None:
         if not self._subs:

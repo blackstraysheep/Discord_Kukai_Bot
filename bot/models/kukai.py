@@ -9,6 +9,7 @@ from bot.models.base import Base, TimestampMixin
 if TYPE_CHECKING:
     from bot.models.entry import Entry
     from bot.models.notification import NotificationSchedule
+    from bot.models.participant import KukaiParticipant
     from bot.models.submission import Submission
     from bot.models.select import OverallSelectComment, Select
     from bot.models.select_rule import SelectLabel
@@ -43,7 +44,7 @@ class Kukai(Base, TimestampMixin):
     # --- Entry settings ---
     entry_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     entry_approval: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    # 'manual' | 'full_auto' (entry has no semi-auto mode)
+    # 'manual' | 'auto' (legacy 'full_auto' is normalized on writes)
     entry_mode: Mapped[str] = mapped_column(String(20), nullable=False, default="manual")
     min_participants: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     # 'admin' | 'auto_cancel'
@@ -94,6 +95,9 @@ class Kukai(Base, TimestampMixin):
     )
     entries: Mapped[list["Entry"]] = relationship(
         "Entry", back_populates="kukai", cascade="all, delete-orphan"
+    )
+    participants: Mapped[list["KukaiParticipant"]] = relationship(
+        "KukaiParticipant", back_populates="kukai", cascade="all, delete-orphan"
     )
     submissions: Mapped[list["Submission"]] = relationship(
         "Submission", back_populates="kukai", cascade="all, delete-orphan"

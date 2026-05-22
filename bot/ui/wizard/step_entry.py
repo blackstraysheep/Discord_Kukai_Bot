@@ -16,7 +16,7 @@ def build(state: WizardState) -> tuple[discord.Embed, discord.ui.View]:
     enabled_str = "✅ 有効（エントリー制）" if state.entry_enabled else "🚫 無効（全員参加可）"
     if state.entry_enabled:
         approval_str = "✅ 要" if state.entry_approval else "🚫 不要（自動承認）"
-        mode_str = "全自動" if state.entry_mode == "full_auto" else "手動"
+        mode_str = "自動" if state.entry_mode in {"auto", "full_auto"} else "手動"
     else:
         approval_str = "（エントリー無効時は常に不要）"
         mode_str = "（エントリー無効時は適用外）"
@@ -103,9 +103,9 @@ class _EntryModeSelect(discord.ui.Select):
                     default=state.entry_mode == "manual",
                 ),
                 discord.SelectOption(
-                    label="全自動（締切時刻に成立判定）",
-                    value="full_auto",
-                    default=state.entry_mode == "full_auto",
+                    label="自動（締切時刻に成立判定）",
+                    value="auto",
+                    default=state.entry_mode in {"auto", "full_auto"},
                 ),
             ],
             row=2,

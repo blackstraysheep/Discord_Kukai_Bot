@@ -28,9 +28,10 @@ _DEFAULT_OFFSETS: list[tuple[str, int]] = [
 
 _EVENT_ORDER = {
     "entry_close": 1,
-    "submission_close": 2,
-    "selecting_close": 3,
-    "voice_start": 4,
+    "submission_open": 2,
+    "submission_close": 3,
+    "selecting_close": 4,
+    "voice_start": 5,
 }
 
 
@@ -40,20 +41,26 @@ def _stage_order(kukai) -> int:
         return 0
     if state in {KukaiState.ENTRY_OPEN, KukaiState.ENTRY_CLOSED}:
         return 1
-    if state in {KukaiState.SUBMISSION_OPEN, KukaiState.SUBMISSION_CLOSED, KukaiState.WAITING_PUBLISH}:
+    if state == KukaiState.SUBMISSION_OPEN:
         return 2
-    if state in {KukaiState.SELECTING_OPEN, KukaiState.SELECTING_CLOSED}:
+    if state in {KukaiState.SUBMISSION_CLOSED, KukaiState.WAITING_PUBLISH}:
         return 3
-    return 4
+    if state in {KukaiState.SELECTING_OPEN, KukaiState.SELECTING_CLOSED}:
+        return 4
+    return 5
 
 
 def _is_past_event(kukai, event_type: str) -> bool:
+    if event_type == "submission_open":
+        return _stage_order(kukai) >= _EVENT_ORDER["submission_open"]
     return _EVENT_ORDER.get(event_type, 99) < _stage_order(kukai)
 
 
 def _get_deadline_dt(kukai, event_type: str) -> datetime | None:
     if event_type == "submission_close":
         return kukai.submission_close_at
+    if event_type == "submission_open":
+        return getattr(kukai, "submission_open_at", None)
     if event_type == "selecting_close":
         return kukai.selecting_close_at
     if event_type == "entry_close":
@@ -174,6 +181,7 @@ async def schedule_kukai_jobs(session: AsyncSession, kukai) -> None:
     # Schedule deadline jobs
     for event_type, deadline_dt in [
         ("entry_close", kukai.entry_close_at),
+        ("submission_open", kukai.submission_open_at),
         ("submission_close", kukai.submission_close_at),
         ("selecting_close", kukai.selecting_close_at),
     ]:
@@ -211,7 +219,7 @@ async def cancel_kukai_jobs(session: AsyncSession, kukai_id: int) -> None:
             except JobLookupError:
                 pass
 
-    for event_type in ("entry_close", "submission_close", "selecting_close"):
+    for event_type in ("entry_close", "submission_open", "submission_close", "selecting_close"):
         job_id = f"deadline_{kukai_id}_{event_type}"
         try:
             scheduler.remove_job(job_id)

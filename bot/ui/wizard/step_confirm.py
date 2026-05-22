@@ -34,7 +34,7 @@ def build(state: WizardState) -> tuple[discord.Embed, discord.ui.View]:
 
     sub_str = format_jst(state.submission_close_at) if state.submission_close_at else "未設定"
     selecting_str = format_jst(state.selecting_close_at) if state.selecting_close_at else "未設定"
-    entry_mode_labels = {"manual": "手動", "full_auto": "全自動"}
+    entry_mode_labels = {"manual": "手動", "auto": "自動", "full_auto": "自動"}
     sub_mode_labels = {"manual": "手動", "semi_auto": "半自動", "full_auto": "全自動"}
     if state.entry_enabled:
         entry_str = format_jst(state.entry_close_at) if state.entry_close_at else "未設定"
@@ -163,7 +163,7 @@ class StepConfirmView(discord.ui.View):
         await interaction.response.defer(ephemeral=True)
         state = self.state
         state.result_mode = "manual" if state.selecting_mode == "manual" else "auto"
-        entry_mode_labels = {"manual": "手動", "full_auto": "全自動"}
+        entry_mode_labels = {"manual": "手動", "auto": "自動", "full_auto": "自動"}
         sub_mode_labels = {"manual": "手動", "semi_auto": "半自動", "full_auto": "全自動"}
         guild = interaction.guild
         assert guild is not None

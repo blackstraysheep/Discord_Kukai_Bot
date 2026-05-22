@@ -7,7 +7,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from bot.database import get_session
-from bot.repositories import entry_repo, select_repo
+from bot.repositories import entry_repo, participant_repo, select_repo
 from bot.services import kukai_service, permission_service, result_service
 from bot.services.errors import ServiceError
 from bot.state_machine.states import KukaiState
@@ -233,6 +233,14 @@ async def _load_display_names(session, kukai_id: int, guild: discord.Guild) -> d
     for entry in entries:
         member = guild.get_member(entry.user_id)
         names[entry.user_id] = entry.haigo or (member.display_name if member else f"UID:{entry.user_id}")
+    participants = await participant_repo.list_by_kukai(session, kukai_id)
+    for participant in participants:
+        if participant.user_id in names:
+            continue
+        member = guild.get_member(participant.user_id)
+        names[participant.user_id] = participant.haigo or (
+            member.display_name if member else f"UID:{participant.user_id}"
+        )
     return names
 
 
