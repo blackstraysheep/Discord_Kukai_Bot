@@ -124,6 +124,7 @@ class PdfCog(commands.Cog):
     @app_commands.describe(
         kukai_id="句会ID（省略時はチャンネルから自動解決）",
         show_author="作者名を表示するか（デフォルト: True）",
+        show_reviewer="選評者名を表示するか（デフォルト: True）",
         theme="テーマ名（デフォルト: default）",
         public="チャンネルに投稿するか（管理者のみ・デフォルト: False）",
     )
@@ -132,6 +133,7 @@ class PdfCog(commands.Cog):
         interaction: discord.Interaction,
         kukai_id: int | None = None,
         show_author: bool = True,
+        show_reviewer: bool = True,
         theme: str = "default",
         public: bool = False,
     ) -> None:
@@ -168,6 +170,7 @@ class PdfCog(commands.Cog):
                     kukai,
                     interaction.guild,
                     show_author=show_author,
+                    show_reviewer=show_reviewer,
                     theme=theme,
                 )
                 kid = kukai.id

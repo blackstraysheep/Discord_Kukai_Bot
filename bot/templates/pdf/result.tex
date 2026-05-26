@@ -1,0 +1,99 @@
+\documentclass[a4paper,tate]{ltjtarticle}
+\usepackage[no-math,deluxe,expert]{luatexja-preset}
+\usepackage{geometry}
+\usepackage{multicol}
+\usepackage{kintou}
+
+\pagestyle{empty}
+\geometry{top=18mm,bottom=18mm,left=16mm,right=16mm}
+\setlength{\parindent}{0pt}
+\setlength{\columnsep}{2.5\zw}
+\setlength{\columnseprule}{.3pt}
+\setlength{\multicolsep}{0pt}
+\renewcommand{\baselinestretch}{1.05}
+
+\newcommand{\resulttitle}[3]{%
+  {\gtfamily\Large #1　結果}\par
+  \vspace{.7\baselineskip}
+  {\small #2\quad 参加者：#3}\par
+  \vspace{1.2\baselineskip}
+}
+
+\newcommand{\scoreheading}[1]{%
+  \vspace{.1\baselineskip}
+  {\bfseries\large \rensuji{#1}点句}\par
+  \vspace{.25\baselineskip}
+}
+
+\newcommand{\reviewheading}[1]{%
+  {\gtfamily\small #1}\par
+  \vspace{0\baselineskip}
+}
+
+\newcommand{\reviewer}[1]{%
+  \unskip\nobreak\hfill\hbox{\tate\small ――#1}%
+  \parfillskip=0pt
+}
+
+\newcommand{\reviewtext}[1]{%
+  {\leftskip=2\zw
+  {\small #1}\par}%
+  \vspace{0\baselineskip}
+}
+
+\newcommand{\reviewgroup}[2]{%
+  {\leftskip=1\zw
+  \reviewheading{#1}}%
+  #2%
+  \vspace{0\baselineskip}
+}
+
+\newcommand{\reviewblock}[2]{%
+  \reviewgroup{#1}{\reviewtext{#2}}%
+}
+
+\newcommand{\resultentry}[4]{%
+  {\scriptsize \rensuji{No.#1}}\quad{\large\kintou{17}{#2}}\par
+  \hfill{\small #3}\par
+  #4%
+  \vspace{1\baselineskip}
+}
+
+\begin{document}
+\resulttitle{第21回　Bot句会}{2026年5月22日}{山田太郎・山田花子・山田次郎・山田三郎・山田四郎}
+
+\begin{multicols*}{3}
+\scoreheading{7}
+\resultentry{1}{古池や蛙飛びこむ水の音}{松尾芭蕉}{%
+  \reviewblock{特選}{静けさの中に一瞬の動きが入り、音だけで景が立ち上がるところが見事です。\reviewer{山田三郎}}
+  \reviewgroup{並選}{%
+    \reviewtext{古池の沈黙と水音の対比が鮮やかで、余韻が深い句だと思いました。\reviewer{山田花子}}
+    \reviewtext{小さな音から空間全体が見えてくるところに惹かれました。\reviewer{山田五郎}}
+  }
+}
+\scoreheading{6}
+\resultentry{2}{閑さや岩にしみ入る蝉の声}{松尾芭蕉}{%
+  \reviewblock{並選}{蝉の声を通して静けさを深めているところが印象的です。}
+}
+\scoreheading{5}
+\resultentry{3}{五月雨をあつめて早し最上川}{松尾芭蕉}{%
+  \reviewblock{並選}{雨の蓄積が川の勢いへ変わる展開が大きく、景の動きがよく出ています。}
+}
+\scoreheading{4}
+\resultentry{4}{菜の花や月は東に日は西に}{与謝蕪村}{%
+  \reviewblock{選評}{菜の花の広がりを中心に、月と日の配置まで一息に見える句です。}
+}
+\scoreheading{3}
+\resultentry{5}{春の海終日のたりのたりかな}{与謝蕪村}{%
+  \reviewblock{選評}{ゆるやかな反復が春の海の時間をそのまま感じさせます。}
+}
+\scoreheading{2}
+\resultentry{6}{やせ蛙負けるな一茶これにあり}{小林一茶}{%
+  \reviewblock{選評}{小さなものへ肩入れする視線が明快で、作者の声が強く響きます。}
+}
+\scoreheading{1}
+\resultentry{7}{柿くへば鐘が鳴るなり法隆寺}{正岡子規}{%
+  \reviewblock{選評}{味覚と鐘の音、寺の名が自然につながり、旅の一場面として残ります。}
+}
+\end{multicols*}
+\end{document}

@@ -216,16 +216,18 @@ async def build_result_pdf(
     guild: discord.Guild | None,
     *,
     show_author: bool,
+    show_reviewer: bool,
     theme: str,
 ) -> bytes:
     results = await result_service.compute_results(session, kukai)
     overall_comments = await select_repo.list_overall_comments(session, kukai.id)
-    haigo_map = await _build_haigo_map(session, kukai.id, guild) if show_author else {}
+    haigo_map = await _build_haigo_map(session, kukai.id, guild)
 
     data = {
         "title": kukai.title,
         "kukai_theme": kukai.theme,
         "date": _format_date(kukai),
+        "participants": list(haigo_map.values()),
         "results": [
             {
                 "rank": r.rank,
@@ -241,11 +243,15 @@ async def build_result_pdf(
                             {
                                 "author": haigo_map.get(
                                     c.selector_user_id, f"UID:{c.selector_user_id}"
-                                ),
+                                ) if show_reviewer else None,
                                 "text": c.text,
                             }
                             for c in ls.comments
                         ],
+                        "all_selectors": [
+                            haigo_map.get(uid, f"UID:{uid}")
+                            for uid in ls.selector_user_ids
+                        ] if show_reviewer else [],
                     }
                     for ls in r.label_selects
                 ],
@@ -254,7 +260,7 @@ async def build_result_pdf(
         ],
         "overall_comments": [
             {
-                "author": haigo_map.get(oc.user_id, f"UID:{oc.user_id}"),
+                "author": haigo_map.get(oc.user_id, f"UID:{oc.user_id}") if show_reviewer else None,
                 "text": oc.comment,
             }
             for oc in overall_comments

@@ -39,6 +39,7 @@ class LabelSelects:
     rank_priority: int
     count: int = 0
     comments: list[SelectCommentEntry] = field(default_factory=list)
+    selector_user_ids: list[int] = field(default_factory=list)
 
 
 @dataclass
@@ -101,6 +102,7 @@ async def compute_results(
             if not lbl:
                 continue
             lv_map[selected.select_label_id].count += 1
+            lv_map[selected.select_label_id].selector_user_ids.append(selected.selector_user_id)
             total_score += lbl.point
             if selected.comment:
                 lv_map[selected.select_label_id].comments.append(

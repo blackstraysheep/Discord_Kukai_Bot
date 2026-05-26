@@ -1,65 +1,66 @@
-\documentclass[{{ theme.page.writing_mode }},paper={{ theme.page.paper }},fontsize={{ theme.font.size }}]{jlreq}
-\usepackage{luatexja-fontspec}
-\setmainjfont[BoldFont={{ theme.font.bold }}]{ {{ theme.font.main }} }
+\documentclass[a4paper,tate]{ltjtarticle}
+\usepackage[no-math,deluxe,expert]{luatexja-preset}
+\usepackage{geometry}
+\usepackage{multicol}
+\usepackage{kintou}
 
-\pagestyle{plain}
+\pagestyle{empty}
+\geometry{top=18mm,bottom=18mm,left=16mm,right=16mm}
+\setlength{\parindent}{0pt}
+\setlength{\columnsep}{2.5\zw}
+\setlength{\columnseprule}{.3pt}
+\setlength{\multicolsep}{0pt}
+\renewcommand{\baselinestretch}{1.05}
 
 \begin{document}
 
-%% ヘッダー
-\begin{center}
-{\Large\bfseries {{ title | tex }}\quad 結果}\\[1\zh]
-{%- if kukai_theme %}
-兼題\quad {{ kukai_theme | tex }}\\[0.5\zh]
-{%- endif %}
-{{ date }}
-\end{center}
+%% タイトル
+{\gtfamily\Large {{ title | tex }}　結果}\par
+\vspace{.7\baselineskip}
+{\small {{ date }}{% if kukai_theme %}\quad 兼題：{{ kukai_theme | tex }}{% endif %}{% if participants %}\quad 参加者：{% for p in participants %}{{ p | tex }}{% if not loop.last %}・{% endif %}{% endfor %}{% endif %}}\par
+\vspace{1.2\baselineskip}
 
-\bigskip
-\noindent\rule{\linewidth}{0.4pt}
-\bigskip
+\begin{multicols*}{3}
 
-%% 結果一覧
-{% for r in results -%}
-%% --- {{ r.rank }}位 ---
-\noindent
-{\normalsize \tatechuyoko{ {{ r.rank }} }位\quad \tatechuyoko{ {{ r.score }} }点\quad No.\tatechuyoko{ {{ r.number }} }}\\[0.3\zh]
-{\large\bfseries {{ r.text | tex }}}%
-{% if r.author -%}
-\hfill{\small {{ r.author | tex }}}%
-{%- endif %}
-\par\smallskip
+{% set ns = namespace(last_score=None) %}
+{% for r in results %}
+{%- if r.score != ns.last_score %}
+{% set ns.last_score = r.score %}
+\vspace{.1\baselineskip}
+{\bfseries\large \rensuji{ {{ r.score }} }点句}\par
+\vspace{.25\baselineskip}
+{% endif %}
 
-%% 得票サマリ
-{% if r.label_selects -%}
-\noindent{\small
-{%- for ls in r.label_selects %}
-{{ ls.label | tex }}\(\times\)\tatechuyoko{ {{ ls.count }} }\quad
-{%- endfor %}
-}\par\smallskip
+%% 句
+{\scriptsize \rensuji{No.{{ r.number }}}}\quad{\large\kintou{17}{ {{- r.text | tex -}} }}\par
+{%- if r.author %}
+\hfill{\small {{ r.author | tex }}}\par
 {%- endif %}
 
-%% 選評コメント
-{% for ls in r.label_selects -%}
-{% for c in ls.comments -%}
-\noindent{\small 【{{ ls.label | tex }}】{{ c.author | tex }}：{{ c.text | tex }}}\par
-{% endfor -%}
+%% 選評
+{% for ls in r.label_selects %}{% if ls.count %}
+{\leftskip=1\zw{\gtfamily\small {{ ls.label | tex }}\quad\rensuji{ {{ ls.count }} }}{% if ls.all_selectors %}{\mcfamily\small （{% for name in ls.all_selectors %}{{ name | tex }}{% if not loop.last %}・{% endif %}{% endfor %}）}{% endif %}\par}%
+{% for c in ls.comments %}
+{\leftskip=2\zw{\small {{ c.text | tex }}{% if c.author %}\unskip\nobreak\hfill\hbox{\tate\small ――{{ c.author | tex }}}\parfillskip=0pt{% endif %}}\par}%
+{% endfor %}
+{% endif %}{% endfor %}
+\vspace{1\baselineskip}
 {% endfor %}
 
-\noindent\rule{\linewidth}{0.2pt}
-\addvspace{2\zh}
-{% endfor %}
-
-{% if overall_comments -%}
 %% 総評
-\bigskip
-\noindent\rule{\linewidth}{0.4pt}
-\bigskip
-\noindent{\large\bfseries 総評}\par\medskip
-{% for oc in overall_comments -%}
-\noindent{\small\bfseries {{ oc.author | tex }}：}\par
-\noindent{{ oc.text | tex }}\par\medskip
+{% if overall_comments %}
+\vspace{.5\baselineskip}
+\noindent\rule{\linewidth}{.3pt}\par
+\vspace{.5\baselineskip}
+{\gtfamily\large 総評}\par
+\vspace{.5\baselineskip}
+{% for oc in overall_comments %}
+{\leftskip=1\zw
+{\bfseries\small {% if oc.author %}{{ oc.author | tex }}{% endif %}}\par
+{\small {{ oc.text | tex }}}\par}%
+\vspace{.5\baselineskip}
 {% endfor %}
-{%- endif %}
+{% endif %}
 
+\end{multicols*}
 \end{document}
