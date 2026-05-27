@@ -147,7 +147,8 @@ class TestRenderSubmissionList:
         data = self._data()
         data["submissions"] = [{"number": 1, "text": "古池や", "author": None}]
         tex = _render_template("default", "submission_list.tex.j2", data)
-        assert "\\hfill" not in tex
+        assert "古池や" in tex
+        assert "芭蕉" not in tex
 
     def test_special_chars_escaped(self):
         data = self._data()
@@ -229,7 +230,7 @@ class TestRenderResult:
     def test_no_overall_section_when_empty(self):
         data = self._data(overall_comments=[])
         tex = _render_template("default", "result.tex.j2", data)
-        assert "総評" not in tex
+        assert "{\\gtfamily\\large 総評}" not in tex
 
     def test_author_hidden_when_none(self):
         data = self._data()

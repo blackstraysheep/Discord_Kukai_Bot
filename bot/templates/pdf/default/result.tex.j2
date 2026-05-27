@@ -32,7 +32,7 @@
 {% endif %}
 
 %% 句
-{\scriptsize \rensuji{No.{{ r.number }}}}\quad{\large\kintou{17}{ {{- r.text | tex -}} }}\par
+{\scriptsize 第\rensuji{ {{ r.rank }} }位\quad No.\rensuji{ {{ r.number }} }}\quad{\large\kintou{17}{ {{- r.text | tex -}} }}\par
 {%- if r.author %}
 \hfill{\small {{ r.author | tex }}}\par
 {%- endif %}
@@ -47,8 +47,8 @@
 \vspace{1\baselineskip}
 {% endfor %}
 
-%% 総評
 {% if overall_comments %}
+%% 総評
 \vspace{.5\baselineskip}
 \noindent\rule{\linewidth}{.3pt}\par
 \vspace{.5\baselineskip}
