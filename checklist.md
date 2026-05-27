@@ -6,7 +6,7 @@ THIS DOCUMENT IS NOT FOR CODING AGENT(S) TO CHECK; IT IS FOR MANUAL CHECK. FOR A
 
 - ボタン位置
 - proceedの使い勝手が悪い（現在および次のstateがわかるべき、state指定できるようになるべき）
-- id途中変更時の対応
+
 - 選句モーダルの編集
 
 - Shard対応可能な設計
@@ -18,7 +18,7 @@ THIS DOCUMENT IS NOT FOR CODING AGENT(S) TO CHECK; IT IS FOR MANUAL CHECK. FOR A
 
 
 ＊＊＊要確認＊＊＊
-
+- id途中変更時の対応
 - エントリー締め切りも自動進行、手動進行の区別をつけたい。これに関しては半自動はなくていいか。自動進行の場合、エントリー人数が1人以上いないと句会不成立。
 
 - editで過去の時間に締め切りを設定できてしまう
