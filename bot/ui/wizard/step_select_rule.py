@@ -69,7 +69,7 @@ def build(state: WizardState) -> tuple[discord.Embed, discord.ui.View]:
         embed.add_field(name="選句種別", value="\n".join(lines[:12]), inline=False)
     embed.set_footer(
         text="プリセットを選んだあと「選句数・コメント設定」で句会ごとのカスタマイズができます。"
-        " プリセット管理は /preset コマンドで行います。"
+        " プリセット管理は /select-preset コマンドで行います。"
     )
     return embed, StepSelectRuleView(state)
 
