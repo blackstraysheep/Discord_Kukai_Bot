@@ -50,6 +50,7 @@ class WizardState:
     selecting_mode: str = "manual"
     publish_mode: str = "manual"
     result_mode: str = "manual"
+    author_publication_mode: str = "with_result"
     author_reveal: bool = True
     author_reveal_zero: bool = True
 

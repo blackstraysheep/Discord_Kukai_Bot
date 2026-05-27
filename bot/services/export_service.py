@@ -133,6 +133,7 @@ async def export_payload(
                 "points_enabled": kukai.points_enabled,
                 "publish_mode": kukai.publish_mode,
                 "result_mode": kukai.result_mode,
+                "author_publication_mode": kukai.author_publication_mode,
                 "author_reveal": kukai.author_reveal,
                 "author_reveal_zero": kukai.author_reveal_zero,
                 "result_display_default": kukai.result_display_default,
@@ -425,6 +426,10 @@ async def import_payload(
             points_enabled=bool(source_kukai.get("points_enabled", True)),
             publish_mode=source_kukai.get("publish_mode") or "manual",
             result_mode=source_kukai.get("result_mode") or "manual",
+            author_publication_mode=(
+                source_kukai.get("author_publication_mode")
+                or ("with_result" if bool(source_kukai.get("author_reveal", True)) else "never")
+            ),
             author_reveal=bool(source_kukai.get("author_reveal", True)),
             author_reveal_zero=bool(source_kukai.get("author_reveal_zero", True)),
             result_display_default=source_kukai.get("result_display_default") or "score",

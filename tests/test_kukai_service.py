@@ -65,6 +65,46 @@ async def test_create_kukai_can_set_submission_max_unlimited(db_session):
 
 
 @pytest.mark.asyncio
+async def test_create_kukai_manual_author_publication_keeps_zero_policy(db_session):
+    kukai = await kukai_service.create_kukai(
+        db_session,
+        guild_id=1,
+        created_by=100,
+        channel_id=200,
+        title="作者後公開句会",
+        entry_close_at=_utc(3),
+        submission_close_at=_utc(7),
+        selecting_close_at=_utc(14),
+        author_publication_mode="manual",
+        author_reveal_zero=False,
+    )
+
+    assert kukai.author_publication_mode == "manual"
+    assert kukai.author_reveal is False
+    assert kukai.author_reveal_zero is False
+
+
+@pytest.mark.asyncio
+async def test_create_kukai_never_author_publication_disables_zero_policy(db_session):
+    kukai = await kukai_service.create_kukai(
+        db_session,
+        guild_id=1,
+        created_by=100,
+        channel_id=200,
+        title="作者非公開句会",
+        entry_close_at=_utc(3),
+        submission_close_at=_utc(7),
+        selecting_close_at=_utc(14),
+        author_publication_mode="never",
+        author_reveal_zero=False,
+    )
+
+    assert kukai.author_publication_mode == "never"
+    assert kukai.author_reveal is False
+    assert kukai.author_reveal_zero is True
+
+
+@pytest.mark.asyncio
 async def test_create_kukai_deadline_conflict(db_session):
     with pytest.raises(DeadlineConflictError):
         await kukai_service.create_kukai(

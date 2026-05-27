@@ -51,7 +51,8 @@ async def test_edit_kukai_updates_fields_and_deadlines(db_session):
         submission_mode="semi_auto",
         publish_mode="auto",
         result_mode="manual",
-        author_reveal=False,
+        author_publication_mode="manual",
+        author_reveal_zero=False,
     )
 
     assert changed is True
@@ -63,7 +64,9 @@ async def test_edit_kukai_updates_fields_and_deadlines(db_session):
     assert kukai.submission_mode == "semi_auto"
     assert kukai.publish_mode == "auto"
     assert kukai.result_mode == "manual"
+    assert kukai.author_publication_mode == "manual"
     assert kukai.author_reveal is False
+    assert kukai.author_reveal_zero is False
 
 
 @pytest.mark.asyncio

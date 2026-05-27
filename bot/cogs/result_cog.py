@@ -245,9 +245,18 @@ async def _load_display_names(session, kukai_id: int, guild: discord.Guild) -> d
 
 
 def build_result_entry_embed(kukai, *, result_count: int) -> discord.Embed:
+    author_mode = getattr(kukai, "author_publication_mode", "with_result")
+    if getattr(kukai, "author_reveal", False):
+        author_note = "作者も公開されています。"
+    elif author_mode == "manual":
+        author_note = "作者はまだ公開されていません。管理者が後で公開できます。"
+    elif author_mode == "never":
+        author_note = "作者は公開されません。"
+    else:
+        author_note = "作者は公開されていません。"
     embed = discord.Embed(
         title=f"🏆 選句結果 — {kukai.title}",
-        description="結果を見るボタンから個別に表示できます。",
+        description=f"結果を見るボタンから個別に表示できます。\n{author_note}",
         color=COLOR_RESULT,
     )
     embed.set_footer(text=f"句会 ID: {kukai.id}　|　全 {result_count} 句")

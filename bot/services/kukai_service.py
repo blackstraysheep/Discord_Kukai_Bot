@@ -37,6 +37,24 @@ _VALID_ENTRY_MODES = {"manual", "auto"}
 _VALID_SELECTING_MODES = {"manual", "semi_auto", "full_auto"}
 _VALID_PUBLISH_MODES = {"manual", "auto"}
 _VALID_RESULT_MODES = {"manual", "auto"}
+_VALID_AUTHOR_PUBLICATION_MODES = {"with_result", "manual", "never"}
+
+AUTHOR_PUBLICATION_LABELS = {
+    "with_result": "結果公開と同時に作者を公開",
+    "manual": "結果公開後に作者を手動公開",
+    "never": "作者公開はしない",
+}
+
+
+def author_publication_label(mode: str | None) -> str:
+    return AUTHOR_PUBLICATION_LABELS.get(str(mode), str(mode))
+
+
+def _normalize_author_publication_mode(mode: str | None) -> str:
+    normalized = mode or "with_result"
+    if normalized not in _VALID_AUTHOR_PUBLICATION_MODES:
+        raise ValidationError("author_publication_mode は with_result/manual/never で指定してください。")
+    return normalized
 
 
 async def create_kukai(
@@ -65,14 +83,22 @@ async def create_kukai(
     points_enabled: bool = True,
     publish_mode: str = "manual",
     result_mode: str = "manual",
-    author_reveal: bool = True,
+    author_publication_mode: str = "with_result",
+    author_reveal: bool | None = None,
     author_reveal_zero: bool = True,
     select_label_specs: list[dict] | None = None,
 ) -> Kukai:
     if not entry_enabled:
         entry_approval = False
         entry_mode = "manual"
-    if not author_reveal:
+    if author_reveal is not None and author_publication_mode == "with_result" and not author_reveal:
+        author_publication_mode = "never"
+    author_publication_mode = _normalize_author_publication_mode(author_publication_mode)
+    if author_reveal is None:
+        author_reveal = author_publication_mode == "with_result"
+    if author_publication_mode in {"manual", "never"}:
+        author_reveal = False
+    if author_publication_mode == "never":
         author_reveal_zero = True
 
     entry_mode = normalize_entry_mode(entry_mode)
@@ -104,6 +130,7 @@ async def create_kukai(
         submission_overflow=submission_overflow,
         publish_mode=publish_mode,
         result_mode=result_mode,
+        author_publication_mode=author_publication_mode,
         points_enabled=points_enabled,
         author_reveal=author_reveal,
         author_reveal_zero=author_reveal_zero,
@@ -253,6 +280,7 @@ async def edit_kukai(
     selecting_mode: str | None = None,
     publish_mode: str | None = None,
     result_mode: str | None = None,
+    author_publication_mode: str | None = None,
     author_reveal: bool | None = None,
     author_reveal_zero: bool | None = None,
 ) -> bool:
@@ -310,9 +338,21 @@ async def edit_kukai(
             raise ValidationError("result_mode は manual/auto で指定してください。")
         kukai.result_mode = result_mode
 
+    if author_publication_mode is not None:
+        mode = _normalize_author_publication_mode(author_publication_mode)
+        kukai.author_publication_mode = mode
+        if mode == "with_result":
+            kukai.author_reveal = True
+        elif mode in {"manual", "never"}:
+            kukai.author_reveal = False
+
     if author_reveal is not None:
         kukai.author_reveal = author_reveal
-        if not author_reveal:
+        if author_reveal and kukai.author_publication_mode == "never":
+            kukai.author_publication_mode = "manual"
+        elif not author_reveal and kukai.author_publication_mode == "with_result":
+            kukai.author_publication_mode = "never"
+        if not author_reveal and kukai.author_publication_mode == "never":
             kukai.author_reveal_zero = True
     if author_reveal_zero is not None:
         kukai.author_reveal_zero = author_reveal_zero
@@ -320,7 +360,7 @@ async def edit_kukai(
     if not kukai.entry_enabled:
         kukai.entry_approval = False
         kukai.entry_mode = "manual"
-    if not kukai.author_reveal:
+    if kukai.author_publication_mode == "never":
         kukai.author_reveal_zero = True
 
     if submission_max_unlimited and submission_max is not None:

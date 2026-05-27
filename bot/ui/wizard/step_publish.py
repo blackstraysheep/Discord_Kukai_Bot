@@ -1,4 +1,4 @@
-"""Wizard step 6: Progress mode + author reveal settings."""
+"""Wizard step 6: Progress mode + author publication settings."""
 
 from __future__ import annotations
 
@@ -8,29 +8,32 @@ from bot.ui.wizard.base import STEP_COUNT, cancel_wizard, goto_step
 from bot.ui.wizard.wizard_state import WizardState, set_wizard
 
 
-def _sync_result_mode(state: WizardState) -> None:
-    state.result_mode = "manual" if state.selecting_mode == "manual" else "auto"
+AUTHOR_PUBLICATION_LABELS = {
+    "with_result": "結果公開と同時に作者を公開",
+    "manual": "結果公開後に作者を手動公開",
+    "never": "作者公開はしない",
+}
 
 
 def build(state: WizardState) -> tuple[discord.Embed, discord.ui.View]:
-    _sync_result_mode(state)
     mode_ja = {"manual": "手動", "semi_auto": "半自動", "full_auto": "全自動"}
     submission_mode = mode_ja.get(state.submission_mode, state.submission_mode)
     selecting_mode = mode_ja.get(state.selecting_mode, state.selecting_mode)
-    result_str = "手動" if state.result_mode == "manual" else "自動（選句進行に連動）"
-    reveal_str = "公開" if state.author_reveal else "非公開"
-    if state.author_reveal:
-        zero_reveal_str = "公開" if state.author_reveal_zero else "非公開"
+    author_mode = AUTHOR_PUBLICATION_LABELS.get(
+        state.author_publication_mode,
+        state.author_publication_mode,
+    )
+    if state.author_publication_mode == "never":
+        zero_reveal_str = "適用外"
     else:
-        zero_reveal_str = "（作者非公開時は適用外）"
+        zero_reveal_str = "公開" if state.author_reveal_zero else "非公開"
     embed = discord.Embed(
         title=f"ステップ 6/{STEP_COUNT}: 公開・結果設定",
         color=discord.Color.blurple(),
     )
     embed.add_field(name="投句進行モード", value=submission_mode, inline=True)
     embed.add_field(name="選句進行モード", value=selecting_mode, inline=True)
-    embed.add_field(name="結果公開モード", value=result_str, inline=False)
-    embed.add_field(name="作者公開", value=reveal_str, inline=True)
+    embed.add_field(name="作者公開設定", value=author_mode, inline=False)
     embed.add_field(name="0点以下作者", value=zero_reveal_str, inline=True)
     return embed, StepPublishView(state)
 
@@ -94,35 +97,40 @@ class _SelectingModeSelect(discord.ui.Select):
 
     async def callback(self, interaction: discord.Interaction) -> None:
         self.state.selecting_mode = self.values[0]
-        _sync_result_mode(self.state)
         set_wizard(self.state)
         embed, view = build(self.state)
         await interaction.response.edit_message(embed=embed, view=view)
 
 
-class _AuthorRevealSelect(discord.ui.Select):
+class _AuthorPublicationModeSelect(discord.ui.Select):
     def __init__(self, state: WizardState) -> None:
         self.state = state
         super().__init__(
             placeholder="作者公開設定",
             options=[
                 discord.SelectOption(
-                    label="公開（結果時に作者名を表示）",
-                    value="true",
-                    default=state.author_reveal,
+                    label="結果公開と同時に作者を公開",
+                    value="with_result",
+                    default=state.author_publication_mode == "with_result",
                 ),
                 discord.SelectOption(
-                    label="非公開（作者名を隠す）",
-                    value="false",
-                    default=not state.author_reveal,
+                    label="結果公開後に作者を手動公開",
+                    value="manual",
+                    default=state.author_publication_mode == "manual",
+                ),
+                discord.SelectOption(
+                    label="作者公開はしない",
+                    value="never",
+                    default=state.author_publication_mode == "never",
                 ),
             ],
             row=2,
         )
 
     async def callback(self, interaction: discord.Interaction) -> None:
-        self.state.author_reveal = self.values[0] == "true"
-        if not self.state.author_reveal:
+        self.state.author_publication_mode = self.values[0]
+        self.state.author_reveal = self.state.author_publication_mode == "with_result"
+        if self.state.author_publication_mode == "never":
             self.state.author_reveal_zero = True
         set_wizard(self.state)
         embed, view = build(self.state)
@@ -132,10 +140,10 @@ class _AuthorRevealSelect(discord.ui.Select):
 class _AuthorRevealZeroSelect(discord.ui.Select):
     def __init__(self, state: WizardState) -> None:
         self.state = state
-        if not state.author_reveal:
+        if state.author_publication_mode == "never":
             options = [
                 discord.SelectOption(
-                    label="適用外（作者非公開）",
+                    label="適用外（作者公開なし）",
                     value="n/a",
                     default=True,
                 )
@@ -155,15 +163,15 @@ class _AuthorRevealZeroSelect(discord.ui.Select):
             ]
         super().__init__(
             placeholder="0点以下作者の公開",
-            disabled=not state.author_reveal,
+            disabled=state.author_publication_mode == "never",
             options=options,
             row=3,
         )
 
     async def callback(self, interaction: discord.Interaction) -> None:
-        if not self.state.author_reveal:
+        if self.state.author_publication_mode == "never":
             await interaction.response.send_message(
-                "作者非公開時は0点以下作者の設定は変更できません。", ephemeral=True
+                "作者公開なしの場合は0点以下作者の設定は変更できません。", ephemeral=True
             )
             return
         self.state.author_reveal_zero = self.values[0] == "true"
@@ -178,52 +186,26 @@ class StepPublishView(discord.ui.View):
         self.state = state
         self.add_item(_SubmissionModeSelect(state))
         self.add_item(_SelectingModeSelect(state))
-        self.add_item(_AuthorRevealSelect(state))
-
-        zero_label = (
-            "0点以下作者: 公開"
-            if state.author_reveal and state.author_reveal_zero
-            else "0点以下作者: 非公開"
-        )
-        if not state.author_reveal:
-            zero_label = "0点以下作者: 適用外"
-        zero_btn = discord.ui.Button(
-            label=zero_label,
-            style=discord.ButtonStyle.primary,
-            row=3,
-            disabled=not state.author_reveal,
-        )
-        zero_btn.callback = self._toggle_author_reveal_zero
-        self.add_item(zero_btn)
+        self.add_item(_AuthorPublicationModeSelect(state))
+        self.add_item(_AuthorRevealZeroSelect(state))
 
         back_btn = discord.ui.Button(
-            label="← 戻る", style=discord.ButtonStyle.secondary, row=3
+            label="← 戻る", style=discord.ButtonStyle.secondary, row=4
         )
         back_btn.callback = self._back
         self.add_item(back_btn)
 
         next_btn = discord.ui.Button(
-            label="次へ ➜", style=discord.ButtonStyle.success, row=3
+            label="次へ ➜", style=discord.ButtonStyle.success, row=4
         )
         next_btn.callback = self._next
         self.add_item(next_btn)
 
         cancel_btn = discord.ui.Button(
-            label="❌ キャンセル", style=discord.ButtonStyle.danger, row=3
+            label="❌ キャンセル", style=discord.ButtonStyle.danger, row=4
         )
         cancel_btn.callback = self._cancel
         self.add_item(cancel_btn)
-
-    async def _toggle_author_reveal_zero(self, interaction: discord.Interaction) -> None:
-        if not self.state.author_reveal:
-            await interaction.response.send_message(
-                "作者非公開時は0点以下作者の設定は変更できません。", ephemeral=True
-            )
-            return
-        self.state.author_reveal_zero = not self.state.author_reveal_zero
-        set_wizard(self.state)
-        embed, view = build(self.state)
-        await interaction.response.edit_message(embed=embed, view=view)
 
     async def _back(self, interaction: discord.Interaction) -> None:
         self.state.step = 5

@@ -69,6 +69,8 @@ class Kukai(Base, TimestampMixin):
     # 'auto' | 'manual'
     publish_mode: Mapped[str] = mapped_column(String(10), nullable=False, default="manual")
     result_mode: Mapped[str] = mapped_column(String(10), nullable=False, default="manual")
+    # 'with_result' | 'manual' | 'never'
+    author_publication_mode: Mapped[str] = mapped_column(String(20), nullable=False, default="with_result")
     author_reveal: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     # Whether to show authors whose total score <= 0
     author_reveal_zero: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)

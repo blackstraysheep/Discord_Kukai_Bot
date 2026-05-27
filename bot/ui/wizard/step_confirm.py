@@ -18,6 +18,11 @@ from bot.utils.datetime_utils import format_jst
 from bot.utils.embed_builder import COLOR_INFO, COLOR_SUCCESS, build_select_summary, error_embed
 
 logger = logging.getLogger(__name__)
+AUTHOR_PUBLICATION_LABELS = {
+    "with_result": "結果公開と同時に作者を公開",
+    "manual": "結果公開後に作者を手動公開",
+    "never": "作者公開はしない",
+}
 
 
 def build(state: WizardState) -> tuple[discord.Embed, discord.ui.View]:
@@ -76,9 +81,8 @@ def build(state: WizardState) -> tuple[discord.Embed, discord.ui.View]:
     embed.add_field(
         name="進行・公開設定",
         value=(
-            f"結果: {'自動' if state.result_mode == 'auto' else '手動'}"
-            f"　作者: {'公開' if state.author_reveal else '非公開'}"
-            f"　0点以下作者: {('公開' if state.author_reveal_zero else '非公開') if state.author_reveal else '適用外'}"
+            f"作者公開設定: {AUTHOR_PUBLICATION_LABELS.get(state.author_publication_mode, state.author_publication_mode)}"
+            f"　0点以下作者: {('適用外' if state.author_publication_mode == 'never' else ('公開' if state.author_reveal_zero else '非公開'))}"
         ),
         inline=False,
     )
@@ -162,7 +166,6 @@ class StepConfirmView(discord.ui.View):
     async def _confirm(self, interaction: discord.Interaction) -> None:
         await interaction.response.defer(ephemeral=True)
         state = self.state
-        state.result_mode = "manual" if state.selecting_mode == "manual" else "auto"
         entry_mode_labels = {"manual": "手動", "auto": "自動", "full_auto": "自動"}
         sub_mode_labels = {"manual": "手動", "semi_auto": "半自動", "full_auto": "全自動"}
         guild = interaction.guild
@@ -263,8 +266,7 @@ class StepConfirmView(discord.ui.View):
                     submission_overflow=state.submission_overflow,
                     points_enabled=state.select_points_enabled,
                     publish_mode="manual",
-                    result_mode=state.result_mode,
-                    author_reveal=state.author_reveal,
+                    author_publication_mode=state.author_publication_mode,
                     author_reveal_zero=state.author_reveal_zero,
                     select_label_specs=state.select_label_specs,
                 )

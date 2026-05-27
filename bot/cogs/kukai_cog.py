@@ -390,6 +390,7 @@ class KukaiCog(commands.Cog):
                     "selecting_mode",
                     "publish_mode",
                     "result_mode",
+                    "author_publication_mode",
                     "author_reveal",
                     "author_reveal_zero",
                     "preset_id",
@@ -494,11 +495,23 @@ class KukaiCog(commands.Cog):
             selecting_mode = first_value(fields, "selecting_mode", "manual") or "manual"
             publish_mode = first_value(fields, "publish_mode", "manual") or "manual"
             result_mode = first_value(fields, "result_mode", "manual") or "manual"
+            author_publication_mode = first_value(fields, "author_publication_mode")
+            legacy_author_reveal_raw = first_value(fields, "author_reveal")
+            if not author_publication_mode:
+                if legacy_author_reveal_raw is None:
+                    author_publication_mode = "with_result"
+                else:
+                    author_publication_mode = (
+                        "with_result"
+                        if parse_bool(legacy_author_reveal_raw, name="author_reveal")
+                        else "never"
+                    )
             for name, value, allowed in (
                 ("submission_mode", submission_mode, {"manual", "semi_auto", "full_auto"}),
                 ("selecting_mode", selecting_mode, {"manual", "semi_auto", "full_auto"}),
                 ("publish_mode", publish_mode, {"manual", "auto"}),
                 ("result_mode", result_mode, {"manual", "auto"}),
+                ("author_publication_mode", author_publication_mode, {"with_result", "manual", "never"}),
             ):
                 if value not in allowed:
                     raise BulkParseError(f"{name} は {('/'.join(sorted(allowed)))} で指定してください。")
@@ -620,10 +633,7 @@ class KukaiCog(commands.Cog):
                     points_enabled=points_enabled,
                     publish_mode=publish_mode,
                     result_mode=result_mode,
-                    author_reveal=parse_bool(
-                        first_value(fields, "author_reveal", "true") or "true",
-                        name="author_reveal",
-                    ),
+                    author_publication_mode=author_publication_mode,
                     author_reveal_zero=parse_bool(
                         first_value(fields, "author_reveal_zero", "true") or "true",
                         name="author_reveal_zero",
@@ -863,6 +873,59 @@ class KukaiCog(commands.Cog):
         except ServiceError as e:
             await interaction.followup.send(embed=error_embed(str(e)), ephemeral=True)
 
+    @kukai.command(name="reveal-authors", description="【句会管理者】結果公開後に作者を公開します")
+    @app_commands.describe(kukai_id="句会ID（省略可: このチャンネルで1件なら自動特定）")
+    async def kukai_reveal_authors(
+        self,
+        interaction: discord.Interaction,
+        kukai_id: int | None = None,
+    ) -> None:
+        assert interaction.guild is not None
+        await interaction.response.defer(ephemeral=True)
+        try:
+            async with get_session() as session:
+                kukai = await kukai_service.resolve_kukai_in_channel(
+                    session,
+                    guild_id=interaction.guild.id,
+                    channel_id=effective_channel_id(interaction),
+                    kukai_id=kukai_id,
+                )
+                if not await permission_service.is_kukai_admin(session, kukai, interaction.user):  # type: ignore[arg-type]
+                    await interaction.edit_original_response(
+                        embed=error_embed("この操作は句会管理者のみ実行できます。")
+                    )
+                    return
+
+                state = KukaiState.from_value(kukai.state)
+                if state not in {KukaiState.RESULTS, KukaiState.ENDED}:
+                    await interaction.edit_original_response(
+                        embed=error_embed("作者公開は結果公開後に実行できます。")
+                    )
+                    return
+
+                mode = getattr(kukai, "author_publication_mode", "with_result")
+                if mode == "never":
+                    await interaction.edit_original_response(
+                        embed=error_embed("この句会は「作者公開はしない」に設定されています。")
+                    )
+                    return
+
+                if kukai.author_reveal:
+                    await interaction.edit_original_response(
+                        embed=success_embed("作者はすでに公開されています。")
+                    )
+                    return
+
+                kukai.author_reveal = True
+                kukai_title = kukai.title
+                await self._announce_authors_revealed(interaction.guild, kukai)
+
+            await interaction.edit_original_response(
+                embed=success_embed(f"句会「{kukai_title}」の作者を公開しました。")
+            )
+        except ServiceError as e:
+            await interaction.edit_original_response(embed=error_embed(str(e)))
+
     @kukai.command(name="pause", description="【句会管理者】句会を一時停止します")
     @app_commands.describe(kukai_id="句会ID（省略可: このチャンネルで1件なら自動特定）")
     async def kukai_pause(self, interaction: discord.Interaction, kukai_id: int | None = None) -> None:
@@ -1093,6 +1156,22 @@ class KukaiCog(commands.Cog):
         except Exception:
             pass
 
+    async def _announce_authors_revealed(self, guild: discord.Guild, kukai) -> None:
+        if not kukai.channel_id:
+            return
+        channel = guild.get_channel(kukai.channel_id)
+        if not isinstance(channel, discord.TextChannel):
+            return
+        embed = discord.Embed(
+            description=f"句会「**{kukai.title}**」の作者を公開しました。",
+            color=COLOR_INFO,
+        )
+        embed.set_footer(text=f"句会ID: {kukai.id}")
+        try:
+            await send_with_retry(lambda: channel.send(embed=embed))
+        except Exception:
+            logger.exception("Failed to announce author reveal")
+
     async def _announce_settings_updated(
         self,
         guild: discord.Guild,
@@ -1265,8 +1344,7 @@ class KukaiCog(commands.Cog):
         submission_mode="投句進行モード",
         selecting_mode="選句進行モード",
         publish_mode="投句公開モード",
-        result_mode="結果公開モード",
-        author_reveal="作者公開するか",
+        author_publication_mode="作者公開設定",
         author_reveal_zero="0点以下作者を公開するか",
     )
     async def kukai_edit(
@@ -1286,8 +1364,7 @@ class KukaiCog(commands.Cog):
         submission_mode: Literal["manual", "semi_auto", "full_auto"] | None = None,
         selecting_mode: Literal["manual", "semi_auto", "full_auto"] | None = None,
         publish_mode: Literal["manual", "auto"] | None = None,
-        result_mode: Literal["manual", "auto"] | None = None,
-        author_reveal: bool | None = None,
+        author_publication_mode: Literal["with_result", "manual", "never"] | None = None,
         author_reveal_zero: bool | None = None,
     ) -> None:
         assert interaction.guild is not None
@@ -1332,6 +1409,7 @@ class KukaiCog(commands.Cog):
                     "selecting_mode": kukai.selecting_mode,
                     "publish_mode": kukai.publish_mode,
                     "result_mode": kukai.result_mode,
+                    "author_publication_mode": kukai.author_publication_mode,
                     "author_reveal": kukai.author_reveal,
                     "author_reveal_zero": kukai.author_reveal_zero,
                 }
@@ -1352,8 +1430,7 @@ class KukaiCog(commands.Cog):
                     submission_mode=submission_mode,
                     selecting_mode=selecting_mode,
                     publish_mode=publish_mode,
-                    result_mode=result_mode,
-                    author_reveal=author_reveal,
+                    author_publication_mode=author_publication_mode,
                     author_reveal_zero=author_reveal_zero,
                 )
 
@@ -1375,6 +1452,7 @@ class KukaiCog(commands.Cog):
                     "selecting_mode": kukai.selecting_mode,
                     "publish_mode": kukai.publish_mode,
                     "result_mode": kukai.result_mode,
+                    "author_publication_mode": kukai.author_publication_mode,
                     "author_reveal": kukai.author_reveal,
                     "author_reveal_zero": kukai.author_reveal_zero,
                 }
@@ -1411,10 +1489,10 @@ class KukaiCog(commands.Cog):
                         f"投句公開モード: {mode_labels.get(str(before['publish_mode']), str(before['publish_mode']))}"
                         f" → {mode_labels.get(str(after['publish_mode']), str(after['publish_mode']))}"
                     )
-                if before["result_mode"] != after["result_mode"]:
+                if before["author_publication_mode"] != after["author_publication_mode"]:
                     changed_lines.append(
-                        f"結果公開モード: {mode_labels.get(str(before['result_mode']), str(before['result_mode']))}"
-                        f" → {mode_labels.get(str(after['result_mode']), str(after['result_mode']))}"
+                        f"作者公開設定: {kukai_service.author_publication_label(str(before['author_publication_mode']))}"
+                        f" → {kukai_service.author_publication_label(str(after['author_publication_mode']))}"
                     )
                 if before["author_reveal"] != after["author_reveal"]:
                     changed_lines.append(
@@ -1992,6 +2070,22 @@ def _build_info_embed(
     embed.add_field(
         name=f"選句締切（{_mode_label(getattr(kukai, 'selecting_mode', 'manual'))}）",
         value=selecting_deadline,
+        inline=False,
+    )
+    author_mode = getattr(kukai, "author_publication_mode", "with_result")
+    if author_mode == "never":
+        author_value = "作者公開はしない"
+    elif getattr(kukai, "author_reveal", False):
+        author_value = f"{kukai_service.author_publication_label(author_mode)}（公開済み）"
+    else:
+        author_value = f"{kukai_service.author_publication_label(author_mode)}（未公開）"
+    if author_mode == "never":
+        zero_value = "適用外"
+    else:
+        zero_value = "公開" if getattr(kukai, "author_reveal_zero", True) else "非公開"
+    embed.add_field(
+        name="作者公開設定",
+        value=f"{author_value}\n0点以下作者: {zero_value}",
         inline=False,
     )
 
