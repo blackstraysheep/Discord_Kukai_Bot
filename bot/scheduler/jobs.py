@@ -821,7 +821,7 @@ async def _entry_close_participant_lines(session, guild, kukai_id: int) -> list[
     lines: list[str] = []
     for entry in entries:
         icon = "✅" if entry.status == "approved" else "⏳"
-        status = "承認済" if entry.status == "approved" else "審査待ち"
+        status = "承認済" if entry.status == "approved" else "承認待ち"
         if entry.haigo:
             name = discord_safe(entry.haigo)
         else:

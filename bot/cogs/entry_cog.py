@@ -145,7 +145,7 @@ class EntryCog(commands.Cog):
     @app_commands.describe(kukai_id="句会ID（省略可: このチャンネルで1件なら自動特定）", status="絞り込み (省略で全件)")
     @app_commands.choices(
         status=[
-            app_commands.Choice(name="審査待ち", value="pending"),
+            app_commands.Choice(name="承認待ち", value="pending"),
             app_commands.Choice(name="承認済み", value="approved"),
             app_commands.Choice(name="却下", value="rejected"),
             app_commands.Choice(name="取消", value="withdrawn"),
@@ -184,7 +184,7 @@ class EntryCog(commands.Cog):
                 )
                 return
 
-            STATUS_JA = {"pending": "審査待", "approved": "承認済", "rejected": "却下", "withdrawn": "取消"}
+            STATUS_JA = {"pending": "承認待", "approved": "承認済", "rejected": "却下", "withdrawn": "取消"}
             lines = []
             for e in entries:
                 member = interaction.guild.get_member(e.user_id)
@@ -213,7 +213,7 @@ class EntryCog(commands.Cog):
     ) -> None:
         await self._admin_action(interaction, effective_channel_id(interaction), kukai_id, user, "approve")
 
-    @entry.command(name="approve-all", description="【句会管理者】審査待ちエントリーを一括承認します")
+    @entry.command(name="approve-all", description="【句会管理者】承認待ちエントリーを一括承認します")
     @app_commands.describe(kukai_id="句会ID（省略可: このチャンネルで1件なら自動特定）")
     async def entry_approve_all(
         self,
@@ -251,7 +251,7 @@ class EntryCog(commands.Cog):
 
             if not approved_names:
                 await interaction.followup.send(
-                    embed=discord.Embed(description="審査待ちのエントリーはありません。", color=COLOR_INFO),
+                    embed=discord.Embed(description="承認待ちのエントリーはありません。", color=COLOR_INFO),
                     ephemeral=True,
                 )
                 return
@@ -368,7 +368,7 @@ class EntryCog(commands.Cog):
             if not entries:
                 await interaction.followup.send(
                     embed=discord.Embed(
-                        description="審査待ちのエントリーはありません。",
+                        description="承認待ちのエントリーはありません。",
                         color=COLOR_INFO,
                     ),
                     ephemeral=True,
@@ -379,7 +379,7 @@ class EntryCog(commands.Cog):
             await interaction.followup.send(
                 embed=discord.Embed(
                     title=f"エントリー{action_ja}",
-                    description=f"審査待ち: {len(entries)} 件\nリストからユーザーを選択してください。",
+                    description=f"承認待ち: {len(entries)} 件\nリストからユーザーを選択してください。",
                     color=COLOR_INFO,
                 ),
                 view=view,

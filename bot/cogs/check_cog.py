@@ -74,7 +74,7 @@ class CheckCog(commands.Cog):
             if entry:
                 status_ja = {
                     "approved": "✅ 承認済み",
-                    "pending": "⏳ 審査待ち",
+                    "pending": "⏳ 承認待ち",
                     "rejected": "❌ 却下",
                     "withdrawn": "↩️ 取消済み",
                 }.get(entry.status, entry.status)

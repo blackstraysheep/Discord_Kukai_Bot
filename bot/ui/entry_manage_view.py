@@ -34,7 +34,7 @@ class EntryActionSelect(discord.ui.Select):
         for entry in entries[:25]:
             member = guild.get_member(entry.user_id)
             display = entry.haigo or (member.display_name if member else f"UID:{entry.user_id}")
-            status_tag = {"pending": "審査待", "approved": "承認済"}.get(entry.status, entry.status)
+            status_tag = {"pending": "承認待ち", "approved": "承認済"}.get(entry.status, entry.status)
             options.append(
                 discord.SelectOption(
                     label=display[:100],

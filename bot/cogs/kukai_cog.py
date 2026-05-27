@@ -57,7 +57,7 @@ logger = logging.getLogger(__name__)
 
 # Japanese labels for each state
 STATE_LABEL: dict[str, str] = {
-    "draft": "下書き",
+    "draft": "開始前",
     "entry_open": "エントリー受付中",
     "entry_closed": "エントリー締切",
     "submission_open": "投句受付中",
@@ -86,7 +86,7 @@ def _entry_mode_label(mode: str | None) -> str:
     return {"manual": "手動", "auto": "自動", "full_auto": "自動"}.get(str(mode), str(mode))
 
 ROLLBACK_TARGET_CHOICES = [
-    app_commands.Choice(name="下書き", value=KukaiState.DRAFT.value),
+    app_commands.Choice(name="開始前", value=KukaiState.DRAFT.value),
     app_commands.Choice(name="エントリー受付中", value=KukaiState.ENTRY_OPEN.value),
     app_commands.Choice(name="エントリー締切", value=KukaiState.ENTRY_CLOSED.value),
     app_commands.Choice(name="投句受付中", value=KukaiState.SUBMISSION_OPEN.value),
@@ -1503,7 +1503,7 @@ class KukaiCog(commands.Cog):
             return {"approved": "✅", "pending": "⏳", "rejected": "❌", "withdrawn": "↩️"}.get(status, "•")
 
         def _entry_status_label(status: str) -> str:
-            return {"approved": "承認済", "pending": "審査待ち", "rejected": "却下", "withdrawn": "取消"}.get(status, status)
+            return {"approved": "承認済", "pending": "承認待ち", "rejected": "却下", "withdrawn": "取消"}.get(status, status)
 
         def _member_name(guild: discord.Guild, user_id: int, haigo: str | None = None) -> str:
             if haigo:

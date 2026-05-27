@@ -79,7 +79,7 @@ Discord完結型句会管理Bot。Python 3.13 / discord.py 2.x / SQLAlchemy 2.x 
   - `notification_job(schedule_id)`: NotificationScheduleを取得しリマインダー送信
   - 通知回ごとに `channel_id` と `mention` を持ち、DM/チャンネル/mention付き通知を切替可能
   - `voice_start` 通知イベントに対応
-  - `entry_close` 通知ではエントリー参加者一覧（承認済/審査待ち）をEmbedに表示
+  - `entry_close` 通知ではエントリー参加者一覧（承認済/承認待ち）をEmbedに表示
   - `deadline_job(kukai_id, event_type)`: manual/semi_auto/full_autoに応じた自動進行
 - `bot/repositories/notification_repo.py`
 - `bot/services/notification_service.py` — schedule_kukai_jobs / cancel_kukai_jobs
