@@ -205,9 +205,9 @@ class TestRenderResult:
         base.update(overrides)
         return base
 
-    def test_rank_appears(self):
+    def test_submission_number_appears(self):
         tex = _render_template("default", "result.tex.j2", self._data())
-        assert "位" in tex
+        assert "No." in tex
 
     def test_haiku_text_appears(self):
         tex = _render_template("default", "result.tex.j2", self._data())

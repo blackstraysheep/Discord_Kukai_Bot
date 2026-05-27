@@ -32,7 +32,7 @@
 {% endif %}
 
 %% 句
-{\scriptsize 第\rensuji{ {{ r.rank }} }位\quad No.\rensuji{ {{ r.number }} }}\quad{\large\kintou{17}{ {{- r.text | tex -}} }}\par
+{\scriptsize No.\rensuji{ {{ r.number }} }}\quad{\large\kintou{17}{ {{- r.text | tex -}} }}\par
 {%- if r.author %}
 \hfill{\small {{ r.author | tex }}}\par
 {%- endif %}
