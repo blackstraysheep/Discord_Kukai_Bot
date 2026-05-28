@@ -442,6 +442,73 @@ async def test_schedule_kukai_jobs_does_not_register_entry_close_after_submissio
 
 
 @pytest.mark.asyncio
+async def test_schedule_kukai_jobs_marks_submission_close_reminder_past_after_manual_close(
+    db_session, monkeypatch
+):
+    kukai = await _make_kukai(
+        db_session,
+        entry_enabled=True,
+        entry_mode="auto",
+        entry_close_at=_utc(7),
+        submission_close_at=_utc(10),
+    )
+    await kukai_service.proceed(db_session, kukai)
+    await kukai_service.proceed(db_session, kukai)
+    schedule = NotificationSchedule(
+        kukai_id=kukai.id,
+        event_type="submission_close",
+        offset_secs=86400,
+        fired=False,
+        job_id="notify-submission-close",
+    )
+    db_session.add(schedule)
+    await db_session.flush()
+    scheduler = _FakeScheduler()
+    monkeypatch.setattr(notification_service, "has_scheduler", lambda: True)
+    monkeypatch.setattr(notification_service, "get_scheduler", lambda: scheduler)
+
+    await notification_service.schedule_kukai_jobs(db_session, kukai)
+
+    assert schedule.fired is True
+    assert schedule.job_id is None
+    assert "notify-submission-close" in scheduler.removed
+
+
+@pytest.mark.asyncio
+async def test_schedule_kukai_jobs_marks_selecting_close_past_after_manual_close(
+    db_session, monkeypatch
+):
+    kukai = await _make_kukai(db_session, entry_enabled=False)
+    while KukaiState.from_value(kukai.state) != KukaiState.SELECTING_OPEN:
+        await kukai_service.proceed(db_session, kukai)
+    await kukai_service.proceed(db_session, kukai)
+    schedule = NotificationSchedule(
+        kukai_id=kukai.id,
+        event_type="selecting_close",
+        offset_secs=86400,
+        fired=False,
+        job_id="notify-selecting-close",
+    )
+    db_session.add(schedule)
+    await db_session.flush()
+    scheduler = _FakeScheduler()
+    monkeypatch.setattr(notification_service, "has_scheduler", lambda: True)
+    monkeypatch.setattr(notification_service, "get_scheduler", lambda: scheduler)
+
+    await notification_service.schedule_kukai_jobs(db_session, kukai)
+
+    deadline_events = {
+        item["args"][1]
+        for item in scheduler.added
+        if item["id"].startswith(f"deadline_{kukai.id}_")
+    }
+    assert schedule.fired is True
+    assert schedule.job_id is None
+    assert "notify-selecting-close" in scheduler.removed
+    assert "selecting_close" not in deadline_events
+
+
+@pytest.mark.asyncio
 async def test_deadline_job_submission_open_allows_entry_to_continue_until_entry_close(
     db_session, monkeypatch
 ):

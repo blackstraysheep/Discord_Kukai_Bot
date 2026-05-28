@@ -51,8 +51,28 @@ def _stage_order(kukai) -> int:
 
 
 def _is_past_event(kukai, event_type: str) -> bool:
+    state = KukaiState.from_value(kukai.state)
+    if event_type == "entry_close":
+        return state not in {KukaiState.ENTRY_OPEN, KukaiState.SUBMISSION_OPEN}
     if event_type == "submission_open":
         return _stage_order(kukai) >= _EVENT_ORDER["submission_open"]
+    if event_type == "submission_close":
+        return state not in {
+            KukaiState.DRAFT,
+            KukaiState.ENTRY_OPEN,
+            KukaiState.ENTRY_CLOSED,
+            KukaiState.SUBMISSION_OPEN,
+        }
+    if event_type == "selecting_close":
+        return state not in {
+            KukaiState.DRAFT,
+            KukaiState.ENTRY_OPEN,
+            KukaiState.ENTRY_CLOSED,
+            KukaiState.SUBMISSION_OPEN,
+            KukaiState.SUBMISSION_CLOSED,
+            KukaiState.WAITING_PUBLISH,
+            KukaiState.SELECTING_OPEN,
+        }
     return _EVENT_ORDER.get(event_type, 99) < _stage_order(kukai)
 
 
@@ -204,6 +224,16 @@ async def schedule_kukai_jobs(session: AsyncSession, kukai) -> None:
             KukaiState.ENTRY_OPEN,
             KukaiState.ENTRY_CLOSED,
             KukaiState.SUBMISSION_OPEN,
+        }:
+            continue
+        if event_type == "selecting_close" and current_state not in {
+            KukaiState.DRAFT,
+            KukaiState.ENTRY_OPEN,
+            KukaiState.ENTRY_CLOSED,
+            KukaiState.SUBMISSION_OPEN,
+            KukaiState.SUBMISSION_CLOSED,
+            KukaiState.WAITING_PUBLISH,
+            KukaiState.SELECTING_OPEN,
         }:
             continue
         run_date = deadline_dt
