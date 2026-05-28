@@ -308,6 +308,7 @@ async def deadline_job(kukai_id: int, event_type: str) -> None:
 
                 approved_entries = await _approved_entries(session, kukai.id)
                 if not approved_entries:
+                    await _notify_entry_closed(bot=_bot, session=session, kukai=kukai)
                     await kukai_service.cancel(session, kukai)
                     await notification_service.cancel_kukai_jobs(session, kukai.id)
                     await admin_notice_service.send_admin_notice(
@@ -596,7 +597,6 @@ async def _notify_entry_closed(*, bot, session, kukai) -> None:
 
     from bot.utils.discord_retry import send_with_retry
     from bot.utils.embed_builder import COLOR_INFO
-    from bot.utils.text import discord_safe
 
     if not kukai.channel_id:
         return
@@ -607,24 +607,25 @@ async def _notify_entry_closed(*, bot, session, kukai) -> None:
     if not channel or not hasattr(channel, "send"):
         return
 
-    entries = await _approved_entries(session, kukai.id)
-    names: list[str] = []
-    for entry in entries:
-        member = guild.get_member(entry.user_id)
-        names.append(discord_safe(entry.haigo or (member.display_name if member else f"UID:{entry.user_id}")))
+    names = await _entry_close_approved_names(session, guild, kukai.id)
 
     embed = discord.Embed(
         description=f"句会「**{kukai.title}**」: エントリーが締め切られました。",
         color=COLOR_INFO,
     )
     embed.add_field(
-        name=f"エントリー人数: {len(names)}名",
-        value=_limited_field_value(names),
+        name="エントリー人数",
+        value=_entry_count_summary(names),
         inline=False,
     )
     embed.set_footer(text=f"句会ID: {kukai.id}")
     try:
-        await send_with_retry(lambda: channel.send(embed=embed))
+        await send_with_retry(
+            lambda: channel.send(
+                embed=embed,
+                allowed_mentions=discord.AllowedMentions.none(),
+            )
+        )
     except Exception as error:
         logger.error("_notify_entry_closed failed: %s", error)
 
@@ -801,6 +802,39 @@ def _limited_field_value(lines: list[str], *, limit: int = 1024) -> str:
         value = candidate
         shown += 1
     return value or "（表示できる項目がありません）"
+
+
+async def _entry_close_approved_names(session, guild, kukai_id: int) -> list[str]:
+    from bot.utils.text import discord_safe
+
+    entries = await _approved_entries(session, kukai_id)
+    names: list[str] = []
+    for entry in entries:
+        member = guild.get_member(entry.user_id) if guild else None
+        display_name = entry.haigo or (member.display_name if member else f"UID:{entry.user_id}")
+        names.append(discord_safe(display_name))
+    return names
+
+
+def _entry_count_summary(names: list[str], *, limit: int = 1024) -> str:
+    if not names:
+        return "0名（なし）"
+
+    prefix = f"{len(names)}名（"
+    suffix = "）"
+    value = prefix
+    shown = 0
+    for name in names:
+        separator = "、" if shown else ""
+        candidate = f"{value}{separator}{name}"
+        if len(candidate) + len(suffix) > limit:
+            ellipsis = "、……" if shown else "……"
+            if len(value) + len(ellipsis) + len(suffix) <= limit:
+                value += ellipsis
+            break
+        value = candidate
+        shown += 1
+    return f"{value}{suffix}" if shown else f"{len(names)}名（……）"
 
 
 async def _entry_close_participant_lines(session, guild, kukai_id: int) -> list[str]:

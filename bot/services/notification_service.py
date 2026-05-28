@@ -187,16 +187,23 @@ async def schedule_kukai_jobs(session: AsyncSession, kukai) -> None:
     ]:
         if deadline_dt is None or deadline_dt <= now:
             continue
+        run_date = deadline_dt
+        if (
+            event_type == "entry_close"
+            and kukai.submission_close_at is not None
+            and deadline_dt == kukai.submission_close_at
+        ):
+            run_date = deadline_dt - timedelta(microseconds=1)
         job_id = f"deadline_{kukai.id}_{event_type}"
         scheduler.add_job(
             deadline_job,
             trigger="date",
-            run_date=deadline_dt,
+            run_date=run_date,
             args=[kukai.id, event_type],
             id=job_id,
             replace_existing=True,
         )
-        logger.info("Scheduled deadline job %s at %s", job_id, deadline_dt)
+        logger.info("Scheduled deadline job %s at %s", job_id, run_date)
 
 
 async def cancel_kukai_jobs(session: AsyncSession, kukai_id: int) -> None:

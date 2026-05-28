@@ -96,6 +96,34 @@ class _ChannelCapture:
         self.messages.append(message)
 
 
+class _EmbedChannelCapture:
+    def __init__(self, channel_id: int) -> None:
+        self.id = channel_id
+        self.sent: list[dict] = []
+
+    async def send(self, **kwargs):
+        self.sent.append(kwargs)
+        return SimpleNamespace(id=len(self.sent))
+
+
+class _MemberWithDisplayName:
+    def __init__(self, user_id: int, display_name: str) -> None:
+        self.id = user_id
+        self.display_name = display_name
+
+
+class _GuildForEntryClose:
+    def __init__(self, channel, members=None) -> None:
+        self._channel = channel
+        self._members = {member.id: member for member in members or []}
+
+    def get_member(self, user_id: int):
+        return self._members.get(user_id)
+
+    def get_channel(self, channel_id: int):
+        return self._channel if self._channel.id == channel_id else None
+
+
 class _BotWithGuild:
     def __init__(self, guild) -> None:
         self._guild = guild
@@ -125,6 +153,34 @@ async def test_schedule_kukai_jobs_registers_notification_and_deadline_jobs(db_s
     assert any(job_id.startswith("notify_") for job_id in added_ids)
     assert f"deadline_{kukai.id}_submission_close" in added_ids
     assert f"deadline_{kukai.id}_selecting_close" in added_ids
+
+
+@pytest.mark.asyncio
+async def test_schedule_kukai_jobs_runs_entry_close_before_equal_submission_close(
+    db_session, monkeypatch
+):
+    close_at = _utc(7)
+    kukai = await _make_kukai(
+        db_session,
+        entry_enabled=True,
+        entry_mode="auto",
+        entry_close_at=close_at,
+        submission_open_at=_utc(3),
+        submission_close_at=close_at,
+    )
+    scheduler = _FakeScheduler()
+    monkeypatch.setattr(notification_service, "has_scheduler", lambda: True)
+    monkeypatch.setattr(notification_service, "get_scheduler", lambda: scheduler)
+
+    await notification_service.schedule_kukai_jobs(db_session, kukai)
+
+    deadline_jobs = {
+        item["args"][1]: item
+        for item in scheduler.added
+        if item["id"].startswith(f"deadline_{kukai.id}_")
+    }
+    assert deadline_jobs["entry_close"]["run_date"] < deadline_jobs["submission_close"]["run_date"]
+    assert deadline_jobs["submission_close"]["run_date"] == close_at
 
 
 @pytest.mark.asyncio
@@ -239,15 +295,49 @@ async def test_deadline_job_entry_close_auto_opens_submission_with_approved_entr
 
 
 @pytest.mark.asyncio
+async def test_notify_entry_closed_includes_approved_count_and_haigo(db_session):
+    kukai = await _make_kukai(db_session, entry_enabled=True, entry_mode="auto")
+    await entry_service.enter(db_session, kukai, user_id=101, haigo="山田太郎")
+    await entry_service.enter(db_session, kukai, user_id=102, haigo="testaro")
+    await entry_service.enter(db_session, kukai, user_id=103, haigo="☆之助")
+    pending_entry = await entry_service.enter(db_session, kukai, user_id=104, haigo=None)
+    pending_entry.status = "pending"
+    await db_session.flush()
+
+    channel = _EmbedChannelCapture(channel_id=200)
+    guild = _GuildForEntryClose(
+        channel,
+        members=[_MemberWithDisplayName(104, "表示名")],
+    )
+    bot = _BotWithGuild(guild)
+
+    await jobs._notify_entry_closed(bot=bot, session=db_session, kukai=kukai)
+
+    assert len(channel.sent) == 1
+    embed = channel.sent[0]["embed"]
+    assert "エントリーが締め切られました" in embed.description
+    assert embed.fields[0].name == "エントリー人数"
+    assert embed.fields[0].value == "3名（山田太郎、testaro、☆之助）"
+    assert "allowed_mentions" in channel.sent[0]
+
+
+@pytest.mark.asyncio
 async def test_deadline_job_entry_close_auto_cancels_without_approved_entries(
     db_session, monkeypatch
 ):
     kukai = await _make_kukai(db_session, entry_enabled=True, entry_mode="auto")
     called = _patch_deadline_env(monkeypatch, db_session)
+    called["entry_closed"] = []
+
+    async def _fake_notify_entry_closed(*, bot, session, kukai):
+        called["entry_closed"].append(kukai.id)
+
+    monkeypatch.setattr(jobs, "_notify_entry_closed", _fake_notify_entry_closed)
 
     await jobs.deadline_job(kukai.id, "entry_close")
 
     assert KukaiState(kukai.state) == KukaiState.CANCELLED
+    assert called["entry_closed"] == [kukai.id]
     assert called["admins"]
     assert called["channel"]
 
