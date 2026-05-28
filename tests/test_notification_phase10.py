@@ -368,6 +368,80 @@ async def test_deadline_job_entry_close_auto_waits_for_submission_open_at(
 
 
 @pytest.mark.asyncio
+async def test_manual_submission_close_sends_early_entry_close_notice_and_marks_fired(
+    db_session, monkeypatch
+):
+    kukai = await _make_kukai(
+        db_session,
+        entry_enabled=True,
+        entry_mode="auto",
+        entry_close_at=_utc(7),
+        submission_close_at=_utc(10),
+    )
+    await entry_service.enter(db_session, kukai, user_id=101, haigo="山田太郎")
+    await kukai_service.proceed(db_session, kukai)
+    previous_state = KukaiState.from_value(kukai.state)
+    await kukai_service.proceed(db_session, kukai)
+    schedule = NotificationSchedule(
+        kukai_id=kukai.id,
+        event_type="entry_close",
+        offset_secs=86400,
+        fired=False,
+        job_id="notify-entry-close",
+    )
+    db_session.add(schedule)
+    await db_session.flush()
+
+    called = []
+
+    async def _fake_notify_entry_closed(*, bot, session, kukai):
+        called.append(kukai.id)
+
+    monkeypatch.setattr(jobs, "_notify_entry_closed", _fake_notify_entry_closed)
+
+    sent = await jobs.notify_entry_closed_for_manual_submission_close(
+        bot=_FakeBot(),
+        session=db_session,
+        kukai=kukai,
+        previous_state=previous_state,
+    )
+
+    assert sent is True
+    assert called == [kukai.id]
+    assert schedule.fired is True
+    assert schedule.job_id is None
+
+
+@pytest.mark.asyncio
+async def test_schedule_kukai_jobs_does_not_register_entry_close_after_submission_closed(
+    db_session, monkeypatch
+):
+    kukai = await _make_kukai(
+        db_session,
+        entry_enabled=True,
+        entry_mode="auto",
+        entry_close_at=_utc(7),
+        submission_close_at=_utc(10),
+    )
+    await kukai_service.proceed(db_session, kukai)
+    await kukai_service.proceed(db_session, kukai)
+    scheduler = _FakeScheduler()
+    monkeypatch.setattr(notification_service, "has_scheduler", lambda: True)
+    monkeypatch.setattr(notification_service, "get_scheduler", lambda: scheduler)
+
+    await notification_service.schedule_kukai_jobs(db_session, kukai)
+
+    deadline_events = {
+        item["args"][1]
+        for item in scheduler.added
+        if item["id"].startswith(f"deadline_{kukai.id}_")
+    }
+    assert "entry_close" not in deadline_events
+    assert "submission_close" not in deadline_events
+    assert "selecting_close" in deadline_events
+
+
+@pytest.mark.asyncio
 async def test_deadline_job_submission_open_allows_entry_to_continue_until_entry_close(
     db_session, monkeypatch
 ):

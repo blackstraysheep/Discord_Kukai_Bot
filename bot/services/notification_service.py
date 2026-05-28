@@ -179,6 +179,7 @@ async def schedule_kukai_jobs(session: AsyncSession, kukai) -> None:
         logger.info("Scheduled notification job %s at %s", job_id, fire_at)
 
     # Schedule deadline jobs
+    current_state = KukaiState.from_value(kukai.state)
     for event_type, deadline_dt in [
         ("entry_close", kukai.entry_close_at),
         ("submission_open", kukai.submission_open_at),
@@ -186,6 +187,24 @@ async def schedule_kukai_jobs(session: AsyncSession, kukai) -> None:
         ("selecting_close", kukai.selecting_close_at),
     ]:
         if deadline_dt is None or deadline_dt <= now:
+            continue
+        if event_type == "entry_close" and current_state not in {
+            KukaiState.ENTRY_OPEN,
+            KukaiState.SUBMISSION_OPEN,
+        }:
+            continue
+        if event_type == "submission_open" and current_state not in {
+            KukaiState.DRAFT,
+            KukaiState.ENTRY_OPEN,
+            KukaiState.ENTRY_CLOSED,
+        }:
+            continue
+        if event_type == "submission_close" and current_state not in {
+            KukaiState.DRAFT,
+            KukaiState.ENTRY_OPEN,
+            KukaiState.ENTRY_CLOSED,
+            KukaiState.SUBMISSION_OPEN,
+        }:
             continue
         run_date = deadline_dt
         if (

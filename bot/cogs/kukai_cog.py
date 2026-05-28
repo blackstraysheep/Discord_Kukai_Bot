@@ -832,6 +832,15 @@ class KukaiCog(commands.Cog):
                         )
                         if result_message_id is not None:
                             kukai.result_message_id = result_message_id
+                if new_state == KukaiState.SUBMISSION_CLOSED:
+                    from bot.scheduler import jobs as scheduler_jobs
+
+                    await scheduler_jobs.notify_entry_closed_for_manual_submission_close(
+                        bot=self.bot,
+                        session=session,
+                        kukai=kukai,
+                        previous_state=current_state,
+                    )
                 if override_report is not None:
                     await admin_notice_service.send_admin_notice(
                         self.bot,
@@ -844,6 +853,7 @@ class KukaiCog(commands.Cog):
                         ),
                         fields=[("未達状況", "\n".join(override_report.admin_lines()))],
                     )
+                await notification_service.cancel_kukai_jobs(session, kukai.id)
                 await notification_service.schedule_kukai_jobs(session, kukai)
                 logger.info(
                     "event=kukai_proceed_command kukai_id=%s actor_user_id=%s "

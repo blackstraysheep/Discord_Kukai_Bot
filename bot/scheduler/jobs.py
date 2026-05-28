@@ -630,6 +630,35 @@ async def _notify_entry_closed(*, bot, session, kukai) -> None:
         logger.error("_notify_entry_closed failed: %s", error)
 
 
+async def notify_entry_closed_for_manual_submission_close(
+    *,
+    bot,
+    session,
+    kukai,
+    previous_state,
+) -> bool:
+    from bot.services import kukai_service
+    from bot.state_machine.states import KukaiState
+
+    if KukaiState.from_value(previous_state) != KukaiState.SUBMISSION_OPEN:
+        return False
+    if KukaiState.from_value(kukai.state) != KukaiState.SUBMISSION_CLOSED:
+        return False
+    if not getattr(kukai, "entry_enabled", False):
+        return False
+    if not kukai_service.is_entry_mode_auto(getattr(kukai, "entry_mode", "manual")):
+        return False
+    if getattr(kukai, "entry_close_at", None) is None:
+        return False
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    if kukai.entry_close_at <= now:
+        return False
+
+    await _notify_entry_closed(bot=bot, session=session, kukai=kukai)
+    await _mark_past_deadline_notifications_fired(session, kukai.id, "entry_close")
+    return True
+
+
 async def _notify_admins(bot, kukai, message: str) -> None:
     """DM the kukai creator (and admins if reachable) with a message."""
     import discord
