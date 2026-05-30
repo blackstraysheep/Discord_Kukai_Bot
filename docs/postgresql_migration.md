@@ -1,13 +1,14 @@
 # PostgreSQL Migration
 
-This migration is staged so the default SQLite setup keeps working.
+PostgreSQL is the current operational database for the bot.
+SQLite remains useful for local in-memory tests and as historical backup data.
 
-## Stage 1: Boot a fresh PostgreSQL database
+## Current Operation
 
 Start the bot with the PostgreSQL override:
 
 ```powershell
-docker compose -f docker-compose.yml -f docker-compose.postgres.yml up --build
+docker compose -f docker-compose.yml -f docker-compose.postgres.yml up -d --build
 ```
 
 The override sets:
@@ -19,7 +20,7 @@ SCHEDULER_DB_URL=postgresql+psycopg://kukai:kukai@db:5432/kukai
 
 `DATABASE_URL` uses the async driver for the bot runtime. `SCHEDULER_DB_URL` uses a sync driver because APScheduler's SQLAlchemy job store is synchronous.
 
-## Stage 2: Verify migrations
+## Verify Migrations
 
 The container runs:
 
@@ -27,11 +28,23 @@ The container runs:
 alembic upgrade head && python -m bot.main
 ```
 
-Before migrating real data, confirm that a fresh PostgreSQL database reaches Alembic head and the bot starts.
+Confirm the running database is at head:
 
-## Stage 3: Move existing data
+```powershell
+docker compose -f docker-compose.yml -f docker-compose.postgres.yml exec bot alembic current
+```
 
-For existing SQLite data, export/import with a dedicated migration tool such as `pgloader`, then run:
+Expected head:
+
+```text
+0014_select_comments_select_id
+```
+
+## Existing SQLite Data
+
+Existing SQLite files are not required for normal operation. Keep them as backup/reference data unless a specific historical kukai must be restored.
+
+For existing SQLite data that must be imported, export/import with a dedicated migration tool such as `pgloader`, then run:
 
 ```sh
 alembic upgrade head
@@ -44,6 +57,11 @@ After import, verify at least:
 - notification schedules and logs
 - APScheduler jobs, or intentionally rebuild them from notification schedules
 
-## Stage 4: Cut over
+## Cutover Status
 
-Once imported data is verified, keep PostgreSQL URLs in `.env` and start with the PostgreSQL compose override. Keep the SQLite files as rollback backups until a full event cycle has completed.
+PostgreSQL cutover has been verified through:
+
+- Alembic migration to `0014_select_comments_select_id`
+- Discord operation cycle
+- APScheduler notification delivery
+- `select_comments.select_id` schema verification

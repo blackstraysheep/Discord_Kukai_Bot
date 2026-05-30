@@ -1,6 +1,6 @@
 # Kukai Bot 今後の改善項目（技術者向け）
 
-最終更新: 2026-05-21
+最終更新: 2026-05-30
 
 ## A. 優先度高（運用直結）
 - 進行通知ボタンの永続化
@@ -85,16 +85,10 @@
 
 ## I. 配布・インフラ
 
-- SQLite WALモード有効化
-  - 複数サーバーが同時書き込む際のロック競合を緩和
-  - `database.py` の接続時に `PRAGMA journal_mode=WAL` を追加するだけ
 - 定期バックアップ整備
-  - Oracle Free Tier はVM強制回収リスクがあるため、DBファイルの定期バックアップが必要
-  - cronで `sqlite3 .backup` → Oracle Object Storage（無料10GB）へアップロード
-- PostgreSQL移行（将来）
-  - 同時アクティブサーバーが100を超えたあたりでSQLiteの書き込み競合が顕在化する
-  - `DATABASE_URL` の変更と `pgloader` によるデータ移行で対応可能
-  - AlembicはURL変更だけで動くが、SQLite固有型の差異を要確認
+  - Oracle Free Tier はVM強制回収リスクがあるため、PostgreSQL dumpの定期バックアップが必要
+  - cronで `pg_dump` → 暗号化 → Oracle Object Storage（無料10GB）へアップロード
+  - リストア手順も `docs/operations.md` に追記する
 - GitHub Actions + GHCRによるDockerイメージ配布
   - セルフホスト配布を楽にするため、ビルド済みイメージをGHCR（GitHub Container Registry）にpush
   - `docker-compose.yml` を `build: .` から `image: ghcr.io/...` に切り替える
@@ -109,8 +103,6 @@
   - 通知・自動進行は対象guildを持つshardで実行できる設計にする
 
 ## H. ドキュメント
-- 運用者向けRunbook追加
-  - 典型操作（作成〜進行〜結果公開）とトラブル対処
 - 一括入力コマンドの利用例拡充
   - `/preset bulk`, `/kukai create_bulk`, `/submit_bulk`, `/select_bulk` の運用者向けサンプル集
 - 開発者向け仕様同期

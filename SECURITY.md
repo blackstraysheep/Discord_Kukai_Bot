@@ -1,6 +1,6 @@
 # Kukai Bot セキュリティ仕様
 
-最終更新: 2026-05-25
+最終更新: 2026-05-30
 
 ## 1. 脅威モデル
 
@@ -12,7 +12,7 @@
 | ユーザーAが別サーバーのデータをコマンド経由で取得する | 防止済み（後述） |
 | 任意の guild_id をパラメータに渡して偽装する | 防止済み（後述） |
 | Bot運営者がDBを直接閲覧する | 仕様として許容・プライバシーポリシーで開示 |
-| VMへの不正アクセスによるDBファイル取得 | インフラ層で対策（後述） |
+| VMへの不正アクセスによるDB取得 | インフラ層で対策（後述） |
 
 ---
 
@@ -82,17 +82,17 @@ RUN useradd -m botuser
 USER botuser
 ```
 
-### DBファイルのパーミッション（SQLite）
+### PostgreSQL
 
 ```bash
-chmod 600 /data/kukai.db
-chown botuser:botuser /data/kukai.db
+# 5432番ポートをインターネットに公開しない
+# DB認証情報は .env に置き、Git管理しない
 ```
 
-### ネットワーク（PostgreSQL移行時）
+### ネットワーク
 
 - 5432番ポートをインターネットに公開しない
-- Oracle VCN（仮想ネットワーク）でlocalhost以外からのアクセスを遮断
+- Docker network / Oracle VCN（仮想ネットワーク）でBot以外からのアクセスを遮断
 
 ---
 
@@ -102,31 +102,14 @@ chown botuser:botuser /data/kukai.db
 
 ```bash
 # 暗号化してからObject Storageへアップロード
-gpg --symmetric --cipher-algo AES256 kukai.db
-# → kukai.db.gpg を Oracle Object Storage（無料10GB）へ
+pg_dump -U kukai -d kukai > kukai_backup.sql
+gpg --symmetric --cipher-algo AES256 kukai_backup.sql
+# → kukai_backup.sql.gpg を Oracle Object Storage（無料10GB）へ
 ```
 
 ---
 
-## 6. SQLite WALモード（実装TODO）
-
-現状の `database.py` はWALモード未設定。
-複数サーバーが同時書き込む際のロック競合を緩和するため、初期化時に設定する。
-
-```python
-# bot/database.py への追加案
-from sqlalchemy import event, text
-
-@event.listens_for(_engine.sync_engine, "connect")
-def set_wal_mode(dbapi_conn, _):
-    dbapi_conn.execute("PRAGMA journal_mode=WAL")
-```
-
-→ FUTURE_IMPROVEMENTS.md セクションI 参照
-
----
-
-## 7. Discord Bot公開時の要件
+## 6. Discord Bot公開時の要件
 
 75サーバー以上に参加する場合、Discordの Bot Verification（審査）が必要。
 審査通過のために以下を用意する：
@@ -140,14 +123,14 @@ def set_wal_mode(dbapi_conn, _):
 
 ---
 
-## 8. 対応済み / 未対応 一覧
+## 7. 対応済み / 未対応 一覧
 
 | 項目 | 状態 | 備考 |
 |---|---|---|
 | クロスサーバーデータ分離 | **対応済み** | 全層でguild_id検証 |
-| SQLite WALモード | **未対応** | セクション6参照 |
+| PostgreSQL移行 | **対応済み** | Compose override + Alembic |
 | Dockerをnon-rootで実行 | **未対応** | Dockerfileに追加が必要 |
 | SSHパスワード認証無効化 | デプロイ時に設定 | VMセットアップ手順に含める |
-| バックアップ暗号化 | **未対応** | Oracle Object Storage連携時に実施 |
+| バックアップ暗号化 | **未対応** | PostgreSQL dumpの暗号化とObject Storage連携時に実施 |
 | プライバシーポリシー | **未作成** | 公開前に必須 |
 | Discord Bot Verification | **未対応** | 75サーバー超時に対応 |

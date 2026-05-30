@@ -1,11 +1,13 @@
 # Kukai Bot 現在仕様（技術者向け）
 
-最終更新: 2026-05-21（管理者スレッド通知・未達進行警告）
+最終更新: 2026-05-30（PostgreSQL移行・select_id統一）
 
 ## 1. 全体構成
 - 実装言語: Python 3.11+（開発・テスト環境は Python 3.13）
 - フレームワーク: `discord.py`（`app_commands` ベース）
-- DB: SQLite（Alembic マイグレーション管理）
+- DB: PostgreSQL（Alembic マイグレーション管理）
+  - ローカル単体テストは in-memory SQLite を使用
+  - PostgreSQL運用手順は `docs/operations.md` を参照
 - レイヤ: `cogs`（UI/コマンド） / `services`（業務ロジック） / `repositories`（DBアクセス） / `ui`（View/Modal）
 
 ## 2. 句会ステート
@@ -176,6 +178,9 @@
 - 登録完了通知:
   - 選評登録後に「登録しました」通知を表示
   - 現在登録済みの選評/総評内容（抜粋）を併記
+- DB命名:
+  - 現行スキーマでは `select_comments.select_id` を使用
+  - 旧エクスポート互換のため、import時のみ `vote_id` 形式も受理する
 
 ## 10. 結果表示
 - `/result`:
