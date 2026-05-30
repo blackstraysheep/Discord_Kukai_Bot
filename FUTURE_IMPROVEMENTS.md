@@ -102,6 +102,11 @@
 - Discord Bot Verification対応（75サーバー超時）
   - 公開Bot化する場合、75サーバー以上でDiscord側の審査が必要
   - プライバシーポリシー・利用規約ページの用意が前提条件
+- Shard対応可能な設計
+  - 現状は単一Botプロセス前提
+  - データは `guild_id` / `channel_id` / `kukai_id` を保持しているため、将来のshard判定には利用可能
+  - 将来shard化時はschedulerを専用worker化するか、job claim/lockを導入する
+  - 通知・自動進行は対象guildを持つshardで実行できる設計にする
 
 ## H. ドキュメント
 - 運用者向けRunbook追加
