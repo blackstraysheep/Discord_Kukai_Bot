@@ -3,10 +3,11 @@
 import logging
 from datetime import datetime, timezone
 
-from sqlalchemy import select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.models.kukai import Kukai, KukaiAdmin
+from bot.models.select import OverallSelectComment, Select, SelectComment
 from bot.models.select_rule import SelectLabel
 from bot.repositories import kukai_repo
 from bot.services import select_rule_service
@@ -30,6 +31,15 @@ _SUBMISSION_LOCKED_STATES = {
     KukaiState.RESULTS,
     KukaiState.ENDED,
     KukaiState.CANCELLED,
+}
+
+_SELECT_RULE_REPLACE_ALLOWED_STATES = {
+    KukaiState.DRAFT,
+    KukaiState.ENTRY_OPEN,
+    KukaiState.ENTRY_CLOSED,
+    KukaiState.SUBMISSION_OPEN,
+    KukaiState.SUBMISSION_CLOSED,
+    KukaiState.WAITING_PUBLISH,
 }
 
 _VALID_SUBMISSION_MODES = {"manual", "semi_auto", "full_auto"}
@@ -262,6 +272,57 @@ async def remove_kukai_admin(
         raise NotFoundError("指定ユーザーは句会管理者ではありません。")
 
 
+async def count_select_rule_data(session: AsyncSession, kukai_id: int) -> tuple[int, int]:
+    """Return counts of select rows and overall comments tied to a kukai."""
+    select_count = (
+        await session.execute(select(func.count()).where(Select.kukai_id == kukai_id))
+    ).scalar_one()
+    overall_count = (
+        await session.execute(
+            select(func.count()).where(OverallSelectComment.kukai_id == kukai_id)
+        )
+    ).scalar_one()
+    return int(select_count), int(overall_count)
+
+
+async def replace_select_rules(
+    session: AsyncSession,
+    kukai: Kukai,
+    *,
+    select_label_specs: list[dict],
+    points_enabled: bool,
+    clear_existing_select_data: bool = False,
+) -> list[SelectLabel]:
+    """Replace kukai-local select labels, optionally clearing existing selects first."""
+    state = KukaiState.from_value(kukai.state)
+    if state not in _SELECT_RULE_REPLACE_ALLOWED_STATES:
+        raise InvalidStateError("選句開始後は選句ルールを差し替えできません。")
+
+    select_count, overall_count = await count_select_rule_data(session, kukai.id)
+    if (select_count or overall_count) and not clear_existing_select_data:
+        raise ValidationError(
+            "既存の選句・選評データが残っています。削除を確認してから再実行してください。"
+        )
+
+    if clear_existing_select_data:
+        await _delete_select_data(session, kukai.id)
+
+    normalized_specs = select_rule_service.normalize_kukai_specs(select_label_specs)
+    if not points_enabled:
+        for spec in normalized_specs:
+            spec["point"] = 0
+
+    await session.execute(delete(SelectLabel).where(SelectLabel.kukai_id == kukai.id))
+    labels: list[SelectLabel] = []
+    for data in normalized_specs:
+        label = SelectLabel(kukai_id=kukai.id, **data)
+        session.add(label)
+        labels.append(label)
+    kukai.points_enabled = points_enabled
+    await session.flush()
+    return labels
+
+
 async def edit_kukai(
     session: AsyncSession,
     kukai: Kukai,
@@ -269,13 +330,17 @@ async def edit_kukai(
     title: str | None = None,
     theme: str | None = None,
     description: str | None = None,
+    entry_close_at: datetime | None = None,
     submission_open_at: datetime | None = None,
     submission_close_at: datetime | None = None,
     selecting_close_at: datetime | None = None,
+    entry_approval: bool | None = None,
     entry_mode: str | None = None,
+    min_participants: int | None = None,
     submission_min: int | None = None,
     submission_max: int | None = None,
     submission_max_unlimited: bool = False,
+    submission_overflow: bool | None = None,
     submission_mode: str | None = None,
     selecting_mode: str | None = None,
     publish_mode: str | None = None,
@@ -295,6 +360,8 @@ async def edit_kukai(
                 submission_min,
                 submission_max,
                 entry_mode,
+                min_participants,
+                submission_overflow,
                 submission_mode,
                 selecting_mode,
             )
@@ -327,6 +394,12 @@ async def edit_kukai(
         kukai.selecting_mode = selecting_mode
     if entry_mode is not None:
         kukai.entry_mode = normalize_entry_mode(entry_mode)
+    if entry_approval is not None:
+        kukai.entry_approval = entry_approval
+    if min_participants is not None:
+        if min_participants < 0:
+            raise ValidationError("min_participants は0以上にしてください。")
+        kukai.min_participants = min_participants
 
     if publish_mode is not None:
         if publish_mode not in _VALID_PUBLISH_MODES:
@@ -358,6 +431,8 @@ async def edit_kukai(
         kukai.author_reveal_zero = author_reveal_zero
 
     if not kukai.entry_enabled:
+        if entry_close_at is not None:
+            raise ValidationError("エントリーなしの句会では entry_close_at は変更できません。")
         kukai.entry_approval = False
         kukai.entry_mode = "manual"
     if kukai.author_publication_mode == "never":
@@ -383,11 +458,15 @@ async def edit_kukai(
         kukai.submission_max = None
     elif submission_max is not None:
         kukai.submission_max = submission_max
+    if submission_overflow is not None:
+        kukai.submission_overflow = submission_overflow
 
+    old_entry_close_at = kukai.entry_close_at
     old_submission_close_at = kukai.submission_close_at
     old_submission_open_at = kukai.submission_open_at
     old_selecting_close_at = kukai.selecting_close_at
 
+    new_entry_close_at = entry_close_at if entry_close_at is not None else kukai.entry_close_at
     new_submission_open_at = (
         submission_open_at if submission_open_at is not None else kukai.submission_open_at
     )
@@ -395,9 +474,11 @@ async def edit_kukai(
         submission_close_at if submission_close_at is not None else kukai.submission_close_at
     )
     new_selecting_close_at = selecting_close_at if selecting_close_at is not None else kukai.selecting_close_at
-    _validate_deadlines(kukai.entry_close_at, new_submission_open_at, new_submission_close_at, new_selecting_close_at)
-    _validate_future_deadlines(None, submission_open_at, submission_close_at, selecting_close_at)
+    _validate_deadlines(new_entry_close_at, new_submission_open_at, new_submission_close_at, new_selecting_close_at)
+    _validate_future_deadlines(entry_close_at, submission_open_at, submission_close_at, selecting_close_at)
 
+    if entry_close_at is not None:
+        kukai.entry_close_at = entry_close_at
     if submission_open_at is not None:
         kukai.submission_open_at = submission_open_at
     if submission_close_at is not None:
@@ -406,6 +487,9 @@ async def edit_kukai(
         kukai.selecting_close_at = selecting_close_at
 
     return (
+        entry_close_at is not None
+        and entry_close_at != old_entry_close_at
+    ) or (
         submission_open_at is not None
         and submission_open_at != old_submission_open_at
     ) or (
@@ -475,3 +559,10 @@ def normalize_entry_mode(mode: str | None) -> str:
 
 def is_entry_mode_auto(mode: str | None) -> bool:
     return normalize_entry_mode(mode) == "auto"
+
+
+async def _delete_select_data(session: AsyncSession, kukai_id: int) -> None:
+    select_ids = select(Select.id).where(Select.kukai_id == kukai_id)
+    await session.execute(delete(SelectComment).where(SelectComment.select_id.in_(select_ids)))
+    await session.execute(delete(Select).where(Select.kukai_id == kukai_id))
+    await session.execute(delete(OverallSelectComment).where(OverallSelectComment.kukai_id == kukai_id))

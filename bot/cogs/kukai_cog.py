@@ -219,6 +219,33 @@ class StageActionView(discord.ui.View):
         self.add_item(button)
 
 
+class SelectRuleConfigModal(discord.ui.Modal, title="選句ルール設定"):
+    def __init__(self, cog: "KukaiCog", kukai_id: int | None) -> None:
+        super().__init__(timeout=600)
+        self.cog = cog
+        self.kukai_id = kukai_id
+        self.config = discord.ui.TextInput(
+            label="選句ルール設定",
+            style=discord.TextStyle.paragraph,
+            required=True,
+            max_length=1900,
+            placeholder=(
+                "preset_id=3\n"
+                "または\n"
+                "points_enabled=true\n"
+                "label=特選,2,1,1,optional\n"
+                "label=並選,1,0,5,optional"
+            ),
+        )
+        self.add_item(self.config)
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        await self.cog._edit_select_rule_config(
+            interaction,
+            kukai_id=self.kukai_id,
+            select_rule_config=str(self.config.value),
+        )
+
 
 
 class KukaiCog(commands.Cog):
@@ -1344,17 +1371,24 @@ class KukaiCog(commands.Cog):
         title="新しいタイトル",
         theme="新しい題（空文字でクリア）",
         description="新しい説明（空文字でクリア）",
+        select_rule_config="選句ルール差し替え設定（gui で入力画面 / preset_id=... または label=...）",
+        entry_close_at="エントリー締切 (例: 2026-05-20 19:00 JST)",
         submission_open_at="投句開始 (例: 2026-05-20 20:00 JST)",
         submission_close_at="投句締切 (例: 2026-05-20 23:59 JST)",
         selecting_close_at="選句締切 (例: 2026-05-21 23:59 JST)",
+        entry_approval="エントリーを承認制にするか",
+        min_participants="最小成立人数（0で制限なし）",
         submission_min="最小投句数",
         submission_max="最大投句数",
         submission_max_unlimited="最大投句数を無制限にする",
+        submission_overflow="最大投句数を超えた投句を許可するか",
         entry_mode="エントリー締切進行モード",
         submission_mode="投句進行モード",
         selecting_mode="選句進行モード",
         publish_mode="投句公開モード",
+        result_mode="結果公開モード",
         author_publication_mode="作者公開設定",
+        author_reveal="作者を公開済みにするか",
         author_reveal_zero="0点以下作者を公開するか",
     )
     async def kukai_edit(
@@ -1364,21 +1398,71 @@ class KukaiCog(commands.Cog):
         title: str | None = None,
         theme: str | None = None,
         description: str | None = None,
+        select_rule_config: str | None = None,
+        entry_close_at: str | None = None,
         submission_open_at: str | None = None,
         submission_close_at: str | None = None,
         selecting_close_at: str | None = None,
+        entry_approval: bool | None = None,
+        min_participants: int | None = None,
         submission_min: int | None = None,
         submission_max: int | None = None,
         submission_max_unlimited: bool | None = None,
+        submission_overflow: bool | None = None,
         entry_mode: Literal["manual", "auto"] | None = None,
         submission_mode: Literal["manual", "semi_auto", "full_auto"] | None = None,
         selecting_mode: Literal["manual", "semi_auto", "full_auto"] | None = None,
         publish_mode: Literal["manual", "auto"] | None = None,
+        result_mode: Literal["manual", "auto"] | None = None,
         author_publication_mode: Literal["with_result", "manual", "never"] | None = None,
+        author_reveal: bool | None = None,
         author_reveal_zero: bool | None = None,
     ) -> None:
         assert interaction.guild is not None
+        if select_rule_config is not None:
+            if any(
+                value is not None
+                for value in (
+                    title,
+                    theme,
+                    description,
+                    entry_close_at,
+                    submission_open_at,
+                    submission_close_at,
+                    selecting_close_at,
+                    entry_approval,
+                    min_participants,
+                    submission_min,
+                    submission_max,
+                    submission_max_unlimited,
+                    submission_overflow,
+                    entry_mode,
+                    submission_mode,
+                    selecting_mode,
+                    publish_mode,
+                    result_mode,
+                    author_publication_mode,
+                    author_reveal,
+                    author_reveal_zero,
+                )
+            ):
+                await interaction.response.send_message(
+                    embed=error_embed("select_rule_config は他の編集項目と同時指定できません。"),
+                    ephemeral=True,
+                )
+                return
+            if select_rule_config.strip().lower() in {"gui", "modal", "form", "フォーム", "入力"}:
+                await interaction.response.send_modal(SelectRuleConfigModal(self, kukai_id))
+                return
+            await self._edit_select_rule_config(
+                interaction,
+                kukai_id=kukai_id,
+                select_rule_config=select_rule_config,
+            )
+            return
+
         try:
+            entry_close_dt = parse_datetime(entry_close_at) if entry_close_at else None
             submission_open_dt = parse_datetime(submission_open_at) if submission_open_at else None
             submission_close_dt = parse_datetime(submission_close_at) if submission_close_at else None
             selecting_close_dt = parse_datetime(selecting_close_at) if selecting_close_at else None
@@ -1409,11 +1493,15 @@ class KukaiCog(commands.Cog):
                     "title": kukai.title,
                     "theme": kukai.theme,
                     "description": kukai.description,
+                    "entry_close_at": kukai.entry_close_at,
+                    "entry_approval": kukai.entry_approval,
+                    "min_participants": kukai.min_participants,
                     "submission_open_at": kukai.submission_open_at,
                     "submission_close_at": kukai.submission_close_at,
                     "selecting_close_at": kukai.selecting_close_at,
                     "submission_min": kukai.submission_min,
                     "submission_max": kukai.submission_max,
+                    "submission_overflow": kukai.submission_overflow,
                     "entry_mode": kukai.entry_mode,
                     "submission_mode": kukai.submission_mode,
                     "selecting_mode": kukai.selecting_mode,
@@ -1430,17 +1518,23 @@ class KukaiCog(commands.Cog):
                     title=title,
                     theme=theme,
                     description=description,
+                    entry_close_at=entry_close_dt,
                     submission_open_at=submission_open_dt,
                     submission_close_at=submission_close_dt,
                     selecting_close_at=selecting_close_dt,
+                    entry_approval=entry_approval,
+                    min_participants=min_participants,
                     submission_min=submission_min,
                     submission_max=submission_max,
                     submission_max_unlimited=bool(submission_max_unlimited),
+                    submission_overflow=submission_overflow,
                     entry_mode=entry_mode,
                     submission_mode=submission_mode,
                     selecting_mode=selecting_mode,
                     publish_mode=publish_mode,
+                    result_mode=result_mode,
                     author_publication_mode=author_publication_mode,
+                    author_reveal=author_reveal,
                     author_reveal_zero=author_reveal_zero,
                 )
 
@@ -1452,11 +1546,15 @@ class KukaiCog(commands.Cog):
                     "title": kukai.title,
                     "theme": kukai.theme,
                     "description": kukai.description,
+                    "entry_close_at": kukai.entry_close_at,
+                    "entry_approval": kukai.entry_approval,
+                    "min_participants": kukai.min_participants,
                     "submission_open_at": kukai.submission_open_at,
                     "submission_close_at": kukai.submission_close_at,
                     "selecting_close_at": kukai.selecting_close_at,
                     "submission_min": kukai.submission_min,
                     "submission_max": kukai.submission_max,
+                    "submission_overflow": kukai.submission_overflow,
                     "entry_mode": kukai.entry_mode,
                     "submission_mode": kukai.submission_mode,
                     "selecting_mode": kukai.selecting_mode,
@@ -1473,12 +1571,24 @@ class KukaiCog(commands.Cog):
                     changed_lines.append(f"題: {(before['theme'] or '未設定')} → {(after['theme'] or '未設定')}")
                 if before["description"] != after["description"]:
                     changed_lines.append("説明: 更新")
+                if before["entry_approval"] != after["entry_approval"]:
+                    changed_lines.append(
+                        f"エントリー承認: {'あり' if before['entry_approval'] else 'なし'}"
+                        f" → {'あり' if after['entry_approval'] else 'なし'}"
+                    )
+                if before["min_participants"] != after["min_participants"]:
+                    changed_lines.append(f"最小成立人数: {before['min_participants']} → {after['min_participants']}")
                 if before["submission_min"] != after["submission_min"]:
                     changed_lines.append(f"最小投句数: {before['submission_min']} → {after['submission_min']}")
                 if before["submission_max"] != after["submission_max"]:
                     old_max = "∞" if before["submission_max"] is None else str(before["submission_max"])
                     new_max = "∞" if after["submission_max"] is None else str(after["submission_max"])
                     changed_lines.append(f"最大投句数: {old_max} → {new_max}")
+                if before["submission_overflow"] != after["submission_overflow"]:
+                    changed_lines.append(
+                        f"投句数超過: {'許可' if before['submission_overflow'] else '不許可'}"
+                        f" → {'許可' if after['submission_overflow'] else '不許可'}"
+                    )
                 if before["submission_mode"] != after["submission_mode"]:
                     changed_lines.append(
                         f"投句進行モード: {mode_labels.get(str(before['submission_mode']), str(before['submission_mode']))}"
@@ -1499,6 +1609,11 @@ class KukaiCog(commands.Cog):
                         f"投句公開モード: {mode_labels.get(str(before['publish_mode']), str(before['publish_mode']))}"
                         f" → {mode_labels.get(str(after['publish_mode']), str(after['publish_mode']))}"
                     )
+                if before["result_mode"] != after["result_mode"]:
+                    changed_lines.append(
+                        f"結果公開モード: {mode_labels.get(str(before['result_mode']), str(before['result_mode']))}"
+                        f" → {mode_labels.get(str(after['result_mode']), str(after['result_mode']))}"
+                    )
                 if before["author_publication_mode"] != after["author_publication_mode"]:
                     changed_lines.append(
                         f"作者公開設定: {kukai_service.author_publication_label(str(before['author_publication_mode']))}"
@@ -1512,6 +1627,11 @@ class KukaiCog(commands.Cog):
                     changed_lines.append(
                         f"0点以下作者公開: {'公開' if before['author_reveal_zero'] else '非公開'}"
                         f" → {'公開' if after['author_reveal_zero'] else '非公開'}"
+                    )
+                if before["entry_close_at"] != after["entry_close_at"]:
+                    changed_lines.append(
+                        f"エントリー締切: {format_jst(before['entry_close_at']) if before['entry_close_at'] else '未設定'}"
+                        f" → {format_jst(after['entry_close_at']) if after['entry_close_at'] else '未設定'}"
                     )
                 if before["submission_close_at"] != after["submission_close_at"]:
                     changed_lines.append(
@@ -1572,6 +1692,164 @@ class KukaiCog(commands.Cog):
             )
         except ServiceError as e:
             await interaction.response.send_message(embed=error_embed(str(e)), ephemeral=True)
+
+    async def _edit_select_rule_config(
+        self,
+        interaction: discord.Interaction,
+        *,
+        kukai_id: int | None,
+        select_rule_config: str,
+    ) -> None:
+        try:
+            fields = parse_fields(select_rule_config)
+            reject_unknown_keys(fields, {"preset_id", "points_enabled", "label"})
+            preset_id_raw = first_value(fields, "preset_id")
+            label_fields = values_for(fields, "label")
+            if preset_id_raw and label_fields:
+                raise BulkParseError("preset_id と label は同時指定できません。")
+            if not preset_id_raw and not label_fields:
+                raise BulkParseError("preset_id または label を1件以上指定してください。")
+            if preset_id_raw and first_value(fields, "points_enabled") is not None:
+                raise BulkParseError("preset_id 指定時は points_enabled を直接指定できません。")
+            preset_id = parse_int(preset_id_raw, name="preset_id", min_value=1) if preset_id_raw else None
+            points_enabled = parse_bool(
+                first_value(fields, "points_enabled", "true") or "true",
+                name="points_enabled",
+            )
+            label_specs = [
+                parse_label_spec(field.value, line_no=field.line_no)
+                for field in label_fields
+            ]
+        except BulkParseError as e:
+            await interaction.response.send_message(embed=error_embed(str(e)), ephemeral=True)
+            return
+
+        await interaction.response.defer(ephemeral=True)
+        clear_existing_select_data = False
+        select_count = 0
+        overall_count = 0
+        old_summary = "未設定"
+        new_summary = "未設定"
+
+        try:
+            async with get_session() as session:
+                kukai = await kukai_service.resolve_kukai_in_channel(
+                    session,
+                    guild_id=interaction.guild.id,
+                    channel_id=effective_channel_id(interaction),
+                    kukai_id=kukai_id,
+                )
+                if not await permission_service.is_kukai_admin(session, kukai, interaction.user):  # type: ignore[arg-type]
+                    await interaction.edit_original_response(
+                        embed=error_embed("この操作は句会管理者のみ実行できます。")
+                    )
+                    return
+
+                state = KukaiState.from_value(kukai.state)
+                if state not in {
+                    KukaiState.DRAFT,
+                    KukaiState.ENTRY_OPEN,
+                    KukaiState.ENTRY_CLOSED,
+                    KukaiState.SUBMISSION_OPEN,
+                    KukaiState.SUBMISSION_CLOSED,
+                    KukaiState.WAITING_PUBLISH,
+                }:
+                    await interaction.edit_original_response(
+                        embed=error_embed("選句開始後は選句ルールを差し替えできません。")
+                    )
+                    return
+
+                from sqlalchemy import select as _sa_select
+                from bot.models.select_rule import SelectLabel
+
+                current_labels = list(
+                    (
+                        await session.execute(
+                            _sa_select(SelectLabel)
+                            .where(SelectLabel.kukai_id == kukai.id)
+                            .order_by(SelectLabel.display_order)
+                        )
+                    ).scalars().all()
+                )
+                old_summary = build_select_summary(kukai.submission_min, kukai.submission_max, current_labels)
+
+                if preset_id is not None:
+                    template = await select_rule_service.get_template(
+                        session, interaction.guild.id, preset_id
+                    )
+                    points_enabled, _ = select_rule_service.deserialize_template_payload(
+                        template.definition_json
+                    )
+                    label_specs = select_rule_service.build_kukai_specs_from_template(template)
+
+                normalized_specs = select_rule_service.normalize_kukai_specs(label_specs)
+                if not points_enabled:
+                    for spec in normalized_specs:
+                        spec["point"] = 0
+                new_summary = build_select_summary(kukai.submission_min, kukai.submission_max, normalized_specs)
+                select_count, overall_count = await kukai_service.count_select_rule_data(session, kukai.id)
+                resolved_id = kukai.id
+
+            if select_count or overall_count:
+                view = ConfirmView(timeout=60)
+                if view.children:
+                    view.children[0].label = "削除して差し替え"  # type: ignore[attr-defined]
+                warning = discord.Embed(
+                    title="選句データが残っています",
+                    description=(
+                        "選句ルールを差し替えるには、既存の選句・選評データを削除します。\n"
+                        f"選句: {select_count} 件 / 総評: {overall_count} 件"
+                    ),
+                    color=COLOR_INFO,
+                )
+                warning.add_field(name="現在", value=old_summary, inline=False)
+                warning.add_field(name="差し替え後", value=new_summary, inline=False)
+                warning.set_footer(text=f"句会ID: {resolved_id}")
+                await interaction.edit_original_response(embed=warning, view=view)
+                await view.wait()
+                if not view.confirmed:
+                    await interaction.edit_original_response(
+                        embed=success_embed("選句ルールの差し替えをキャンセルしました。"),
+                        view=None,
+                    )
+                    return
+                clear_existing_select_data = True
+
+            async with get_session() as session:
+                kukai = await kukai_service.get_kukai(session, resolved_id, interaction.guild.id)
+                if not await permission_service.is_kukai_admin(session, kukai, interaction.user):  # type: ignore[arg-type]
+                    await interaction.edit_original_response(
+                        embed=error_embed("この操作は句会管理者のみ実行できます。"),
+                        view=None,
+                    )
+                    return
+                labels = await kukai_service.replace_select_rules(
+                    session,
+                    kukai,
+                    select_label_specs=label_specs,
+                    points_enabled=points_enabled,
+                    clear_existing_select_data=clear_existing_select_data,
+                )
+                final_summary = build_select_summary(kukai.submission_min, kukai.submission_max, labels)
+                changed_lines = [f"選句ルール: {old_summary} → {final_summary}"]
+                if clear_existing_select_data:
+                    changed_lines.append(f"選句・選評データを削除: 選句 {select_count} 件 / 総評 {overall_count} 件")
+
+            await interaction.edit_original_response(
+                embed=success_embed(
+                    f"句会「{kukai.title}」の選句ルールを差し替えました。\n"
+                    f"新しい設定: {final_summary}"
+                ),
+                view=None,
+            )
+            await self._announce_settings_updated(
+                interaction.guild,
+                kukai,
+                deadlines_changed=False,
+                changed_lines=changed_lines,
+            )
+        except ServiceError as e:
+            await interaction.edit_original_response(embed=error_embed(str(e)), view=None)
 
     # ------------------------------------------------------------------
     # /kukai admin subgroup

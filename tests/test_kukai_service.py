@@ -3,9 +3,12 @@
 from datetime import datetime, timedelta, timezone
 
 import pytest
+from sqlalchemy import select
 
 from bot.models.kukai import Kukai
+from bot.models.select import OverallSelectComment, Select
 from bot.models.select_rule import SelectLabel
+from bot.models.submission import Submission
 from bot.services import kukai_service
 from bot.services.errors import DeadlineConflictError, InvalidStateError, NotFoundError, ValidationError
 from bot.state_machine.states import KukaiState
@@ -186,6 +189,244 @@ async def test_create_kukai_validates_submission_open_at(db_session):
             submission_close_at=close_at,
             selecting_close_at=_utc(14),
             entry_enabled=False,
+        )
+
+
+@pytest.mark.asyncio
+async def test_edit_kukai_updates_newly_exposed_settings(db_session):
+    kukai = await kukai_service.create_kukai(
+        db_session,
+        guild_id=1,
+        created_by=100,
+        channel_id=200,
+        title="編集対象追加",
+        entry_close_at=_utc(3),
+        submission_close_at=_utc(7),
+        selecting_close_at=_utc(14),
+    )
+    new_entry_close = _utc(4)
+
+    deadlines_changed = await kukai_service.edit_kukai(
+        db_session,
+        kukai,
+        entry_close_at=new_entry_close,
+        entry_approval=True,
+        min_participants=3,
+        submission_overflow=True,
+        result_mode="auto",
+    )
+
+    assert deadlines_changed is True
+    assert kukai.entry_close_at == new_entry_close
+    assert kukai.entry_approval is True
+    assert kukai.min_participants == 3
+    assert kukai.submission_overflow is True
+    assert kukai.result_mode == "auto"
+
+
+@pytest.mark.asyncio
+async def test_edit_kukai_validates_entry_close_at(db_session):
+    kukai = await kukai_service.create_kukai(
+        db_session,
+        guild_id=1,
+        created_by=100,
+        channel_id=200,
+        title="エントリー締切逆転",
+        entry_close_at=_utc(3),
+        submission_close_at=_utc(7),
+        selecting_close_at=_utc(14),
+    )
+
+    with pytest.raises(DeadlineConflictError):
+        await kukai_service.edit_kukai(db_session, kukai, entry_close_at=_utc(8))
+
+
+@pytest.mark.asyncio
+async def test_edit_kukai_manual_author_publication_resets_revealed_authors(db_session):
+    kukai = await kukai_service.create_kukai(
+        db_session,
+        guild_id=1,
+        created_by=100,
+        channel_id=200,
+        title="作者公開戻し",
+        entry_close_at=_utc(3),
+        submission_close_at=_utc(7),
+        selecting_close_at=_utc(14),
+        author_publication_mode="with_result",
+    )
+    kukai.state = KukaiState.RESULTS
+    kukai.author_reveal = True
+
+    await kukai_service.edit_kukai(
+        db_session,
+        kukai,
+        author_publication_mode="manual",
+    )
+
+    assert kukai.author_publication_mode == "manual"
+    assert kukai.author_reveal is False
+
+
+@pytest.mark.asyncio
+async def test_edit_kukai_never_author_publication_resets_zero_policy(db_session):
+    kukai = await kukai_service.create_kukai(
+        db_session,
+        guild_id=1,
+        created_by=100,
+        channel_id=200,
+        title="作者非公開戻し",
+        entry_close_at=_utc(3),
+        submission_close_at=_utc(7),
+        selecting_close_at=_utc(14),
+        author_publication_mode="with_result",
+        author_reveal_zero=False,
+    )
+    kukai.state = KukaiState.RESULTS
+    kukai.author_reveal = True
+
+    await kukai_service.edit_kukai(
+        db_session,
+        kukai,
+        author_publication_mode="never",
+    )
+
+    assert kukai.author_publication_mode == "never"
+    assert kukai.author_reveal is False
+    assert kukai.author_reveal_zero is True
+
+
+@pytest.mark.asyncio
+async def test_edit_kukai_author_reveal_true_switches_never_to_manual(db_session):
+    kukai = await kukai_service.create_kukai(
+        db_session,
+        guild_id=1,
+        created_by=100,
+        channel_id=200,
+        title="作者手動公開",
+        entry_close_at=_utc(3),
+        submission_close_at=_utc(7),
+        selecting_close_at=_utc(14),
+        author_publication_mode="never",
+    )
+
+    await kukai_service.edit_kukai(db_session, kukai, author_reveal=True)
+
+    assert kukai.author_publication_mode == "manual"
+    assert kukai.author_reveal is True
+
+
+@pytest.mark.asyncio
+async def test_replace_select_rules_replaces_labels_before_selecting(db_session):
+    kukai = await kukai_service.create_kukai(
+        db_session,
+        guild_id=1,
+        created_by=100,
+        channel_id=200,
+        title="選句ルール差し替え",
+        entry_close_at=_utc(3),
+        submission_close_at=_utc(7),
+        selecting_close_at=_utc(14),
+    )
+
+    labels = await kukai_service.replace_select_rules(
+        db_session,
+        kukai,
+        select_label_specs=[
+            {
+                "label": "二重丸",
+                "point": 3,
+                "min_count": 1,
+                "max_count": 2,
+                "comment_mode": "required",
+            }
+        ],
+        points_enabled=True,
+    )
+
+    assert kukai.points_enabled is True
+    assert {label.label for label in labels} == {"二重丸", "作者コメント"}
+    stored = (
+        await db_session.execute(
+            select(SelectLabel).where(SelectLabel.kukai_id == kukai.id)
+        )
+    ).scalars().all()
+    assert {label.label for label in stored} == {"二重丸", "作者コメント"}
+
+
+@pytest.mark.asyncio
+async def test_replace_select_rules_clears_existing_select_data_when_confirmed(db_session):
+    kukai = await kukai_service.create_kukai(
+        db_session,
+        guild_id=1,
+        created_by=100,
+        channel_id=200,
+        title="残存選句あり",
+        entry_close_at=_utc(3),
+        submission_close_at=_utc(7),
+        selecting_close_at=_utc(14),
+    )
+    label = (
+        await db_session.execute(
+            select(SelectLabel)
+            .where(SelectLabel.kukai_id == kukai.id, SelectLabel.label == "特選")
+        )
+    ).scalar_one()
+    submission = Submission(kukai_id=kukai.id, user_id=1001, text="古池や")
+    db_session.add(submission)
+    await db_session.flush()
+    db_session.add(
+        Select(
+            kukai_id=kukai.id,
+            selector_user_id=1002,
+            submission_id=submission.id,
+            select_label_id=label.id,
+        )
+    )
+    db_session.add(OverallSelectComment(kukai_id=kukai.id, user_id=1002, comment="総評"))
+    await db_session.flush()
+
+    assert await kukai_service.count_select_rule_data(db_session, kukai.id) == (1, 1)
+    with pytest.raises(ValidationError):
+        await kukai_service.replace_select_rules(
+            db_session,
+            kukai,
+            select_label_specs=[{"label": "並", "point": 1, "min_count": 0, "max_count": 3}],
+            points_enabled=False,
+        )
+
+    labels = await kukai_service.replace_select_rules(
+        db_session,
+        kukai,
+        select_label_specs=[{"label": "並", "point": 1, "min_count": 0, "max_count": 3}],
+        points_enabled=False,
+        clear_existing_select_data=True,
+    )
+
+    assert await kukai_service.count_select_rule_data(db_session, kukai.id) == (0, 0)
+    assert kukai.points_enabled is False
+    assert {label.label: label.point for label in labels} == {"並": 0, "作者コメント": 0}
+
+
+@pytest.mark.asyncio
+async def test_replace_select_rules_rejects_after_selecting_started(db_session):
+    kukai = await kukai_service.create_kukai(
+        db_session,
+        guild_id=1,
+        created_by=100,
+        channel_id=200,
+        title="選句開始後",
+        entry_close_at=_utc(3),
+        submission_close_at=_utc(7),
+        selecting_close_at=_utc(14),
+    )
+    kukai.state = KukaiState.SELECTING_OPEN
+
+    with pytest.raises(InvalidStateError):
+        await kukai_service.replace_select_rules(
+            db_session,
+            kukai,
+            select_label_specs=[{"label": "並", "point": 1, "min_count": 0, "max_count": 3}],
+            points_enabled=True,
         )
 
 
