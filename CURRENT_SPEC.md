@@ -1,6 +1,6 @@
 # Kukai Bot 現在仕様（技術者向け）
 
-最終更新: 2026-05-30（PostgreSQL移行・select_id統一）
+最終更新: 2026-05-31（/kukai edit 設定更新拡張）
 
 ## 1. 全体構成
 - 実装言語: Python 3.11+（開発・テスト環境は Python 3.13）
@@ -216,6 +216,16 @@
   - `points_enabled`
   - `labels[]`: `label`, `point`, `rank_priority`, `min_count`, `max_count`, `comment_mode`
   - 旧JSONに `rank_priority` が無い場合は読み込み時に定義順で補完
+- 句会作成後の選句ルール差し替え:
+  - `/kukai edit select_rule_config:...` で句会固有の選句ラベルを差し替える
+  - `select_rule_config=gui` でモーダル入力を開く
+  - 直接入力の対応項目: `preset_id`, `points_enabled`, `label`
+  - `preset_id` と `label` は同時指定不可
+  - `preset_id` 指定時はプリセット定義の `points_enabled` とラベルを適用する
+  - `label` 指定時は `points_enabled` を明示指定可能（未指定時は `true`）
+  - 選句開始前状態（`draft` / `entry_open` / `entry_closed` / `submission_open` / `submission_closed` / `waiting_publish`）のみ差し替え可能
+  - 既存の選句・総評データが残っている場合は確認UIを表示し、承認時のみそれらを削除して差し替える
+  - `作者コメント` は句会ラベル展開時に自動補完される
 
 ## 11b. 通知プリセット
 - `/notify-preset list` / `/notify-preset add` / `/notify-preset bulk` / `/notify-preset delete` / `/notify-preset set-default` を提供
@@ -371,6 +381,23 @@ overall=全体に春らしい句が多かったです
 - 変更された項目のみ表示（非変更項目は非表示）
 - 締切変更時は再スケジュール実施を明記
 - 句会名変更時、開催チャンネル名が旧句会名由来の名前と一致している場合はチャンネル名も更新
+- 編集対象:
+  - 基本情報: `title`, `theme`, `description`
+  - 締切: `entry_close_at`, `submission_open_at`, `submission_close_at`, `selecting_close_at`
+  - エントリー設定: `entry_approval`, `entry_mode`, `min_participants`
+  - 投句設定: `submission_min`, `submission_max`, `submission_max_unlimited`, `submission_overflow`, `submission_mode`
+  - 選句・公開設定: `selecting_mode`, `publish_mode`, `result_mode`, `select_rule_config`
+  - 作者公開設定: `author_publication_mode`, `author_reveal`, `author_reveal_zero`
+- 作者公開設定:
+  - `author_publication_mode=with_result` は作者公開済み扱い（`author_reveal=true`）にする
+  - `author_publication_mode=manual` は作者未公開（`author_reveal=false`）に戻す
+  - `author_publication_mode=never` は作者未公開に戻し、`author_reveal_zero=true` に補正する
+  - `author_reveal=true` を明示した場合、現在 `never` なら `manual` に切り替えて作者公開済みにする
+  - 既にDiscordへ投稿済みの過去メッセージは巻き戻さない。以後の結果表示は現在のDB設定に従う
+- `select_rule_config`:
+  - 他の編集項目と同時指定不可
+  - `select_rule_config=gui` でモーダル入力を開く
+  - モーダル/直接入力の本文は行形式（例: `preset_id=3` または複数の `label=...`）
 
 ## 14. 通知スケジュール整合
 - ステージ進行時・設定更新時に通知ジョブを再評価

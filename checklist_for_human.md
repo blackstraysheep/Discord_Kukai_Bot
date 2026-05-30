@@ -8,7 +8,7 @@ THIS DOCUMENT IS NOT FOR CODING AGENT(S) TO CHECK; IT IS FOR MANUAL CHECK. FOR A
 - proceedの使い勝手が悪い（現在および次のstateがわかるべき、state指定できるようになるべき）
 
 - 選句モーダルの編集
-- kukai edit対象！
+
 
 - Shard対応可能な設計
 - pdf同時生成対応（cpu上限超えないように）
