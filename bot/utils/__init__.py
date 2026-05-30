@@ -303,10 +303,10 @@ class SubmissionView(discord.ui.View):
         )
         del_btn.callback = self._on_delete
 
+        self.add_item(del_btn)
+        self.add_item(edit_btn)
         self.add_item(add_btn)
         self.add_item(bulk_btn)
-        self.add_item(edit_btn)
-        self.add_item(del_btn)
 
     async def _on_add(self, interaction: discord.Interaction) -> None:
         await interaction.response.send_modal(SubmitAddModal(self.kukai_id))
@@ -376,12 +376,6 @@ class RollbackView(discord.ui.View):
         super().__init__(timeout=60)
         self.choice: str | None = None  # 'keep_selects' | 'reset_selects' | None (cancelled)
 
-    @discord.ui.button(label="選句を保持して戻す", style=discord.ButtonStyle.primary)
-    async def keep_selects(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
-        self.choice = "keep_selects"
-        self.stop()
-        await interaction.response.defer()
-
     @discord.ui.button(label="選句もリセットして戻す", style=discord.ButtonStyle.danger)
     async def reset_selects(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         self.choice = "reset_selects"
@@ -391,5 +385,11 @@ class RollbackView(discord.ui.View):
     @discord.ui.button(label="キャンセル", style=discord.ButtonStyle.secondary)
     async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         self.choice = None
+        self.stop()
+        await interaction.response.defer()
+
+    @discord.ui.button(label="選句を保持して戻す", style=discord.ButtonStyle.primary)
+    async def keep_selects(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        self.choice = "keep_selects"
         self.stop()
         await interaction.response.defer()

@@ -134,6 +134,10 @@ class StepNotifyView(discord.ui.View):
         clear_btn.callback = self._clear
         self.add_item(clear_btn)
 
+        cancel_btn = discord.ui.Button(label="❌ キャンセル", style=discord.ButtonStyle.danger, row=4)
+        cancel_btn.callback = self._cancel
+        self.add_item(cancel_btn)
+
         back_btn = discord.ui.Button(label="← 戻る", style=discord.ButtonStyle.secondary, row=4)
         back_btn.callback = self._back
         self.add_item(back_btn)
@@ -141,10 +145,6 @@ class StepNotifyView(discord.ui.View):
         next_btn = discord.ui.Button(label="次へ ➜", style=discord.ButtonStyle.success, row=4)
         next_btn.callback = self._next
         self.add_item(next_btn)
-
-        cancel_btn = discord.ui.Button(label="❌ キャンセル", style=discord.ButtonStyle.danger, row=4)
-        cancel_btn.callback = self._cancel
-        self.add_item(cancel_btn)
 
     async def _edit(self, interaction: discord.Interaction) -> None:
         await interaction.response.send_modal(NotificationModal(self.state))

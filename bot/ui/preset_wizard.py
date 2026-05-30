@@ -343,13 +343,13 @@ class PresetWizardView(discord.ui.View):
         self.add_item(_ActionSelect(self))
         self.add_item(_PresetSelect(self))
 
-        next_btn = discord.ui.Button(
-            label="次へ（ステップ2）",
-            style=discord.ButtonStyle.success,
+        close_btn = discord.ui.Button(
+            label="閉じる",
+            style=discord.ButtonStyle.danger,
             row=2,
         )
-        next_btn.callback = self._on_next
-        self.add_item(next_btn)
+        close_btn.callback = self._on_close
+        self.add_item(close_btn)
 
         refresh_btn = discord.ui.Button(
             label="再読込",
@@ -359,13 +359,13 @@ class PresetWizardView(discord.ui.View):
         refresh_btn.callback = self._on_refresh
         self.add_item(refresh_btn)
 
-        close_btn = discord.ui.Button(
-            label="閉じる",
-            style=discord.ButtonStyle.danger,
+        next_btn = discord.ui.Button(
+            label="次へ（ステップ2）",
+            style=discord.ButtonStyle.success,
             row=2,
         )
-        close_btn.callback = self._on_close
-        self.add_item(close_btn)
+        next_btn.callback = self._on_next
+        self.add_item(next_btn)
 
     async def reload(self) -> None:
         async with get_session() as session:

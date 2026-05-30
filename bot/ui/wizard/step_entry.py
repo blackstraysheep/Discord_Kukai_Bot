@@ -131,6 +131,12 @@ class StepEntryView(discord.ui.View):
         self.add_item(_EntryApprovalSelect(state))
         self.add_item(_EntryModeSelect(state))
 
+        cancel_btn = discord.ui.Button(
+            label="❌ キャンセル", style=discord.ButtonStyle.danger, row=3
+        )
+        cancel_btn.callback = self._cancel
+        self.add_item(cancel_btn)
+
         back_btn = discord.ui.Button(
             label="← 戻る", style=discord.ButtonStyle.secondary, row=3
         )
@@ -142,12 +148,6 @@ class StepEntryView(discord.ui.View):
         )
         next_btn.callback = self._next
         self.add_item(next_btn)
-
-        cancel_btn = discord.ui.Button(
-            label="❌ キャンセル", style=discord.ButtonStyle.danger, row=3
-        )
-        cancel_btn.callback = self._cancel
-        self.add_item(cancel_btn)
 
     async def _back(self, interaction: discord.Interaction) -> None:
         self.state.step = 1

@@ -123,17 +123,17 @@ class LateEntryReviewView(discord.ui.View):
         self.target_user_id = target_user_id
         self.display_name = display_name
 
-    @discord.ui.button(label="承認", style=discord.ButtonStyle.success)
-    async def approve_button(
-        self, interaction: discord.Interaction, button: discord.ui.Button
-    ) -> None:
-        await self._apply(interaction, "approve")
-
     @discord.ui.button(label="却下", style=discord.ButtonStyle.danger)
     async def reject_button(
         self, interaction: discord.Interaction, button: discord.ui.Button
     ) -> None:
         await self._apply(interaction, "reject")
+
+    @discord.ui.button(label="承認", style=discord.ButtonStyle.success)
+    async def approve_button(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ) -> None:
+        await self._apply(interaction, "approve")
 
     async def _apply(self, interaction: discord.Interaction, action: str) -> None:
         assert interaction.guild is not None

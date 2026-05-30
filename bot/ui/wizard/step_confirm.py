@@ -135,6 +135,18 @@ class StepConfirmView(discord.ui.View):
         super().__init__(timeout=900)
         self.state = state
 
+        cancel_btn = discord.ui.Button(
+            label="❌ キャンセル", style=discord.ButtonStyle.danger, row=0
+        )
+        cancel_btn.callback = self._cancel
+        self.add_item(cancel_btn)
+
+        back_btn = discord.ui.Button(
+            label="← 戻る", style=discord.ButtonStyle.secondary, row=0
+        )
+        back_btn.callback = self._back
+        self.add_item(back_btn)
+
         confirm_btn = discord.ui.Button(
             label="✅ 作成",
             style=discord.ButtonStyle.success,
@@ -143,18 +155,6 @@ class StepConfirmView(discord.ui.View):
         )
         confirm_btn.callback = self._confirm
         self.add_item(confirm_btn)
-
-        back_btn = discord.ui.Button(
-            label="← 戻る", style=discord.ButtonStyle.secondary, row=0
-        )
-        back_btn.callback = self._back
-        self.add_item(back_btn)
-
-        cancel_btn = discord.ui.Button(
-            label="❌ キャンセル", style=discord.ButtonStyle.danger, row=0
-        )
-        cancel_btn.callback = self._cancel
-        self.add_item(cancel_btn)
 
     async def _back(self, interaction: discord.Interaction) -> None:
         self.state.step = 8

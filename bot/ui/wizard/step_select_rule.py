@@ -314,6 +314,10 @@ class StepSelectRuleView(discord.ui.View):
         custom_btn.callback = self._edit_custom_labels
         self.add_item(custom_btn)
 
+        cancel_btn = discord.ui.Button(label="❌ キャンセル", style=discord.ButtonStyle.danger, row=3)
+        cancel_btn.callback = self._cancel
+        self.add_item(cancel_btn)
+
         back_btn = discord.ui.Button(label="← 戻る", style=discord.ButtonStyle.secondary, row=3)
         back_btn.callback = self._back
         self.add_item(back_btn)
@@ -321,10 +325,6 @@ class StepSelectRuleView(discord.ui.View):
         next_btn = discord.ui.Button(label="次へ ➜", style=discord.ButtonStyle.success, row=3)
         next_btn.callback = self._next
         self.add_item(next_btn)
-
-        cancel_btn = discord.ui.Button(label="❌ キャンセル", style=discord.ButtonStyle.danger, row=3)
-        cancel_btn.callback = self._cancel
-        self.add_item(cancel_btn)
 
     async def _refresh_presets(self, interaction: discord.Interaction) -> None:
         try:

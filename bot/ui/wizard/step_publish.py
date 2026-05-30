@@ -189,6 +189,12 @@ class StepPublishView(discord.ui.View):
         self.add_item(_AuthorPublicationModeSelect(state))
         self.add_item(_AuthorRevealZeroSelect(state))
 
+        cancel_btn = discord.ui.Button(
+            label="❌ キャンセル", style=discord.ButtonStyle.danger, row=4
+        )
+        cancel_btn.callback = self._cancel
+        self.add_item(cancel_btn)
+
         back_btn = discord.ui.Button(
             label="← 戻る", style=discord.ButtonStyle.secondary, row=4
         )
@@ -200,12 +206,6 @@ class StepPublishView(discord.ui.View):
         )
         next_btn.callback = self._next
         self.add_item(next_btn)
-
-        cancel_btn = discord.ui.Button(
-            label="❌ キャンセル", style=discord.ButtonStyle.danger, row=4
-        )
-        cancel_btn.callback = self._cancel
-        self.add_item(cancel_btn)
 
     async def _back(self, interaction: discord.Interaction) -> None:
         self.state.step = 5

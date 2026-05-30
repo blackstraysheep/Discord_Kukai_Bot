@@ -303,9 +303,9 @@ class SubmissionView(discord.ui.View):
         )
         del_btn.callback = self._on_delete
 
-        self.add_item(add_btn)
-        self.add_item(edit_btn)
         self.add_item(del_btn)
+        self.add_item(edit_btn)
+        self.add_item(add_btn)
         self._add_slots = add_slots
 
     async def _on_add(self, interaction: discord.Interaction) -> None:
@@ -400,11 +400,6 @@ class RollbackView(discord.ui.View):
         super().__init__(timeout=60)
         self.choice: str | None = None
         self._add_choice_button(
-            label="投句・選句を保持",
-            style=discord.ButtonStyle.primary,
-            choice="keep_all",
-        )
-        self._add_choice_button(
             label="投句保持・選句リセット",
             style=discord.ButtonStyle.danger,
             choice="reset_selects",
@@ -415,6 +410,11 @@ class RollbackView(discord.ui.View):
                 style=discord.ButtonStyle.danger,
                 choice="reset_all",
             )
+        self._add_choice_button(
+            label="投句・選句を保持",
+            style=discord.ButtonStyle.primary,
+            choice="keep_all",
+        )
         self._add_choice_button(
             label="キャンセル",
             style=discord.ButtonStyle.secondary,

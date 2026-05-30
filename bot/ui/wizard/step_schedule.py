@@ -56,6 +56,14 @@ class StepScheduleView(discord.ui.View):
         fill_btn.callback = self._fill
         self.add_item(fill_btn)
 
+        cancel_btn = discord.ui.Button(
+            label="❌ キャンセル",
+            style=discord.ButtonStyle.danger,
+            row=1,
+        )
+        cancel_btn.callback = self._cancel
+        self.add_item(cancel_btn)
+
         back_btn = discord.ui.Button(
             label="← 戻る",
             style=discord.ButtonStyle.secondary,
@@ -72,14 +80,6 @@ class StepScheduleView(discord.ui.View):
         )
         next_btn.callback = self._next
         self.add_item(next_btn)
-
-        cancel_btn = discord.ui.Button(
-            label="❌ キャンセル",
-            style=discord.ButtonStyle.danger,
-            row=1,
-        )
-        cancel_btn.callback = self._cancel
-        self.add_item(cancel_btn)
 
     async def _fill(self, interaction: discord.Interaction) -> None:
         await interaction.response.send_modal(StepScheduleModal(self.state))

@@ -65,6 +65,14 @@ class StepBasicView(discord.ui.View):
             channel_name_btn.callback = self._set_channel_name
             self.add_item(channel_name_btn)
 
+        cancel_btn = discord.ui.Button(
+            label="❌ キャンセル",
+            style=discord.ButtonStyle.danger,
+            row=4,
+        )
+        cancel_btn.callback = self._cancel
+        self.add_item(cancel_btn)
+
         next_btn = discord.ui.Button(
             label="次へ ➜",
             style=discord.ButtonStyle.success,
@@ -73,14 +81,6 @@ class StepBasicView(discord.ui.View):
         )
         next_btn.callback = self._next
         self.add_item(next_btn)
-
-        cancel_btn = discord.ui.Button(
-            label="❌ キャンセル",
-            style=discord.ButtonStyle.danger,
-            row=4,
-        )
-        cancel_btn.callback = self._cancel
-        self.add_item(cancel_btn)
 
     async def _fill(self, interaction: discord.Interaction) -> None:
         await interaction.response.send_modal(StepBasicModal(self.state))

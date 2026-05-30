@@ -416,10 +416,6 @@ class SelectView(discord.ui.View):
         self.add_item(_SubmissionSelect(self))
         self.add_item(_LabelSelect(self))
 
-        decide_btn = discord.ui.Button(label="✅ 決定", style=discord.ButtonStyle.success, row=2)
-        decide_btn.callback = self._on_decide
-        self.add_item(decide_btn)
-
         remove_btn = discord.ui.Button(label="🗑️ 取消", style=discord.ButtonStyle.danger, row=2)
         remove_btn.callback = self._on_remove
         self.add_item(remove_btn)
@@ -427,6 +423,10 @@ class SelectView(discord.ui.View):
         done_btn = discord.ui.Button(label="完了", style=discord.ButtonStyle.secondary, row=2)
         done_btn.callback = self._on_done
         self.add_item(done_btn)
+
+        decide_btn = discord.ui.Button(label="✅ 決定", style=discord.ButtonStyle.success, row=2)
+        decide_btn.callback = self._on_decide
+        self.add_item(decide_btn)
 
     async def _refresh(self, interaction: discord.Interaction) -> None:
         assert interaction.guild is not None
