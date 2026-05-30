@@ -4,7 +4,7 @@ THIS DOCUMENT IS NOT FOR CODING AGENT(S) TO CHECK; IT IS FOR MANUAL CHECK. FOR A
 
 ＊＊＊将来改修＊＊＊
 
-- ボタン位置
+
 - proceedの使い勝手が悪い（現在および次のstateがわかるべき、state指定できるようになるべき）
 
 - 選句モーダルの編集
@@ -16,6 +16,10 @@ THIS DOCUMENT IS NOT FOR CODING AGENT(S) TO CHECK; IT IS FOR MANUAL CHECK. FOR A
 - 番号順結果のフォーマット
 
 ＊＊＊要確認＊＊＊
+
+- ボタン位置
+- editコマンド
+
 - エントリーが締め切られました、の通知にエントリー（承認）人数と俳号を記載したい（エントリー人数：8名（山田太郎、testaro、☆之助、……）のように）。
 
 - 自動進行を手動で進行した場合に通知が適切に処理されるように修正
