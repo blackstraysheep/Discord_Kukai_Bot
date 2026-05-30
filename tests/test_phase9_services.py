@@ -1,5 +1,6 @@
 """Unit tests for Phase 9 services."""
 
+from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -8,7 +9,7 @@ from sqlalchemy import select
 from bot.models.entry import Entry
 from bot.models.kukai import KukaiAdmin
 from bot.models.submission import PublishedSubmission, Submission
-from bot.models.select import Select
+from bot.models.select import Select, SelectComment
 from bot.repositories import kukai_repo
 from bot.services import entry_service, export_service, kukai_service, submission_service, select_service
 from bot.services.errors import InvalidStateError
@@ -147,7 +148,13 @@ async def test_export_and_import_payload_roundtrip(db_session):
     assert len(first["published_submissions"]) == 1
     assert len(first["selects"]) == 1
     assert len(first["select_comments"]) == 1
+    assert "select_id" in first["select_comments"][0]
+    assert "vote_id" not in first["select_comments"][0]
     assert len(first["results"]) == 1
+
+    legacy_payload = deepcopy(payload)
+    for row in legacy_payload["kukais"][0]["select_comments"]:
+        row["vote_id"] = row.pop("select_id")
 
     imported_ids = await export_service.import_payload(db_session, guild_id=1, payload=payload)
     assert len(imported_ids) == 1
@@ -173,10 +180,32 @@ async def test_export_and_import_payload_roundtrip(db_session):
     select_count = (
         await db_session.execute(select(Select).where(Select.kukai_id == imported_kukai_id))
     ).scalars().all()
+    imported_select_ids = [row.id for row in select_count]
+    comment_count = (
+        await db_session.execute(
+            select(SelectComment).where(SelectComment.select_id.in_(imported_select_ids))
+        )
+    ).scalars().all()
 
     assert len(admin_count) == 0
     assert len(entry_count) == 1
     assert len(submission_count) == 1
     assert len(published_count) == 1
     assert len(select_count) == 1
+    assert len(comment_count) == 1
     assert published[0].number == 1
+
+    legacy_imported_ids = await export_service.import_payload(
+        db_session, guild_id=1, payload=legacy_payload
+    )
+    legacy_select_count = (
+        await db_session.execute(select(Select).where(Select.kukai_id == legacy_imported_ids[0]))
+    ).scalars().all()
+    legacy_comment_count = (
+        await db_session.execute(
+            select(SelectComment).where(
+                SelectComment.select_id.in_([row.id for row in legacy_select_count])
+            )
+        )
+    ).scalars().all()
+    assert len(legacy_comment_count) == 1

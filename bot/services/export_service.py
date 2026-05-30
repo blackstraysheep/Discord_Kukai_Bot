@@ -539,7 +539,10 @@ async def import_payload(
             select_id_map[int(row["id"])] = sel.id
 
         for row in _require_list(bundle.get("select_comments"), "select_comments"):
-            mapped_select_id = select_id_map.get(int(row["select_id"]))
+            source_select_id = row.get("select_id", row.get("vote_id"))
+            if source_select_id is None:
+                continue
+            mapped_select_id = select_id_map.get(int(source_select_id))
             if mapped_select_id is None:
                 continue
             session.add(

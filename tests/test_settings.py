@@ -2,7 +2,7 @@ from bot.settings import Settings
 
 
 def test_sync_db_url_keeps_sqlite_default_sync_driver():
-    settings = Settings(bot_token="token")
+    settings = Settings(_env_file=None, bot_token="token")
 
     assert settings.sync_db_url == "sqlite:///./data/kukai.db"
     assert settings.scheduler_sync_db_url == "sqlite:///./data/kukai_scheduler.db"

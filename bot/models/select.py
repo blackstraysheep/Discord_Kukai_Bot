@@ -48,11 +48,7 @@ class SelectComment(Base, TimestampMixin):
     __tablename__ = "select_comments"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    # NOTE:
-    # Existing DB schema uses the legacy column name `vote_id`.
-    # Keep Python attribute as `select_id` and map it to `vote_id` for compatibility.
     select_id: Mapped[int] = mapped_column(
-        "vote_id",
         Integer,
         ForeignKey("selects.id", ondelete="CASCADE"),
         nullable=False,
