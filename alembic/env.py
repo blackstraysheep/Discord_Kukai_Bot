@@ -13,6 +13,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 from bot.models.base import Base
 import bot.models  # noqa: F401 — registers all ORM models with Base.metadata
+from bot.settings import _to_sync_db_url
 
 config = context.config
 
@@ -36,7 +37,7 @@ def _get_url() -> str:
 
 
 def run_migrations_offline() -> None:
-    url = _get_url().replace("sqlite+aiosqlite", "sqlite")
+    url = _to_sync_db_url(_get_url())
     context.configure(
         url=url,
         target_metadata=target_metadata,

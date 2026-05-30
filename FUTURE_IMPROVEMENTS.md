@@ -95,6 +95,10 @@
   - 同時アクティブサーバーが100を超えたあたりでSQLiteの書き込み競合が顕在化する
   - `DATABASE_URL` の変更と `pgloader` によるデータ移行で対応可能
   - AlembicはURL変更だけで動くが、SQLite固有型の差異を要確認
+- `select` / `vote` 旧命名の完全整理
+  - 現状はPython側では `SelectComment.select_id` として扱いつつ、DBカラム名は既存互換のため `select_comments.vote_id` にマップしている
+  - PostgreSQL新規構築時も互換優先で `vote_id` を維持しているが、将来的にはDBカラム・migration・export/import・テストを含めて `select_id` へ統一する
+  - 既存SQLite/PostgreSQLデータの移行migrationと、旧エクスポートデータ読み込み時の互換処理をセットで設計する
 - GitHub Actions + GHCRによるDockerイメージ配布
   - セルフホスト配布を楽にするため、ビルド済みイメージをGHCR（GitHub Container Registry）にpush
   - `docker-compose.yml` を `build: .` から `image: ghcr.io/...` に切り替える
