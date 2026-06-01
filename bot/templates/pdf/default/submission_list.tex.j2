@@ -1,8 +1,21 @@
 \documentclass[a4paper,landscape]{ltjtarticle}
 \usepackage[no-math,deluxe,expert]{luatexja-preset}
+\usepackage{fontspec}
 \usepackage{geometry}
 \usepackage{array}
 \usepackage{kintou}
+{% raw %}
+\IfFontExistsTF{Noto Color Emoji}{%
+  \newfontfamily\EmojiFont{Noto Color Emoji}[Renderer=HarfBuzz]%
+}{%
+  \IfFontExistsTF{Segoe UI Emoji}{%
+    \newfontfamily\EmojiFont{Segoe UI Emoji}[Renderer=HarfBuzz]%
+  }{%
+    \let\EmojiFont\relax
+  }%
+}
+\newcommand{\emoji}[1]{\ifx\EmojiFont\relax #1\else{\EmojiFont #1}\fi}
+{% endraw %}
 \renewcommand{\baselinestretch}{1}
 \pagestyle{empty}
 \geometry{margin=1.5cm}

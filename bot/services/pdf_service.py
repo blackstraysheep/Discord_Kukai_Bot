@@ -56,6 +56,58 @@ _TEX_ESCAPE = str.maketrans({
     "~": r"\textasciitilde{}",
 })
 
+_VARIATION_SELECTORS = {0xFE0E, 0xFE0F}
+_SKIN_TONE_MODIFIERS = range(0x1F3FB, 0x1F400)
+_REGIONAL_INDICATORS = range(0x1F1E6, 0x1F200)
+_TAG_CHARS = range(0xE0020, 0xE0080)
+
+
+def _is_emoji_base(ch: str) -> bool:
+    code = ord(ch)
+    return (
+        code in {0x00A9, 0x00AE}
+        or code in _REGIONAL_INDICATORS
+        or 0x1F000 <= code <= 0x1FAFF
+        or 0x2600 <= code <= 0x27BF
+    )
+
+
+def _is_keycap_start(s: str, index: int) -> bool:
+    if s[index] not in "#*0123456789":
+        return False
+    if index + 1 >= len(s):
+        return False
+    if ord(s[index + 1]) == 0x20E3:
+        return True
+    return index + 2 < len(s) and ord(s[index + 1]) == 0xFE0F and ord(s[index + 2]) == 0x20E3
+
+
+def _is_emoji_continuation(ch: str) -> bool:
+    code = ord(ch)
+    return (
+        code in _VARIATION_SELECTORS
+        or code in _SKIN_TONE_MODIFIERS
+        or code in _TAG_CHARS
+        or code == 0x20E3  # combining enclosing keycap
+    )
+
+
+def _read_emoji_cluster(s: str, start: int) -> tuple[str, int]:
+    end = start + 1
+    if _is_keycap_start(s, start):
+        if ord(s[end]) == 0xFE0F:
+            end += 1
+        return s[start:end + 1], end + 1
+    while end < len(s) and _is_emoji_continuation(s[end]):
+        end += 1
+    while end + 1 < len(s) and ord(s[end]) == 0x200D and _is_emoji_base(s[end + 1]):
+        end += 2
+        while end < len(s) and _is_emoji_continuation(s[end]):
+            end += 1
+    if ord(s[start]) in _REGIONAL_INDICATORS and end < len(s) and ord(s[end]) in _REGIONAL_INDICATORS:
+        end += 1
+    return s[start:end], end
+
 
 # ---------------------------------------------------------------------------
 # Public helpers
@@ -76,7 +128,17 @@ def is_available() -> bool:
 
 def tex_escape(s: str) -> str:
     """Escape TeX special characters in user-supplied text."""
-    return s.translate(_TEX_ESCAPE)
+    parts: list[str] = []
+    i = 0
+    while i < len(s):
+        ch = s[i]
+        if _is_emoji_base(ch) or _is_keycap_start(s, i):
+            cluster, i = _read_emoji_cluster(s, i)
+            parts.append(r"\emoji{" + cluster.translate(_TEX_ESCAPE) + "}")
+            continue
+        parts.append(ch.translate(_TEX_ESCAPE))
+        i += 1
+    return "".join(parts)
 
 
 # ---------------------------------------------------------------------------

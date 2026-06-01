@@ -56,6 +56,15 @@ class TestTexEscape:
         assert r"\&" in result
         assert r"\#" in result
 
+    def test_emoji_wrapped_for_pdf_font(self):
+        assert tex_escape("春の海🙂") == r"春の海\emoji{🙂}"
+
+    def test_emoji_sequence_wrapped_as_cluster(self):
+        assert tex_escape("家族👨‍👩‍👧‍👦") == r"家族\emoji{👨‍👩‍👧‍👦}"
+
+    def test_emoji_with_special_character_still_escapes_tex(self):
+        assert tex_escape("#️⃣") == r"\emoji{\#️⃣}"
+
 
 # ---------------------------------------------------------------------------
 # is_available
@@ -159,6 +168,17 @@ class TestRenderSubmissionList:
         assert r"100\%" in tex
         assert r"芭蕉 \& 蕪村" in tex
 
+    def test_emoji_font_macro_is_defined(self):
+        data = self._data()
+        data["submissions"] = [
+            {"number": 1, "text": "春の海🙂", "author": "芭蕉😀"}
+        ]
+        tex = _render_template("default", "submission_list.tex.j2", data)
+        assert r"\newcommand{\emoji}" in tex
+        assert tex.index("Noto Color Emoji") < tex.index("Segoe UI Emoji")
+        assert r"春の海\emoji{🙂}" in tex
+        assert r"芭蕉\emoji{😀}" in tex
+
     def test_no_theme_block_when_empty(self):
         data = self._data(kukai_theme=None)
         tex = _render_template("default", "submission_list.tex.j2", data)
@@ -226,6 +246,18 @@ class TestRenderResult:
         tex = _render_template("default", "result.tex.j2", self._data())
         assert "今回の句会は海の句が多く良かった。" in tex
         assert "総評" in tex
+
+    def test_emoji_font_macro_is_defined(self):
+        data = self._data()
+        data["results"][0]["text"] = "春の海🙂"
+        data["results"][0]["author"] = "芭蕉😀"
+        data["results"][0]["label_selects"][0]["comments"][0]["text"] = "よい🙂"
+        tex = _render_template("default", "result.tex.j2", data)
+        assert r"\newcommand{\emoji}" in tex
+        assert tex.index("Noto Color Emoji") < tex.index("Segoe UI Emoji")
+        assert r"春の海\emoji{🙂}" in tex
+        assert r"芭蕉\emoji{😀}" in tex
+        assert r"よい\emoji{🙂}" in tex
 
     def test_no_overall_section_when_empty(self):
         data = self._data(overall_comments=[])
