@@ -14,11 +14,19 @@ docker compose up -d --build
 The compose file sets PostgreSQL defaults, which can be overridden in `.env`:
 
 ```env
-DATABASE_URL=postgresql+asyncpg://kukai:kukai@db:5432/kukai
-SCHEDULER_DB_URL=postgresql+psycopg://kukai:kukai@db:5432/kukai
+POSTGRES_PASSWORD=replace-with-strong-password
+```
+
+By default, Compose derives the bot connection URLs from `POSTGRES_PASSWORD`:
+
+```text
+DATABASE_URL=postgresql+asyncpg://kukai:${POSTGRES_PASSWORD}@db:5432/kukai
+SCHEDULER_DB_URL=postgresql+psycopg://kukai:${POSTGRES_PASSWORD}@db:5432/kukai
 ```
 
 `DATABASE_URL` uses the async driver for the bot runtime. `SCHEDULER_DB_URL` uses a sync driver because APScheduler's SQLAlchemy job store is synchronous.
+
+The PostgreSQL Docker image reads `POSTGRES_PASSWORD` only when the database volume is initialized for the first time. After `postgres_data` exists, `.env` must keep the password that is already set inside PostgreSQL, or the DB user password must be changed with `ALTER USER` before updating `.env`.
 
 ## Verify Migrations
 

@@ -1,6 +1,6 @@
 # Kukai Bot セキュリティ仕様
 
-最終更新: 2026-05-30
+最終更新: 2026-06-02
 
 ## 1. 脅威モデル
 
@@ -82,12 +82,17 @@ RUN useradd -m botuser
 USER botuser
 ```
 
+現在の `Dockerfile` は `botuser` でBotプロセスを実行する。
+
 ### PostgreSQL
 
 ```bash
 # 5432番ポートをインターネットに公開しない
 # DB認証情報は .env に置き、Git管理しない
 ```
+
+`POSTGRES_PASSWORD` は `.env` に必ず設定する。Composeはこの値から `DATABASE_URL` / `SCHEDULER_DB_URL` を生成する。
+既存の `postgres_data` ボリュームがある場合、`.env` の変更だけではDB内ユーザーのパスワードは変わらないため、必要に応じて `ALTER USER` でDB側も更新する。
 
 ### ネットワーク
 
@@ -129,7 +134,8 @@ gpg --symmetric --cipher-algo AES256 kukai_backup.sql
 |---|---|---|
 | クロスサーバーデータ分離 | **対応済み** | 全層でguild_id検証 |
 | PostgreSQL移行 | **対応済み** | Compose override + Alembic |
-| Dockerをnon-rootで実行 | **未対応** | Dockerfileに追加が必要 |
+| Dockerをnon-rootで実行 | **対応済み** | Dockerfileで `botuser` を使用 |
+| DBパスワードの明示設定 | **対応済み** | `POSTGRES_PASSWORD` 必須、`.env` 管理 |
 | SSHパスワード認証無効化 | デプロイ時に設定 | VMセットアップ手順に含める |
 | バックアップ暗号化 | **未対応** | PostgreSQL dumpの暗号化とObject Storage連携時に実施 |
 | プライバシーポリシー | **未作成** | 公開前に必須 |

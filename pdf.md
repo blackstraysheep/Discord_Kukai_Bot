@@ -1,6 +1,6 @@
 # PDF生成機能 実装メモ
 
-最終更新: 2026-05-22
+最終更新: 2026-06-02
 
 ## 技術スタック
 
@@ -8,10 +8,11 @@
 |-----|------|------|
 | TeXエンジン | LuaLaTeX | Unicode完全対応 |
 | 投句一覧クラス | `ltjtarticle` + `luatexja-preset` | 横書き・landscape |
-| 結果クラス | `jlreq` + `luatexja-fontspec` | 縦書き |
+| 結果クラス | `ltjtarticle` + `luatexja-preset` | 縦書き |
 | 均等割り | `kintou.sty`（カスタム） | `bot/templates/pdf/` に配置 |
 | テンプレート | Jinja2 (`.tex.j2`) | `\| tex` フィルタでエスケープ |
-| コンテナ | Docker（`python:3.11` + apt LuaLaTeX） | ローカル＝本番の同一イメージ |
+| 絵文字 | `Noto Color Emoji` 優先、`Segoe UI Emoji` フォールバック | Dockerでは `fonts-noto-color-emoji` をインストール |
+| コンテナ | Docker（`python:3.11` + apt LuaLaTeX + Notoフォント） | ローカル＝本番の同一イメージ |
 | PDF公開 | Caddy（Discord 25MB 超過時のみ） | 未設定時は超過でエラー |
 
 ## ファイル構成
@@ -84,6 +85,14 @@ bot/templates/pdf/{theme}/
 {{- var -}}              ← 前後のスペースを除去（\kintouの引数など）
 ```
 
+### 絵文字
+
+- ユーザー入力中の絵文字は `tex` フィルタで `\emoji{...}` に包む
+- defaultテーマでは `Noto Color Emoji` を優先して使用し、存在しない場合は `Segoe UI Emoji` にフォールバック
+- Docker運用では `Dockerfile` で `fonts-noto-color-emoji` をインストールする
+- フォント依存を変更した場合は `docker compose up -d --build` または `docker compose build bot && docker compose up -d bot` が必要
+- 既に生成済みのPDFは更新されないため、変更後に `/pdf submission` または `/pdf result` を再実行する
+
 ### カスタム .sty の配置
 `bot/templates/pdf/*.sty` は `_compile()` 内でコンパイル用一時ディレクトリへ自動コピーされる。
 テーマ固有ではなく全テーマ共通として扱う。
@@ -93,6 +102,7 @@ bot/templates/pdf/{theme}/
 - ユーザー入力は必ず `{{ var | tex }}` でエスケープ
 - `--shell-escape` は使用しない
 - エスケープ対象: `\ { } % # & _ $ ^ ~`
+- 絵文字クラスタはTeX特殊文字エスケープ後に `\emoji{...}` として出力する
 
 ## 投句一覧レイアウト（defaultテーマ）
 
