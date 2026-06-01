@@ -25,6 +25,7 @@ _OVERALL_VALUE = "__overall__"
 SELECT_COMMENT_PREVIEW_LIMIT = 120
 OVERALL_COMMENT_PREVIEW_LIMIT = 300
 logger = logging.getLogger(__name__)
+_UNSET = object()
 
 
 async def load_select_data(
@@ -212,12 +213,11 @@ class _SubmissionSelect(discord.ui.Select):
 
     async def callback(self, interaction: discord.Interaction) -> None:
         selected = self.values[0]
-        self._view_owner._selected_submission_id = None if selected == _OVERALL_VALUE else int(selected)
-        self._view_owner._selected_label_value = self._view_owner._default_label_value()
-        self._view_owner._build_items()
+        selected_submission_id = None if selected == _OVERALL_VALUE else int(selected)
+        next_view = self._view_owner._copy_with(selected_submission_id=selected_submission_id)
         await interaction.response.edit_message(
-            embed=self._view_owner.build_embed(),
-            view=self._view_owner,
+            embed=next_view.build_embed(),
+            view=next_view,
         )
 
 
@@ -292,11 +292,10 @@ class _LabelSelect(discord.ui.Select):
         )
 
     async def callback(self, interaction: discord.Interaction) -> None:
-        self._view_owner._selected_label_value = self.values[0]
-        self._view_owner._build_items()
+        next_view = self._view_owner._copy_with(selected_label_value=self.values[0])
         await interaction.response.edit_message(
-            embed=self._view_owner.build_embed(),
-            view=self._view_owner,
+            embed=next_view.build_embed(),
+            view=next_view,
         )
 
 
@@ -310,7 +309,8 @@ class SelectView(discord.ui.View):
         overall_comment: str,
         *,
         selector_user_id: int,
-        selected_submission_id: int | None = None,
+        selected_submission_id: int | None | object = _UNSET,
+        selected_label_value: str | None = None,
     ) -> None:
         super().__init__(timeout=600)
         self._kukai = kukai
@@ -321,10 +321,29 @@ class SelectView(discord.ui.View):
         self._selector_user_id = selector_user_id
         self._author_label = next((lbl for lbl in labels if lbl.label == _AUTHOR_COMMENT_LABEL), None)
         self._selected_submission_id = (
-            selected_submission_id if selected_submission_id is not None else self._pub_subs[0].submission_id
+            self._pub_subs[0].submission_id if selected_submission_id is _UNSET else selected_submission_id
         )
-        self._selected_label_value = self._default_label_value()
+        self._selected_label_value = selected_label_value or self._default_label_value()
         self._build_items()
+
+    def _copy_with(
+        self,
+        *,
+        selected_submission_id: int | None | object = _UNSET,
+        selected_label_value: str | None = None,
+    ) -> "SelectView":
+        return SelectView(
+            self._kukai,
+            self._pub_subs,
+            self._labels,
+            self._selects,
+            overall_comment=self._overall_comment,
+            selector_user_id=self._selector_user_id,
+            selected_submission_id=selected_submission_id
+            if selected_submission_id is not _UNSET
+            else self._selected_submission_id,
+            selected_label_value=selected_label_value,
+        )
 
     def _is_overall_selected(self) -> bool:
         return self._selected_submission_id is None
