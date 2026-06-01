@@ -443,7 +443,7 @@ class SelectView(discord.ui.View):
         done_btn.callback = self._on_done
         self.add_item(done_btn)
 
-        decide_btn = discord.ui.Button(label="✅ 決定", style=discord.ButtonStyle.success, row=2)
+        decide_btn = discord.ui.Button(label="✅ 登録", style=discord.ButtonStyle.success, row=2)
         decide_btn.callback = self._on_decide
         self.add_item(decide_btn)
 
