@@ -1,23 +1,23 @@
 # Operations Runbook
 
-## Standard PostgreSQL Operation
+## Standard Operation
 
-Use the PostgreSQL compose override for normal operation:
+Start the PostgreSQL-backed stack:
 
 ```powershell
-docker compose -f docker-compose.yml -f docker-compose.postgres.yml up -d
+docker compose up -d
 ```
 
 Follow bot logs:
 
 ```powershell
-docker compose -f docker-compose.yml -f docker-compose.postgres.yml logs -f bot
+docker compose logs -f bot
 ```
 
 Stop the stack:
 
 ```powershell
-docker compose -f docker-compose.yml -f docker-compose.postgres.yml down
+docker compose down
 ```
 
 Do not use `down -v` unless intentionally deleting the PostgreSQL database volume.
@@ -27,19 +27,19 @@ Do not use `down -v` unless intentionally deleting the PostgreSQL database volum
 Confirm Alembic is at the latest revision:
 
 ```powershell
-docker compose -f docker-compose.yml -f docker-compose.postgres.yml exec bot alembic current
+docker compose exec bot alembic current
 ```
 
 Confirm the database is reachable:
 
 ```powershell
-docker compose -f docker-compose.yml -f docker-compose.postgres.yml exec db psql -U kukai -d kukai -c "select count(*) from kukais;"
+docker compose exec db psql -U kukai -d kukai -c "select count(*) from kukais;"
 ```
 
 Confirm the select comment schema is fully renamed:
 
 ```powershell
-docker compose -f docker-compose.yml -f docker-compose.postgres.yml exec db psql -U kukai -d kukai -c "\d select_comments"
+docker compose exec db psql -U kukai -d kukai -c "\d select_comments"
 ```
 
 Expected:
@@ -53,14 +53,14 @@ Expected:
 Restart only the bot:
 
 ```powershell
-docker compose -f docker-compose.yml -f docker-compose.postgres.yml restart bot
+docker compose restart bot
 ```
 
 Restart the full stack:
 
 ```powershell
-docker compose -f docker-compose.yml -f docker-compose.postgres.yml down
-docker compose -f docker-compose.yml -f docker-compose.postgres.yml up -d
+docker compose down
+docker compose up -d
 ```
 
 ## Backups
@@ -75,7 +75,7 @@ PostgreSQL data lives in the Docker volume `kukai_bot_postgres_data`.
 Create a PostgreSQL dump:
 
 ```powershell
-docker compose -f docker-compose.yml -f docker-compose.postgres.yml exec db pg_dump -U kukai -d kukai > kukai_backup.sql
+docker compose exec db pg_dump -U kukai -d kukai > kukai_backup.sql
 ```
 
 ## Troubleshooting
@@ -83,7 +83,7 @@ docker compose -f docker-compose.yml -f docker-compose.postgres.yml exec db pg_d
 If the bot cannot resolve Discord hosts:
 
 ```powershell
-docker compose -f docker-compose.yml -f docker-compose.postgres.yml exec bot python -c "import socket; print(socket.gethostbyname('gateway.discord.gg'))"
+docker compose exec bot python -c "import socket; print(socket.gethostbyname('gateway.discord.gg'))"
 ```
 
 If DNS fails repeatedly, restart the bot first, then the stack, then Docker Desktop.
@@ -91,8 +91,8 @@ If DNS fails repeatedly, restart the bot first, then the stack, then Docker Desk
 If Compose reports a missing network, recreate the stack network:
 
 ```powershell
-docker compose -f docker-compose.yml -f docker-compose.postgres.yml down --remove-orphans
-docker compose -f docker-compose.yml -f docker-compose.postgres.yml up -d
+docker compose down --remove-orphans
+docker compose up -d
 ```
 
 ## Discord Interaction Loading Text

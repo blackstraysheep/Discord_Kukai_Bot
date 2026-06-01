@@ -5,13 +5,13 @@ SQLite remains useful for local in-memory tests and as historical backup data.
 
 ## Current Operation
 
-Start the bot with the PostgreSQL override:
+Start the bot with the standard Compose file:
 
 ```powershell
-docker compose -f docker-compose.yml -f docker-compose.postgres.yml up -d --build
+docker compose up -d --build
 ```
 
-The override sets:
+The compose file sets PostgreSQL defaults, which can be overridden in `.env`:
 
 ```env
 DATABASE_URL=postgresql+asyncpg://kukai:kukai@db:5432/kukai
@@ -31,7 +31,7 @@ alembic upgrade head && python -m bot.main
 Confirm the running database is at head:
 
 ```powershell
-docker compose -f docker-compose.yml -f docker-compose.postgres.yml exec bot alembic current
+docker compose exec bot alembic current
 ```
 
 Expected head:
