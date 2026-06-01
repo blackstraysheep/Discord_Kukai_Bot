@@ -263,9 +263,14 @@ def build_result_entry_embed(kukai, *, result_count: int) -> discord.Embed:
     return embed
 
 
+def result_open_custom_id(kukai_id: int, initial_format: str | None = None) -> str:
+    format_token = initial_format or "default"
+    return f"kukai:result:{kukai_id}:{format_token}"
+
+
 class ResultOpenView(discord.ui.View):
     def __init__(self, kukai_id: int, *, initial_format: str | None = None) -> None:
-        super().__init__(timeout=86400)
+        super().__init__(timeout=None)
         self.kukai_id = kukai_id
         self.initial_format = initial_format
 
@@ -273,6 +278,7 @@ class ResultOpenView(discord.ui.View):
             label="結果を見る",
             style=discord.ButtonStyle.primary,
             row=0,
+            custom_id=result_open_custom_id(kukai_id, initial_format),
         )
         button.callback = self._on_open
         self.add_item(button)

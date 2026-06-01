@@ -51,6 +51,10 @@ class KukaiBot(commands.Bot):
             except Exception:
                 logger.exception("Failed to load cog: %s", cog)
 
+        from bot.ui.persistent_views import register_persistent_views
+
+        await register_persistent_views(self)
+
         # Sync slash commands: dev guilds get instant sync, global takes ~1 hour
         if self.settings.dev_guild_id_list:
             for guild_id in self.settings.dev_guild_id_list:

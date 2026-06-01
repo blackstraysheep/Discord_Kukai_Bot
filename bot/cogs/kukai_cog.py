@@ -97,9 +97,13 @@ ROLLBACK_TARGET_CHOICES = [
 ]
 
 
+def stage_action_custom_id(kukai_id: int, state: KukaiState) -> str:
+    return f"kukai:stage:{kukai_id}:{state.value}"
+
+
 class StageActionView(discord.ui.View):
     def __init__(self, kukai_id: int, state: KukaiState) -> None:
-        super().__init__(timeout=86400)
+        super().__init__(timeout=None)
         self.kukai_id = kukai_id
         self.state = state
         label_map = {
@@ -110,7 +114,12 @@ class StageActionView(discord.ui.View):
         button_label = label_map.get(state)
         if not button_label:
             return
-        button = discord.ui.Button(label=button_label, style=discord.ButtonStyle.primary, row=0)
+        button = discord.ui.Button(
+            label=button_label,
+            style=discord.ButtonStyle.primary,
+            row=0,
+            custom_id=stage_action_custom_id(kukai_id, state),
+        )
 
         async def _callback(interaction: discord.Interaction) -> None:
             assert interaction.guild is not None
