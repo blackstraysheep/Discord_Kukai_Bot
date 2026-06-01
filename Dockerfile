@@ -5,6 +5,7 @@ RUN apt-get update && apt-get install -y \
     texlive-lang-japanese \
     texlive-fonts-recommended \
     fonts-noto-cjk \
+    fonts-noto-color-emoji \
  && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
