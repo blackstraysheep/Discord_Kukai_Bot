@@ -7,7 +7,7 @@ from sqlalchemy.orm import selectinload
 from bot.models.submission import PublishedSubmission
 from bot.models.select import OverallSelectComment, Select, SelectComment
 from bot.models.select_rule import SelectLabel
-from bot.repositories import select_repo
+from bot.repositories import entry_repo, select_repo
 from bot.services.errors import InvalidStateError, NotFoundError, ValidationError
 from bot.state_machine.states import KukaiState
 from bot.utils.text import normalize
@@ -28,6 +28,7 @@ async def cast_select(
     """Cast or update a selection on a published submission."""
     if KukaiState.from_value(kukai.state) != _SELECTING_OPEN:
         raise InvalidStateError("現在選句を受け付けていません。")
+    await _ensure_select_participant(session, kukai, selector_user_id)
 
     # Verify published submission exists and belongs to this kukai
     ps_result = await session.execute(
@@ -113,6 +114,7 @@ async def remove_select(
     """Remove a selection (only during SELECTING_OPEN)."""
     if KukaiState.from_value(kukai.state) != _SELECTING_OPEN:
         raise InvalidStateError("選句の取消は受付期間中のみ可能です。")
+    await _ensure_select_participant(session, kukai, selector_user_id)
 
     sel = await select_repo.get_select(session, kukai.id, selector_user_id, submission_id)
     if not sel:
@@ -130,6 +132,7 @@ async def set_overall_comment(
     """Upsert overall comment (総評)."""
     if KukaiState.from_value(kukai.state) != _SELECTING_OPEN:
         raise InvalidStateError("総評の入力は選句期間中のみ可能です。")
+    await _ensure_select_participant(session, kukai, user_id)
 
     text = normalize(text.strip())
     if not text:
@@ -150,3 +153,11 @@ async def list_selects_for_selector(
     session: AsyncSession, kukai_id: int, selector_user_id: int
 ) -> list[Select]:
     return await select_repo.get_selects_by_selector(session, kukai_id, selector_user_id)
+
+
+async def _ensure_select_participant(session: AsyncSession, kukai, user_id: int) -> None:
+    if not kukai.entry_enabled:
+        return
+    entry = await entry_repo.get_by_user(session, kukai.id, user_id)
+    if entry is None or entry.status != "approved":
+        raise InvalidStateError("選句にはこの句会への承認済み参加登録が必要です。")

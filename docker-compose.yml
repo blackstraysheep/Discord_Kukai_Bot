@@ -7,8 +7,8 @@ services:
       db:
         condition: service_healthy
     environment:
-      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://kukai:kukai@db:5432/kukai}
-      SCHEDULER_DB_URL: ${SCHEDULER_DB_URL:-postgresql+psycopg://kukai:kukai@db:5432/kukai}
+      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://${POSTGRES_USER:-kukai}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@db:5432/${POSTGRES_DB:-kukai}}
+      SCHEDULER_DB_URL: ${SCHEDULER_DB_URL:-postgresql+psycopg://${POSTGRES_USER:-kukai}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@db:5432/${POSTGRES_DB:-kukai}}
     volumes:
       - ./data:/app/data
 
@@ -18,7 +18,7 @@ services:
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-kukai}
       POSTGRES_USER: ${POSTGRES_USER:-kukai}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-kukai}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:

@@ -2126,7 +2126,12 @@ class KukaiCog(commands.Cog):
             )
             return
         try:
+            max_bytes = export_service.MAX_IMPORT_FILE_BYTES
+            if file.size > max_bytes:
+                raise ValidationError(f"インポートJSONは{max_bytes // (1024 * 1024)}MB以内にしてください。")
             raw = (await file.read()).decode("utf-8")
+            if len(raw.encode("utf-8")) > max_bytes:
+                raise ValidationError(f"インポートJSONは{max_bytes // (1024 * 1024)}MB以内にしてください。")
             payload = json.loads(raw)
             if not isinstance(payload, dict):
                 raise ValidationError("JSON形式が不正です。")

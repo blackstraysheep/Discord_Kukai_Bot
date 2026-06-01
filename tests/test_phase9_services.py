@@ -12,7 +12,7 @@ from bot.models.submission import PublishedSubmission, Submission
 from bot.models.select import Select, SelectComment
 from bot.repositories import kukai_repo
 from bot.services import entry_service, export_service, kukai_service, submission_service, select_service
-from bot.services.errors import InvalidStateError
+from bot.services.errors import InvalidStateError, ValidationError
 from bot.state_machine.states import KukaiState
 
 
@@ -122,6 +122,8 @@ async def test_export_and_import_payload_roundtrip(db_session):
 
     await entry_service.enter(db_session, kukai, user_id=101, haigo="甲")
     await entry_service.approve(db_session, kukai, approver_id=100, target_user_id=101)
+    await entry_service.enter(db_session, kukai, user_id=202, haigo="乙")
+    await entry_service.approve(db_session, kukai, approver_id=100, target_user_id=202)
     await kukai_service.proceed(db_session, kukai)
 
     sub, _ = await submission_service.submit(db_session, kukai, user_id=101, text="春の海")
@@ -143,7 +145,7 @@ async def test_export_and_import_payload_roundtrip(db_session):
     assert payload["kukai_count"] == 1
     first = payload["kukais"][0]
     assert first["kukai"]["title"] == "Phase9テスト句会"
-    assert len(first["entries"]) == 1
+    assert len(first["entries"]) == 2
     assert len(first["submissions"]) == 1
     assert len(first["published_submissions"]) == 1
     assert len(first["selects"]) == 1
@@ -188,7 +190,7 @@ async def test_export_and_import_payload_roundtrip(db_session):
     ).scalars().all()
 
     assert len(admin_count) == 0
-    assert len(entry_count) == 1
+    assert len(entry_count) == 2
     assert len(submission_count) == 1
     assert len(published_count) == 1
     assert len(select_count) == 1
@@ -209,3 +211,31 @@ async def test_export_and_import_payload_roundtrip(db_session):
         )
     ).scalars().all()
     assert len(legacy_comment_count) == 1
+
+
+@pytest.mark.asyncio
+async def test_import_payload_rejects_excessive_kukai_count(db_session):
+    kukai = await _make_kukai(db_session)
+    payload = await export_service.export_payload(db_session, guild_id=1, kukai_id=kukai.id)
+    payload["kukais"] = payload["kukais"] * (export_service.MAX_IMPORT_KUKAIS + 1)
+
+    with pytest.raises(ValidationError, match="一度に"):
+        await export_service.import_payload(db_session, guild_id=1, payload=payload)
+
+
+@pytest.mark.asyncio
+async def test_import_payload_rejects_oversized_submission_text(db_session):
+    kukai = await _make_kukai(db_session, entry_enabled=False)
+    payload = await export_service.export_payload(db_session, guild_id=1, kukai_id=kukai.id)
+    payload["kukais"][0]["submissions"] = [
+        {
+            "id": 1,
+            "kukai_id": kukai.id,
+            "user_id": 101,
+            "text": "x" * (export_service.MAX_IMPORT_TEXT_LENGTH + 1),
+            "is_discarded": False,
+        }
+    ]
+
+    with pytest.raises(ValidationError, match="submissions.text"):
+        await export_service.import_payload(db_session, guild_id=1, payload=payload)

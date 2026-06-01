@@ -19,6 +19,15 @@ _DISCORD_MAX_BYTES = 25 * 1024 * 1024
 
 # 結果公開後のみ作者名を出せる
 _AUTHOR_VISIBLE_STATES = {KukaiState.RESULTS, KukaiState.ENDED}
+_PUBLIC_RESULT_STATES = {KukaiState.RESULTS, KukaiState.ENDED}
+
+
+def _result_pdf_requires_admin(state: KukaiState) -> bool:
+    return state not in _PUBLIC_RESULT_STATES
+
+
+def _can_show_result_author(kukai, requested: bool) -> bool:
+    return requested and bool(getattr(kukai, "author_reveal", False))
 
 
 async def _send_pdf(
@@ -155,6 +164,7 @@ class PdfCog(commands.Cog):
                     channel_id=interaction.channel_id,
                     kukai_id=kukai_id,
                 )
+                state = KukaiState.from_value(kukai.state)
 
                 if public and not await permission_service.is_kukai_admin(
                     session, kukai, interaction.user
@@ -164,6 +174,21 @@ class PdfCog(commands.Cog):
                         ephemeral=True,
                     )
                     return
+                if public and state not in _PUBLIC_RESULT_STATES:
+                    await interaction.followup.send(
+                        embed=error_embed("結果公開前のPDFはチャンネル投稿できません。"),
+                        ephemeral=True,
+                    )
+                    return
+                if _result_pdf_requires_admin(state) and not await permission_service.is_kukai_admin(
+                    session, kukai, interaction.user
+                ):
+                    await interaction.followup.send(
+                        embed=error_embed("結果公開前のPDF生成は句会管理者のみ実行できます。"),
+                        ephemeral=True,
+                    )
+                    return
+                show_author = _can_show_result_author(kukai, show_author)
 
                 pdf_bytes = await pdf_service.build_result_pdf(
                     session,

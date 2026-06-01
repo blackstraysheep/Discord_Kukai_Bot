@@ -215,6 +215,57 @@ async def test_cast_select_required_comment_missing_raises(db_session):
 
 
 @pytest.mark.asyncio
+async def test_entry_enabled_requires_approved_selector(db_session):
+    kukai = await kukai_service.create_kukai(
+        db_session,
+        guild_id=1,
+        created_by=100,
+        channel_id=200,
+        title="承認制句会",
+        entry_close_at=_utc(3),
+        submission_close_at=_utc(7),
+        selecting_close_at=_utc(14),
+        entry_enabled=True,
+        entry_approval=True,
+    )
+    await entry_service.enter(db_session, kukai, user_id=1, haigo="作者")
+    await entry_service.approve(db_session, kukai, approver_id=100, target_user_id=1)
+    await entry_service.enter(db_session, kukai, user_id=2, haigo="選者")
+    await entry_service.enter(db_session, kukai, user_id=3, haigo="承認済選者")
+    await entry_service.approve(db_session, kukai, approver_id=100, target_user_id=3)
+
+    while KukaiState(kukai.state) != KukaiState.SUBMISSION_OPEN:
+        await kukai_service.proceed(db_session, kukai)
+    await submission_service.submit(db_session, kukai, user_id=1, text="春の海")
+    await kukai_service.proceed(db_session, kukai)
+    await kukai_service.proceed(db_session, kukai)
+    await submission_service.publish(db_session, kukai)
+    await kukai_service.proceed(db_session, kukai)
+    await db_session.commit()
+
+    sub_id = await _get_submission_id(db_session, kukai.id)
+    label_id = kukai.select_labels[0].id
+
+    with pytest.raises(InvalidStateError):
+        await select_service.cast_select(
+            db_session,
+            kukai,
+            selector_user_id=2,
+            submission_id=sub_id,
+            select_label_id=label_id,
+        )
+
+    sel = await select_service.cast_select(
+        db_session,
+        kukai,
+        selector_user_id=3,
+        submission_id=sub_id,
+        select_label_id=label_id,
+    )
+    assert sel.selector_user_id == 3
+
+
+@pytest.mark.asyncio
 async def test_remove_select(db_session):
     kukai = await _setup_selecting(db_session)
     sub_id = await _get_submission_id(db_session, kukai.id)

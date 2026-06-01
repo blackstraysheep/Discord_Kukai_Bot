@@ -23,6 +23,40 @@ from bot.models.voice_session import VoiceSession
 from bot.services import result_service
 from bot.services.errors import InvalidStateError, NotFoundError, ValidationError
 
+MAX_IMPORT_KUKAIS = 50
+MAX_IMPORT_FILE_BYTES = 2 * 1024 * 1024
+MAX_IMPORT_SECTION_ROWS = 2000
+MAX_IMPORT_NOTIFICATION_LOGS = 10000
+MAX_IMPORT_TEXT_LENGTH = 4000
+MAX_IMPORT_TITLE_LENGTH = 100
+MAX_IMPORT_OFFSET_SECS = 366 * 24 * 60 * 60
+MAX_DISCORD_ID = 2**63 - 1
+
+_KUKAI_STATES = {
+    "draft",
+    "entry_open",
+    "entry_closed",
+    "submission_open",
+    "submission_closed",
+    "waiting_publish",
+    "selecting_open",
+    "selecting_closed",
+    "waiting_results",
+    "results",
+    "ended",
+    "paused",
+    "cancelled",
+}
+_ENTRY_STATUSES = {"pending", "approved", "rejected", "withdrawn"}
+_NOTIFICATION_EVENTS = {
+    "entry_close",
+    "submission_open",
+    "submission_close",
+    "selecting_close",
+    "voice_start",
+}
+_NOTIFICATION_TARGETS = {"all", "incomplete", "admin"}
+
 
 def _dt_to_str(value: datetime | None) -> str | None:
     return value.isoformat() if value is not None else None
@@ -354,6 +388,148 @@ def _require_list(value: Any, name: str) -> list[dict[str, Any]]:
     return value
 
 
+def _import_int(
+    value: Any,
+    name: str,
+    *,
+    min_value: int | None = 0,
+    max_value: int | None = MAX_DISCORD_ID,
+) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        raise ValidationError(f"{name} は整数である必要があります。") from None
+    if min_value is not None and parsed < min_value:
+        raise ValidationError(f"{name} は{min_value}以上である必要があります。")
+    if max_value is not None and parsed > max_value:
+        raise ValidationError(f"{name} が上限を超えています。")
+    return parsed
+
+
+def _validate_text(value: Any, name: str, *, max_length: int = MAX_IMPORT_TEXT_LENGTH) -> None:
+    if value is None:
+        return
+    if not isinstance(value, str):
+        raise ValidationError(f"{name} は文字列である必要があります。")
+    if len(value) > max_length:
+        raise ValidationError(f"{name} は{max_length}文字以内である必要があります。")
+
+
+def _validate_section_size(bundle: dict[str, Any], section: str, *, limit: int) -> list[dict[str, Any]]:
+    rows = _require_list(bundle.get(section), section)
+    if len(rows) > limit:
+        raise ValidationError(f"{section} は{limit}件以内である必要があります。")
+    return rows
+
+
+def _validate_import_payload(*, guild_id: int, bundles: list[Any]) -> None:
+    if len(bundles) > MAX_IMPORT_KUKAIS:
+        raise ValidationError(f"インポートできる句会は一度に{MAX_IMPORT_KUKAIS}件までです。")
+
+    for bundle_index, bundle in enumerate(bundles, start=1):
+        if not isinstance(bundle, dict):
+            raise ValidationError("句会データ形式が不正です。")
+        source_kukai = bundle.get("kukai")
+        if not isinstance(source_kukai, dict):
+            raise ValidationError("kukai オブジェクトが不正です。")
+        if source_kukai.get("guild_id") != guild_id:
+            raise ValidationError("同一サーバー(guild)のデータのみインポートできます。")
+
+        prefix = f"kukais[{bundle_index}].kukai"
+        _import_int(source_kukai.get("created_by"), f"{prefix}.created_by")
+        channel_id = source_kukai.get("channel_id")
+        if channel_id is not None:
+            _import_int(channel_id, f"{prefix}.channel_id")
+        notify_channel_id = source_kukai.get("notify_channel_id")
+        if notify_channel_id is not None:
+            _import_int(notify_channel_id, f"{prefix}.notify_channel_id", min_value=-2)
+        admin_thread_id = source_kukai.get("admin_thread_id")
+        if admin_thread_id is not None:
+            _import_int(admin_thread_id, f"{prefix}.admin_thread_id")
+        _validate_text(source_kukai.get("title"), f"{prefix}.title", max_length=MAX_IMPORT_TITLE_LENGTH)
+        _validate_text(source_kukai.get("theme"), f"{prefix}.theme")
+        _validate_text(source_kukai.get("description"), f"{prefix}.description")
+        state = source_kukai.get("state") or "draft"
+        if state not in _KUKAI_STATES:
+            raise ValidationError(f"{prefix}.state が不正です。")
+        _import_int(source_kukai.get("min_participants", 0), f"{prefix}.min_participants", max_value=10000)
+        _import_int(source_kukai.get("submission_min", 1), f"{prefix}.submission_min", min_value=1, max_value=1000)
+        if source_kukai.get("submission_max") is not None:
+            _import_int(source_kukai.get("submission_max"), f"{prefix}.submission_max", min_value=1, max_value=1000)
+
+        for section in (
+            "admins",
+            "select_labels",
+            "entries",
+            "participants",
+            "submissions",
+            "published_submissions",
+            "selects",
+            "select_comments",
+            "overall_comments",
+            "notification_schedules",
+        ):
+            _validate_section_size(bundle, section, limit=MAX_IMPORT_SECTION_ROWS)
+        _validate_section_size(bundle, "notification_logs", limit=MAX_IMPORT_NOTIFICATION_LOGS)
+
+        for row in _require_list(bundle.get("admins"), "admins"):
+            _import_int(row.get("user_id"), "admins.user_id")
+            _import_int(row.get("added_by", source_kukai.get("created_by")), "admins.added_by")
+        for row in _require_list(bundle.get("select_labels"), "select_labels"):
+            _import_int(row.get("id"), "select_labels.id")
+            _validate_text(row.get("label"), "select_labels.label", max_length=80)
+            _import_int(row.get("display_order", 1), "select_labels.display_order", max_value=10000)
+            _import_int(row.get("point", 0), "select_labels.point", min_value=-1000, max_value=1000)
+            _import_int(row.get("rank_priority", 1), "select_labels.rank_priority", max_value=10000)
+            _import_int(row.get("min_count", 0), "select_labels.min_count", max_value=1000)
+            if row.get("max_count") is not None:
+                _import_int(row.get("max_count"), "select_labels.max_count", max_value=1000)
+        for row in _require_list(bundle.get("entries"), "entries"):
+            _import_int(row.get("user_id"), "entries.user_id")
+            _validate_text(row.get("haigo"), "entries.haigo", max_length=80)
+            if (row.get("status") or "pending") not in _ENTRY_STATUSES:
+                raise ValidationError("entries.status が不正です。")
+        for row in _require_list(bundle.get("participants"), "participants"):
+            _import_int(row.get("user_id"), "participants.user_id")
+            _validate_text(row.get("haigo"), "participants.haigo", max_length=80)
+        for row in _require_list(bundle.get("submissions"), "submissions"):
+            _import_int(row.get("id"), "submissions.id")
+            _import_int(row.get("user_id"), "submissions.user_id")
+            _validate_text(row.get("text"), "submissions.text")
+        for row in _require_list(bundle.get("published_submissions"), "published_submissions"):
+            _import_int(row.get("submission_id"), "published_submissions.submission_id")
+            _import_int(row.get("number"), "published_submissions.number", min_value=1, max_value=10000)
+        for row in _require_list(bundle.get("selects"), "selects"):
+            _import_int(row.get("id"), "selects.id")
+            _import_int(row.get("selector_user_id"), "selects.selector_user_id")
+            _import_int(row.get("submission_id"), "selects.submission_id")
+            _import_int(row.get("select_label_id"), "selects.select_label_id")
+        for row in _require_list(bundle.get("select_comments"), "select_comments"):
+            source_select_id = row.get("select_id", row.get("vote_id"))
+            _import_int(source_select_id, "select_comments.select_id")
+            _validate_text(row.get("comment"), "select_comments.comment")
+        for row in _require_list(bundle.get("overall_comments"), "overall_comments"):
+            _import_int(row.get("user_id"), "overall_comments.user_id")
+            _validate_text(row.get("comment"), "overall_comments.comment")
+        voice_row = bundle.get("voice_session")
+        if voice_row is not None:
+            if not isinstance(voice_row, dict):
+                raise ValidationError("voice_session はオブジェクトである必要があります。")
+            _import_int(voice_row.get("vc_channel_id"), "voice_session.vc_channel_id")
+        for row in _require_list(bundle.get("notification_schedules"), "notification_schedules"):
+            if (row.get("event_type") or "submission_close") not in _NOTIFICATION_EVENTS:
+                raise ValidationError("notification_schedules.event_type が不正です。")
+            _import_int(row.get("offset_secs", 86400), "notification_schedules.offset_secs", max_value=MAX_IMPORT_OFFSET_SECS)
+            if (row.get("target") or "all") not in _NOTIFICATION_TARGETS:
+                raise ValidationError("notification_schedules.target が不正です。")
+            if row.get("channel_id") is not None:
+                _import_int(row.get("channel_id"), "notification_schedules.channel_id", min_value=-2)
+        for row in _require_list(bundle.get("notification_logs"), "notification_logs"):
+            _import_int(row.get("schedule_id"), "notification_logs.schedule_id")
+            _import_int(row.get("target_count", 0), "notification_logs.target_count", max_value=100000)
+            _validate_text(row.get("error"), "notification_logs.error")
+
+
 async def import_payload(
     session: AsyncSession,
     *,
@@ -366,6 +542,7 @@ async def import_payload(
     bundles = payload.get("kukais")
     if not isinstance(bundles, list) or not bundles:
         raise ValidationError("インポートデータに句会情報がありません。")
+    _validate_import_payload(guild_id=guild_id, bundles=bundles)
 
     created_ids: list[int] = []
 

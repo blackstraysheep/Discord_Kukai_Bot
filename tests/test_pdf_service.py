@@ -2,15 +2,19 @@
 
 from __future__ import annotations
 
+import os
+
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from bot.services.pdf_service import (
     PdfError,
+    _cleanup_expired_temp_pdfs,
     _format_date,
     _render_template,
     is_available,
+    publish_temp,
     tex_escape,
 )
 
@@ -84,6 +88,49 @@ class TestIsAvailable:
         with patch("bot.services.pdf_service.LUALATEX_BIN", "lualatex"), \
              patch("shutil.which", return_value="/usr/bin/lualatex"):
             assert is_available() is True
+
+
+# ---------------------------------------------------------------------------
+# temp PDF publishing
+# ---------------------------------------------------------------------------
+
+class TestTempPdfPublishing:
+    def test_cleanup_expired_temp_pdfs_removes_only_old_files(self, tmp_path):
+        old_dir = tmp_path / "1"
+        old_dir.mkdir()
+        old_pdf = old_dir / "old.pdf"
+        old_pdf.write_bytes(b"old")
+        new_pdf = old_dir / "new.pdf"
+        new_pdf.write_bytes(b"new")
+
+        now = 1_000_000.0
+        os.utime(old_pdf, (now - 90_000, now - 90_000))
+        os.utime(new_pdf, (now - 10, now - 10))
+
+        removed = _cleanup_expired_temp_pdfs(tmp_path, now=now)
+
+        assert removed == 1
+        assert not old_pdf.exists()
+        assert new_pdf.exists()
+
+    @pytest.mark.asyncio
+    async def test_publish_temp_cleans_expired_files_and_returns_url(self, tmp_path):
+        old_dir = tmp_path / "1"
+        old_dir.mkdir()
+        old_pdf = old_dir / "old.pdf"
+        old_pdf.write_bytes(b"old")
+        now = 1_000_000.0
+        os.utime(old_pdf, (now - 90_000, now - 90_000))
+
+        with patch("bot.services.pdf_service.PDF_SERVE_BASE_URL", "https://example.test/pdfs"), \
+             patch("bot.services.pdf_service.PDF_SERVE_DIR", tmp_path), \
+             patch("bot.services.pdf_service.time.time", return_value=now), \
+             patch("bot.services.pdf_service.secrets.token_hex", return_value="token"):
+            url = await publish_temp(b"%PDF", "result_1_named.pdf", 1)
+
+        assert url == "https://example.test/pdfs/1/result_1_named_token.pdf"
+        assert not old_pdf.exists()
+        assert (tmp_path / "1" / "result_1_named_token.pdf").read_bytes() == b"%PDF"
 
 
 # ---------------------------------------------------------------------------

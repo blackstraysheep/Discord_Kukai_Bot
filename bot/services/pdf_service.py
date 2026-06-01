@@ -8,6 +8,7 @@ import os
 import secrets
 import shutil
 import tempfile
+import time
 import tomllib
 from datetime import timedelta, timezone
 from pathlib import Path
@@ -34,6 +35,7 @@ DEFAULT_THEME: str = os.getenv("PDF_DEFAULT_THEME", "default")
 PDF_MAX_CONCURRENT: int = int(os.getenv("PDF_MAX_CONCURRENT", "2"))
 PDF_SERVE_BASE_URL: str = os.getenv("PDF_SERVE_BASE_URL", "").rstrip("/")
 PDF_SERVE_DIR: Path = Path(os.getenv("PDF_SERVE_DIR", "/srv/pdfs"))
+PDF_TEMP_TTL_SECONDS: int = int(os.getenv("PDF_TEMP_TTL_SECONDS", str(24 * 60 * 60)))
 COMPILE_TIMEOUT: int = int(os.getenv("PDF_COMPILE_TIMEOUT", "60"))
 
 TEMPLATES_DIR = Path(__file__).parent.parent / "templates" / "pdf"
@@ -338,6 +340,7 @@ async def publish_temp(pdf_bytes: bytes, filename: str, kukai_id: int) -> str:
         raise PdfError(
             "PDF_SERVE_BASE_URL が設定されていないため一時URLを発行できません。"
         )
+    _cleanup_expired_temp_pdfs(PDF_SERVE_DIR)
     subdir = PDF_SERVE_DIR / str(kukai_id)
     subdir.mkdir(parents=True, exist_ok=True)
 
@@ -347,3 +350,24 @@ async def publish_temp(pdf_bytes: bytes, filename: str, kukai_id: int) -> str:
     out_path.write_bytes(pdf_bytes)
 
     return f"{PDF_SERVE_BASE_URL}/{kukai_id}/{out_path.name}"
+
+
+def _cleanup_expired_temp_pdfs(base_dir: Path, *, now: float | None = None) -> int:
+    """Remove temp PDF files older than the configured TTL."""
+    if PDF_TEMP_TTL_SECONDS <= 0 or not base_dir.exists():
+        return 0
+
+    cutoff = (time.time() if now is None else now) - PDF_TEMP_TTL_SECONDS
+    removed = 0
+    for path in base_dir.rglob("*.pdf"):
+        try:
+            if not path.is_file() or path.stat().st_mtime > cutoff:
+                continue
+            path.unlink()
+            removed += 1
+            parent = path.parent
+            if parent != base_dir and not any(parent.iterdir()):
+                parent.rmdir()
+        except OSError:
+            logger.warning("Failed to remove expired temp PDF: %s", path)
+    return removed

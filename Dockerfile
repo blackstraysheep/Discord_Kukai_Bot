@@ -15,10 +15,14 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-RUN mkdir -p data
+RUN useradd --create-home --shell /usr/sbin/nologin botuser \
+ && mkdir -p data \
+ && chown -R botuser:botuser /app
 
 RUN printf '%s\n' '\documentclass{jlreq}' '\begin{document}' 'test' '\end{document}' > /tmp/warmup.tex \
  && cd /tmp && lualatex --interaction=nonstopmode warmup.tex \
  && rm -f /tmp/warmup.*
+
+USER botuser
 
 CMD ["sh", "-c", "alembic upgrade head && python -m bot.main"]
