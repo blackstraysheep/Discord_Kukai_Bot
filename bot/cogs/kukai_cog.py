@@ -124,31 +124,21 @@ class StageActionView(discord.ui.View):
         async def _callback(interaction: discord.Interaction) -> None:
             assert interaction.guild is not None
             try:
+                if self.state == KukaiState.ENTRY_OPEN:
+                    from bot.cogs.entry_cog import EntryHaigoModal
+
+                    await interaction.response.send_modal(
+                        EntryHaigoModal(
+                            kukai_id=self.kukai_id,
+                            channel_id=effective_channel_id(interaction),
+                            guild_id=interaction.guild.id,
+                        )
+                    )
+                    return
+
                 async with get_session() as session:
                     kukai = await kukai_service.get_kukai(session, self.kukai_id, interaction.guild.id)
                     current = KukaiState.from_value(kukai.state)
-
-                    if self.state == KukaiState.ENTRY_OPEN:
-                        if current not in {
-                            KukaiState.ENTRY_OPEN,
-                            KukaiState.ENTRY_CLOSED,
-                            KukaiState.SUBMISSION_OPEN,
-                        }:
-                            await interaction.response.send_message(
-                                embed=error_embed("現在はエントリー受付中ではありません。"),
-                                ephemeral=True,
-                            )
-                            return
-                        from bot.cogs.entry_cog import EntryHaigoModal
-
-                        await interaction.response.send_modal(
-                            EntryHaigoModal(
-                                kukai_id=kukai.id,
-                                channel_id=effective_channel_id(interaction),
-                                guild_id=interaction.guild.id,
-                            )
-                        )
-                        return
 
                     if self.state == KukaiState.SUBMISSION_OPEN:
                         if current != KukaiState.SUBMISSION_OPEN:

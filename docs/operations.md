@@ -124,7 +124,8 @@ docker compose restart bot
 Expected:
 
 - The button opens the relevant modal/UI when the kukai is still in the matching state.
-- If the kukai has already moved past that stage, the bot replies with the current-state error instead of Discord showing an interaction failure.
+- The `エントリーする` button opens the haigo modal immediately. If the kukai is no longer accepting entries, the error is returned when the modal is submitted.
+- For `投句する` and `選句する`, if the kukai has already moved past that stage, the bot replies with the current-state error instead of Discord showing an interaction failure.
 - The result button shows the result view when the kukai is in `results` or `ended`.
 
 Check the bot log for startup registration:
@@ -202,7 +203,7 @@ Bots cannot customize that exact wording.
 Ways to reduce how often users see it:
 
 - Send an immediate response when work is cheap.
-- Use modals for input-first flows.
+- Use modals for input-first flows. Public entry buttons should show the entry modal before DB work, then validate on modal submit.
 - Keep `defer()` only for operations that may exceed Discord's initial response timeout.
 - After `defer()`, replace the original response quickly with `edit_original_response()`.
 

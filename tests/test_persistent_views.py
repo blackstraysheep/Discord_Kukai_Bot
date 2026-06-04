@@ -1,6 +1,10 @@
 from types import SimpleNamespace
 
+import pytest
+
+import bot.cogs.kukai_cog as kukai_cog
 from bot.cogs.kukai_cog import StageActionView, stage_action_custom_id
+from bot.cogs.entry_cog import EntryHaigoModal
 from bot.cogs.result_cog import ResultOpenView, result_open_custom_id
 from bot.state_machine.states import KukaiState
 from bot.ui.persistent_views import _register_views_for_kukais
@@ -16,6 +20,14 @@ class _FakeBot:
 
 def _custom_ids(view) -> list[str]:
     return [item.custom_id for item in view.children]
+
+
+class _FakeResponse:
+    def __init__(self) -> None:
+        self.modal = None
+
+    async def send_modal(self, modal) -> None:
+        self.modal = modal
 
 
 def test_stage_action_view_is_persistent_with_stable_custom_id():
@@ -54,3 +66,26 @@ def test_register_views_adds_stage_buttons_and_result_buttons_for_result_kukai()
     assert "kukai:result:2:score" in custom_ids
     assert "kukai:result:2:number" in custom_ids
     assert "kukai:result:2:author" in custom_ids
+
+
+@pytest.mark.asyncio
+async def test_entry_stage_button_sends_modal_before_database_lookup(monkeypatch):
+    def fail_get_session():
+        raise AssertionError("entry modal should be sent before database lookup")
+
+    monkeypatch.setattr(kukai_cog, "get_session", fail_get_session)
+    response = _FakeResponse()
+    interaction = SimpleNamespace(
+        guild=SimpleNamespace(id=456),
+        channel=None,
+        channel_id=789,
+        response=response,
+    )
+    view = StageActionView(123, KukaiState.ENTRY_OPEN)
+
+    await view.children[0].callback(interaction)
+
+    assert isinstance(response.modal, EntryHaigoModal)
+    assert response.modal.kukai_id == 123
+    assert response.modal.guild_id == 456
+    assert response.modal.channel_id == 789
