@@ -267,10 +267,7 @@ async def deadline_job(kukai_id: int, event_type: str) -> None:
                             "deadline_job: auto-published and advanced kukai %d to SELECTING_OPEN",
                             kukai_id,
                         )
-                        await _notify_channel(
-                            _bot, kukai,
-                            "投句期間が終了したため、投句一覧を番号付きで公開して選句を開始しました。",
-                        )
+                        await _notify_selecting_open(bot=_bot, kukai=kukai)
                         if mode == "full_auto" and not report.complete:
                             await admin_notice_service.send_admin_notice(
                                 _bot,
@@ -521,39 +518,29 @@ async def _open_submission(*, bot, session, kukai, notification_service, kukai_s
 
 
 async def _notify_submission_open(*, bot, kukai) -> None:
-    if not kukai.channel_id:
-        return
-    import discord
-
-    from bot.cogs.kukai_cog import StageActionView
     from bot.state_machine.states import KukaiState
-    from bot.utils.datetime_utils import format_jst
-    from bot.utils.discord_retry import send_with_retry
-    from bot.utils.embed_builder import COLOR_INFO
+    from bot.utils.stage_announcement import send_stage_announcement
 
     guild = bot.get_guild(kukai.guild_id) if bot else None
     if not guild:
         return
-    channel = guild.get_channel(kukai.channel_id)
-    if not isinstance(channel, discord.TextChannel):
-        return
-
-    embed = discord.Embed(
-        description=f"句会「**{kukai.title}**」の **投句受付** を開始しました。",
-        color=COLOR_INFO,
-    )
-    if kukai.submission_close_at:
-        embed.add_field(
-            name=f"投句締切（{_mode_label(kukai.submission_mode)}）",
-            value=format_jst(kukai.submission_close_at),
-            inline=False,
-        )
-    embed.set_footer(text=f"句会ID: {kukai.id}")
-    view = StageActionView(kukai.id, KukaiState.SUBMISSION_OPEN)
     try:
-        await send_with_retry(lambda: channel.send(embed=embed, view=view))
+        await send_stage_announcement(guild, kukai, KukaiState.SUBMISSION_OPEN)
     except Exception as error:
         logger.error("_notify_submission_open failed: %s", error)
+
+
+async def _notify_selecting_open(*, bot, kukai) -> None:
+    from bot.state_machine.states import KukaiState
+    from bot.utils.stage_announcement import send_stage_announcement
+
+    guild = bot.get_guild(kukai.guild_id) if bot else None
+    if not guild:
+        return
+    try:
+        await send_stage_announcement(guild, kukai, KukaiState.SELECTING_OPEN)
+    except Exception as error:
+        logger.error("_notify_selecting_open failed: %s", error)
 
 
 def _mode_label(mode: str | None) -> str:

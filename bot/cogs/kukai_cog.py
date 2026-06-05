@@ -44,6 +44,7 @@ from bot.utils.channel import effective_channel_id
 from bot.utils.discord_retry import send_with_retry
 from bot.utils.datetime_utils import format_jst, parse_datetime
 from bot.utils.submission_publish import build_submission_publish_embeds
+from bot.utils.stage_announcement import send_action_button_message, send_stage_announcement
 from bot.utils.embed_builder import (
     COLOR_INFO,
     COLOR_RESULT,
@@ -909,6 +910,82 @@ class KukaiCog(commands.Cog):
         except ServiceError as e:
             await interaction.followup.send(embed=error_embed(str(e)), ephemeral=True)
 
+    @kukai.command(name="button", description="【句会管理者】操作ボタンを開催チャンネルへ投稿します")
+    @app_commands.describe(
+        kind="投稿するボタン",
+        kukai_id="句会ID（省略可: このチャンネルで1件なら自動特定）",
+    )
+    @app_commands.choices(
+        kind=[
+            app_commands.Choice(name="現在の状態に合わせる", value="current"),
+            app_commands.Choice(name="エントリーする", value="entry"),
+            app_commands.Choice(name="投句する", value="submission"),
+            app_commands.Choice(name="選句する", value="selecting"),
+            app_commands.Choice(name="結果を見る", value="result"),
+        ]
+    )
+    async def kukai_button(
+        self,
+        interaction: discord.Interaction,
+        kind: str = "current",
+        kukai_id: int | None = None,
+    ) -> None:
+        assert interaction.guild is not None
+        await interaction.response.defer(ephemeral=True)
+        try:
+            result_count: int | None = None
+            async with get_session() as session:
+                kukai = await kukai_service.resolve_kukai_in_channel(
+                    session,
+                    guild_id=interaction.guild.id,
+                    channel_id=effective_channel_id(interaction),
+                    kukai_id=kukai_id,
+                )
+                if not await permission_service.is_kukai_admin(session, kukai, interaction.user):  # type: ignore[arg-type]
+                    await interaction.edit_original_response(
+                        embed=error_embed("この操作は句会管理者のみ実行できます。")
+                    )
+                    return
+                if kind == "result" or (
+                    kind == "current"
+                    and KukaiState.from_value(kukai.state) in {KukaiState.RESULTS, KukaiState.ENDED}
+                ):
+                    if KukaiState.from_value(kukai.state) not in {KukaiState.RESULTS, KukaiState.ENDED}:
+                        await interaction.edit_original_response(
+                            embed=error_embed("結果を見るボタンは結果公開後に投稿できます。")
+                        )
+                        return
+                    result_count = len(await result_service.compute_results(session, kukai))
+            if not kukai.channel_id:
+                await interaction.edit_original_response(
+                    embed=error_embed("開催チャンネルが未設定です。")
+                )
+                return
+            channel = interaction.guild.get_channel(kukai.channel_id)
+            if not isinstance(channel, discord.TextChannel):
+                await interaction.edit_original_response(
+                    embed=error_embed("開催チャンネルが見つかりません。")
+                )
+                return
+            error = await send_action_button_message(
+                channel,
+                kukai,
+                kind,
+                result_count=result_count,
+            )
+            if error:
+                await interaction.edit_original_response(embed=error_embed(error))
+                return
+            await interaction.edit_original_response(
+                embed=success_embed(f"句会「{kukai.title}」の操作ボタンを投稿しました。")
+            )
+        except ServiceError as e:
+            await interaction.edit_original_response(embed=error_embed(str(e)))
+        except discord.Forbidden:
+            await interaction.edit_original_response(
+                embed=error_embed("開催チャンネルへの送信権限がありません。")
+            )
+
     @kukai.command(name="reveal-authors", description="【句会管理者】結果公開後に作者を公開します")
     @app_commands.describe(kukai_id="句会ID（省略可: このチャンネルで1件なら自動特定）")
     async def kukai_reveal_authors(
@@ -1097,100 +1174,8 @@ class KukaiCog(commands.Cog):
 
         return None, first_message_id
 
-    @staticmethod
-    def _state_stage_label(state: KukaiState) -> str | None:
-        mapping = {
-            KukaiState.ENTRY_OPEN: "エントリー受付",
-            KukaiState.SUBMISSION_OPEN: "投句受付",
-            KukaiState.SELECTING_OPEN: "選句受付",
-            KukaiState.RESULTS: "結果公開",
-        }
-        return mapping.get(state)
-
-    @staticmethod
-    def _state_announcement_description(kukai, state: KukaiState) -> str | None:
-        stage = KukaiCog._state_stage_label(state)
-        if stage:
-            return f"句会「**{kukai.title}**」の **{stage}** を開始しました。"
-        mapping = {
-            KukaiState.ENTRY_CLOSED: "エントリーが締め切られました。",
-            KukaiState.SUBMISSION_CLOSED: "投句が締め切られました。",
-            KukaiState.WAITING_PUBLISH: "投句公開待ちになりました。",
-            KukaiState.SELECTING_CLOSED: "選句が締め切られました。",
-            KukaiState.ENDED: "句会が終了しました。",
-            KukaiState.PAUSED: "句会が一時停止されました。",
-            KukaiState.CANCELLED: "句会が中止されました。",
-        }
-        message = mapping.get(state)
-        if message is None:
-            return None
-        return f"句会「**{kukai.title}**」: {message}"
-
     async def _announce_to_kukai_channel(self, guild: discord.Guild, kukai, state: KukaiState) -> None:
-        description = self._state_announcement_description(kukai, state)
-        if not description:
-            return
-        if not kukai.channel_id:
-            return
-        channel = guild.get_channel(kukai.channel_id)
-        if not isinstance(channel, discord.TextChannel):
-            return
-        embed = discord.Embed(description=description, color=COLOR_INFO)
-        if state == KukaiState.ENTRY_OPEN and kukai.entry_enabled and kukai.entry_close_at:
-            embed.add_field(
-                name=f"エントリー締切（{_entry_mode_label(getattr(kukai, 'entry_mode', 'manual'))}）",
-                value=format_jst(kukai.entry_close_at),
-                inline=False,
-            )
-        elif state == KukaiState.ENTRY_CLOSED:
-            participant_lines = await _approved_entry_lines(interaction_guild=guild, kukai_id=kukai.id)
-            embed.add_field(
-                name=f"エントリー人数: {len(participant_lines)}名",
-                value=_limited_field_value(participant_lines),
-                inline=False,
-            )
-        elif state == KukaiState.SUBMISSION_OPEN and kukai.submission_close_at:
-            embed.add_field(
-                name=f"投句締切（{_mode_label(kukai.submission_mode)}）",
-                value=format_jst(kukai.submission_close_at),
-                inline=False,
-            )
-        elif state == KukaiState.SELECTING_OPEN:
-            select_labels = []
-            try:
-                from bot.models.select_rule import SelectLabel
-                from sqlalchemy import select as _sa_select
-
-                async with get_session() as session:
-                    result = await session.execute(
-                        _sa_select(SelectLabel)
-                        .where(SelectLabel.kukai_id == kukai.id)
-                        .order_by(SelectLabel.display_order)
-                    )
-                    select_labels = list(result.scalars().all())
-            except Exception:
-                logger.exception("Failed to load select labels for stage announcement")
-            if select_labels:
-                embed.add_field(
-                    name="句数",
-                    value=build_select_summary(kukai.submission_min, kukai.submission_max, select_labels),
-                    inline=False,
-                )
-            if kukai.selecting_close_at:
-                embed.add_field(
-                    name=f"選句締切（{_mode_label(kukai.selecting_mode)}）",
-                    value=format_jst(kukai.selecting_close_at),
-                    inline=False,
-                )
-        embed.set_footer(text=f"句会ID: {kukai.id}")
-        view = StageActionView(kukai.id, state)
-        try:
-            if view.children:
-                await send_with_retry(lambda: channel.send(embed=embed, view=view))
-            else:
-                await send_with_retry(lambda: channel.send(embed=embed))
-        except Exception:
-            pass
+        await send_stage_announcement(guild, kukai, state)
 
     async def _announce_authors_revealed(self, guild: discord.Guild, kukai) -> None:
         if not kukai.channel_id:
@@ -2426,28 +2411,6 @@ def _limited_field_value(lines: list[str], *, limit: int = 1024) -> str:
         value = candidate
         shown += 1
     return value or "（表示できる項目がありません）"
-
-
-async def _approved_entry_lines(*, interaction_guild: discord.Guild, kukai_id: int) -> list[str]:
-    from sqlalchemy import select as _sa_select
-
-    from bot.models.entry import Entry
-    from bot.utils.text import discord_safe
-
-    async with get_session() as session:
-        result = await session.execute(
-            _sa_select(Entry)
-            .where(Entry.kukai_id == kukai_id, Entry.status == "approved")
-            .order_by(Entry.created_at)
-        )
-        entries = list(result.scalars().all())
-
-    lines: list[str] = []
-    for entry in entries:
-        member = interaction_guild.get_member(entry.user_id)
-        name = entry.haigo or (member.display_name if member else f"UID:{entry.user_id}")
-        lines.append(discord_safe(name))
-    return lines
 
 
 def _format_destination(channel_id: int | None, mention: bool) -> str:

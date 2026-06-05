@@ -8,6 +8,7 @@ from bot.cogs.entry_cog import EntryHaigoModal
 from bot.cogs.result_cog import ResultOpenView, result_open_custom_id
 from bot.state_machine.states import KukaiState
 from bot.ui.persistent_views import _register_views_for_kukais
+from bot.utils.stage_announcement import build_action_button_message
 
 
 class _FakeBot:
@@ -89,3 +90,23 @@ async def test_entry_stage_button_sends_modal_before_database_lookup(monkeypatch
     assert response.modal.kukai_id == 123
     assert response.modal.guild_id == 456
     assert response.modal.channel_id == 789
+
+
+@pytest.mark.asyncio
+async def test_manual_result_button_message_uses_persistent_result_view():
+    kukai = SimpleNamespace(
+        id=123,
+        title="結果句会",
+        author_reveal=False,
+        author_publication_mode="with_result",
+        points_enabled=True,
+        result_display_default="score",
+    )
+
+    embed, view, error = await build_action_button_message(kukai, "result", result_count=5)
+
+    assert error is None
+    assert embed.footer.text.endswith("全 5 句")
+    assert isinstance(view, ResultOpenView)
+    assert view.children[0].label == "結果を見る"
+    assert view.children[0].custom_id == result_open_custom_id(123, "score")

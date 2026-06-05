@@ -106,6 +106,7 @@ Use this after changes to public Discord buttons or startup registration.
 
 Important: buttons posted before persistent-view support was deployed do not have the required `custom_id`.
 Use messages posted by the current code.
+If a fresh entry-point button is needed without changing state, use `/kukai button`.
 
 1. Start the bot with the current code.
 2. Create or use a test kukai and post at least one public entry-point button:
@@ -127,6 +128,7 @@ Expected:
 - The `エントリーする` button opens the haigo modal immediately. If the kukai is no longer accepting entries, the error is returned when the modal is submitted.
 - For `投句する` and `選句する`, if the kukai has already moved past that stage, the bot replies with the current-state error instead of Discord showing an interaction failure.
 - The result button shows the result view when the kukai is in `results` or `ended`.
+- `/kukai button kind:current` reposts the action button for the current stage. Use `kind:result` to repost `結果を見る` after results are public.
 
 Check the bot log for startup registration:
 

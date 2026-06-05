@@ -8,6 +8,7 @@ import pytest
 from sqlalchemy import select
 
 import bot.database as database_mod
+import bot.utils.stage_announcement as stage_announcement_mod
 from bot.models.notification import NotificationSchedule
 from bot.scheduler import jobs
 from bot.services import admin_notice_service, entry_service, kukai_service, notification_service, voice_service
@@ -319,6 +320,31 @@ async def test_notify_entry_closed_includes_approved_count_and_haigo(db_session)
     assert embed.fields[0].name == "エントリー人数"
     assert embed.fields[0].value == "3名（山田太郎、testaro、☆之助）"
     assert "allowed_mentions" in channel.sent[0]
+
+
+@pytest.mark.asyncio
+async def test_notify_selecting_open_includes_action_button(db_session, monkeypatch):
+    kukai = await _make_kukai(db_session, entry_enabled=False)
+    while KukaiState.from_value(kukai.state) != KukaiState.SELECTING_OPEN:
+        await kukai_service.proceed(db_session, kukai)
+    await db_session.flush()
+
+    @asynccontextmanager
+    async def _fake_get_session():
+        yield db_session
+
+    monkeypatch.setattr(stage_announcement_mod, "get_session", _fake_get_session)
+    channel = _EmbedChannelCapture(channel_id=200)
+    guild = _GuildForEntryClose(channel)
+    bot = _BotWithGuild(guild)
+
+    await jobs._notify_selecting_open(bot=bot, kukai=kukai)
+
+    assert len(channel.sent) == 1
+    sent = channel.sent[0]
+    assert "選句受付" in sent["embed"].description
+    assert sent["view"].children[0].label == "選句する"
+    assert sent["view"].children[0].custom_id == f"kukai:stage:{kukai.id}:selecting_open"
 
 
 @pytest.mark.asyncio
