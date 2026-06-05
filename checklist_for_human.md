@@ -8,6 +8,7 @@ THIS DOCUMENT IS NOT FOR CODING AGENT(S) TO CHECK; IT IS FOR MANUAL CHECK. FOR A
 - Shard対応可能な設計
 - pdf同時生成対応（cpu上限超えないように）
 - 番号順結果のフォーマット
+- 選句のみ参加ok/ng
 
 ＊＊＊要確認＊＊＊
 
