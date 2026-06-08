@@ -9,6 +9,10 @@ THIS DOCUMENT IS NOT FOR CODING AGENT(S) TO CHECK; IT IS FOR MANUAL CHECK. FOR A
 - pdf同時生成対応（cpu上限超えないように）
 - 番号順結果のフォーマット
 - 選句のみ参加ok/ng
+- 投句締切（半自動） まで約 0時間 です。
+
+### pdf
+- ページ番号、総評の扱い確認、選評のまとめ方改善、回・日付の数字、参加者判定確認、参加者下揃え
 
 ＊＊＊要確認＊＊＊
 
