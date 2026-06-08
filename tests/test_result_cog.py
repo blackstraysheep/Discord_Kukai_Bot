@@ -1,7 +1,11 @@
 from types import SimpleNamespace
 
 from bot.cogs.result_cog import _available_formats, _resolve_initial_format
-from bot.cogs.pdf_cog import _can_show_result_author, _result_pdf_requires_admin
+from bot.cogs.pdf_cog import (
+    _can_show_pdf_author,
+    _can_show_result_author,
+    _result_pdf_requires_admin,
+)
 from bot.state_machine.states import KukaiState
 
 
@@ -48,3 +52,10 @@ def test_result_pdf_author_visibility_follows_reveal_flag():
     assert _can_show_result_author(SimpleNamespace(author_reveal=False), True) is False
     assert _can_show_result_author(SimpleNamespace(author_reveal=True), True) is True
     assert _can_show_result_author(SimpleNamespace(author_reveal=True), False) is False
+
+
+def test_submission_pdf_author_visibility_requires_results_and_reveal_flag():
+    kukai = SimpleNamespace(author_reveal=True)
+    assert _can_show_pdf_author(kukai, True, state=KukaiState.RESULTS) is True
+    assert _can_show_pdf_author(kukai, True, state=KukaiState.SELECTING_CLOSED) is False
+    assert _can_show_pdf_author(SimpleNamespace(author_reveal=False), True, state=KukaiState.RESULTS) is False

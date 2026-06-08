@@ -26,8 +26,16 @@ def _result_pdf_requires_admin(state: KukaiState) -> bool:
     return state not in _PUBLIC_RESULT_STATES
 
 
+def _can_show_pdf_author(kukai, requested: bool, *, state: KukaiState | None = None) -> bool:
+    if not requested or not bool(getattr(kukai, "author_reveal", False)):
+        return False
+    if state is not None and state not in _AUTHOR_VISIBLE_STATES:
+        return False
+    return True
+
+
 def _can_show_result_author(kukai, requested: bool) -> bool:
-    return requested and bool(getattr(kukai, "author_reveal", False))
+    return _can_show_pdf_author(kukai, requested)
 
 
 async def _send_pdf(
@@ -100,9 +108,11 @@ class PdfCog(commands.Cog):
                     )
                     return
 
-                # 結果公開前は作者名を強制非表示
-                if kukai.state not in _AUTHOR_VISIBLE_STATES:
-                    show_author = False
+                show_author = _can_show_pdf_author(
+                    kukai,
+                    show_author,
+                    state=KukaiState.from_value(kukai.state),
+                )
 
                 pdf_bytes = await pdf_service.build_submission_pdf(
                     session,

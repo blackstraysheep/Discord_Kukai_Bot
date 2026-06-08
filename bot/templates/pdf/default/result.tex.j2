@@ -17,7 +17,18 @@
 \newcommand{\emoji}[1]{\ifx\EmojiFont\relax #1\else{\EmojiFont #1}\fi}
 {% endraw %}
 
-\pagestyle{empty}
+{% raw %}
+\makeatletter
+\def\ps@pdfpagefooter{%
+  \let\@oddhead\@empty
+  \let\@evenhead\@empty
+  \def\@oddfoot{\hfil\thepage/\@ifundefined{PDFLastPage}{??}{\PDFLastPage}\hfil}%
+  \let\@evenfoot\@oddfoot
+}
+\makeatother
+\input{pdf_page_count.tex}
+\pagestyle{pdfpagefooter}
+{% endraw %}
 \geometry{top=18mm,bottom=18mm,left=16mm,right=16mm}
 \setlength{\parindent}{0pt}
 \setlength{\columnsep}{2.5\zw}
@@ -28,9 +39,9 @@
 \begin{document}
 
 %% タイトル
-{\gtfamily\Large {{ title | tex }}　結果}\par
+{\gtfamily\Large {{ title | tex_tcy }}　結果}\par
 \vspace{.7\baselineskip}
-{\small {{ date }}{% if kukai_theme %}\quad 兼題：{{ kukai_theme | tex }}{% endif %}{% if participants %}\quad 参加者：{% for p in participants %}{{ p | tex }}{% if not loop.last %}・{% endif %}{% endfor %}{% endif %}}\par
+{\small {{ date | tex_tcy }}{% if kukai_theme %}\quad 兼題：{{ kukai_theme | tex }}{% endif %}{% if participants %}\quad 参加者：{% for p in participants %}{{ p | tex }}{% if not loop.last %}・{% endif %}{% endfor %}{% endif %}}\par
 \vspace{1.2\baselineskip}
 
 \begin{multicols*}{3}
@@ -50,9 +61,14 @@
 \hfill{\small {{ r.author | tex }}}\par
 {%- endif %}
 
-%% 選評
+%% 得票サマリ
 {% for ls in r.label_selects %}{% if ls.count %}
-{\leftskip=1\zw{\gtfamily\small {{ ls.label | tex }}\quad\rensuji{ {{ ls.count }} }}{% if ls.all_selectors %}{\mcfamily\small （{% for name in ls.all_selectors %}{{ name | tex }}{% if not loop.last %}・{% endif %}{% endfor %}）}{% endif %}\par}%
+{\leftskip=1\zw{\gtfamily\small {{ ls.label | tex }}}{\mcfamily\small （\rensuji{ {{ ls.point }} }点）×\rensuji{ {{ ls.count }} }{% if ls.all_selectors %}（{% for name in ls.all_selectors %}{{ name | tex }}{% if not loop.last %}・{% endif %}{% endfor %}）{% endif %}}\par}%
+{% endif %}{% endfor %}
+
+%% 選評
+{% for ls in r.label_selects %}{% if ls.comments %}
+{\leftskip=1\zw{\gtfamily\small {{ ls.label | tex }}}\par}%
 {% for c in ls.comments %}
 {\leftskip=2\zw{\small {{ c.text | tex }}{% if c.author %}\unskip\nobreak\hfill\hbox{\tate\small ――{{ c.author | tex }}}\parfillskip=0pt{% endif %}}\par}%
 {% endfor %}
@@ -69,8 +85,7 @@
 \vspace{.5\baselineskip}
 {% for oc in overall_comments %}
 {\leftskip=1\zw
-{\bfseries\small {% if oc.author %}{{ oc.author | tex }}{% endif %}}\par
-{\small {{ oc.text | tex }}}\par}%
+{\small {{ oc.text | tex }}{% if oc.author %}\unskip\nobreak\hfill\hbox{\tate\small ――{{ oc.author | tex }}}\parfillskip=0pt{% endif %}}\par}%
 \vspace{.5\baselineskip}
 {% endfor %}
 {% endif %}

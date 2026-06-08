@@ -11,10 +11,12 @@ import pytest
 from bot.services.pdf_service import (
     PdfError,
     _cleanup_expired_temp_pdfs,
+    _extract_pdf_page_count,
     _format_date,
     _render_template,
     is_available,
     publish_temp,
+    tex_tcy_numbers,
     tex_escape,
 )
 
@@ -68,6 +70,16 @@ class TestTexEscape:
 
     def test_emoji_with_special_character_still_escapes_tex(self):
         assert tex_escape("#️⃣") == r"\emoji{\#️⃣}"
+
+    def test_tex_tcy_numbers_wraps_digit_runs_after_escaping(self):
+        assert tex_tcy_numbers("第10回 2026年5月") == (
+            r"第\rensuji{10}回 \rensuji{2026}年\rensuji{5}月"
+        )
+
+
+def test_extract_pdf_page_count_from_lualatex_log():
+    log = "Output written on main.pdf (12 pages, 12345 bytes)."
+    assert _extract_pdf_page_count(log) == 12
 
 
 # ---------------------------------------------------------------------------
@@ -187,9 +199,25 @@ class TestRenderSubmissionList:
         tex = _render_template("default", "submission_list.tex.j2", self._data())
         assert "春の句会" in tex
 
+    def test_page_number_footer_appears(self):
+        tex = _render_template("default", "submission_list.tex.j2", self._data())
+        assert r"\thepage/\@ifundefined{PDFLastPage}{??}{\PDFLastPage}" in tex
+        assert r"\input{pdf_page_count.tex}" in tex
+        assert r"\raisebox{.3\baselineskip}" in tex
+        assert "lastpage" not in tex
+
     def test_theme_appears(self):
         tex = _render_template("default", "submission_list.tex.j2", self._data())
         assert "海" in tex
+
+    def test_title_and_date_digits_use_tcy(self):
+        tex = _render_template(
+            "default",
+            "submission_list.tex.j2",
+            self._data(title="第10回春の句会", date="2026年5月16日"),
+        )
+        assert r"第\rensuji{10}回春の句会" in tex
+        assert r"\rensuji{2026}年\rensuji{5}月\rensuji{16}日" in tex
 
     def test_haiku_text_appears(self):
         tex = _render_template("default", "submission_list.tex.j2", self._data())
@@ -256,12 +284,20 @@ class TestRenderResult:
                     "label_selects": [
                         {
                             "label": "特選",
+                            "point": 3,
                             "count": 1,
+                            "all_selectors": ["蕪村"],
                             "comments": [
                                 {"author": "蕪村", "text": "大海の広がりが印象的"},
                             ],
                         },
-                        {"label": "並選", "count": 2, "comments": []},
+                        {
+                            "label": "並選",
+                            "point": 1,
+                            "count": 2,
+                            "all_selectors": ["一茶", "子規"],
+                            "comments": [],
+                        },
                     ],
                 },
             ],
@@ -276,6 +312,13 @@ class TestRenderResult:
         tex = _render_template("default", "result.tex.j2", self._data())
         assert "No." in tex
 
+    def test_page_number_footer_appears(self):
+        tex = _render_template("default", "result.tex.j2", self._data())
+        assert r"\thepage/\@ifundefined{PDFLastPage}{??}{\PDFLastPage}" in tex
+        assert r"\input{pdf_page_count.tex}" in tex
+        assert r"\pageref{LastPage}" not in tex
+        assert "lastpage" not in tex
+
     def test_haiku_text_appears(self):
         tex = _render_template("default", "result.tex.j2", self._data())
         assert "春の海ひねもすのたりのたりかな" in tex
@@ -285,6 +328,17 @@ class TestRenderResult:
         assert "特選" in tex
         assert "並選" in tex
 
+    def test_select_summary_lists_label_point_count_and_selectors_first(self):
+        tex = _render_template("default", "result.tex.j2", self._data())
+        summary = r"{\gtfamily\small 特選}{\mcfamily\small （\rensuji{ 3 }点）×\rensuji{ 1 }"
+        assert summary in tex
+        assert "蕪村" in tex
+        assert tex.index(summary) < tex.index("大海の広がりが印象的")
+
+    def test_comment_label_is_label_only(self):
+        tex = _render_template("default", "result.tex.j2", self._data())
+        assert r"{\leftskip=1\zw{\gtfamily\small 特選}\par}%" in tex
+
     def test_comment_appears(self):
         tex = _render_template("default", "result.tex.j2", self._data())
         assert "大海の広がりが印象的" in tex
@@ -293,6 +347,16 @@ class TestRenderResult:
         tex = _render_template("default", "result.tex.j2", self._data())
         assert "今回の句会は海の句が多く良かった。" in tex
         assert "総評" in tex
+        assert r"\hbox{\tate\small ――芭蕉}" in tex
+
+    def test_title_and_date_digits_use_tcy(self):
+        tex = _render_template(
+            "default",
+            "result.tex.j2",
+            self._data(title="第10回春の句会", date="2026年5月16日"),
+        )
+        assert r"第\rensuji{10}回春の句会" in tex
+        assert r"\rensuji{2026}年\rensuji{5}月\rensuji{16}日" in tex
 
     def test_emoji_font_macro_is_defined(self):
         data = self._data()

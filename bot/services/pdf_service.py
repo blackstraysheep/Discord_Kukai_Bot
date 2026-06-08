@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import re
 import secrets
 import shutil
 import tempfile
@@ -19,7 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
 
-from bot.repositories import entry_repo, select_repo, submission_repo
+from bot.repositories import entry_repo, participant_repo, select_repo, submission_repo
 from bot.services import result_service
 from bot.services.errors import ServiceError
 
@@ -143,6 +144,19 @@ def tex_escape(s: str) -> str:
     return "".join(parts)
 
 
+def tex_tcy_numbers(s: str) -> str:
+    """Escape text and wrap each Arabic numeral run for tategaki."""
+    parts: list[str] = []
+    for part in re.split(r"([0-9]+)", s):
+        if not part:
+            continue
+        if part.isascii() and part.isdecimal():
+            parts.append(r"\rensuji{" + part + "}")
+        else:
+            parts.append(tex_escape(part))
+    return "".join(parts)
+
+
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
@@ -170,7 +184,15 @@ def _render_template(theme: str, template_name: str, data: dict) -> str:
         keep_trailing_newline=True,
     )
     env.filters["tex"] = tex_escape
+    env.filters["tex_tcy"] = tex_tcy_numbers
     return env.get_template(template_name).render(**data, theme=theme_cfg)
+
+
+def _extract_pdf_page_count(log: str) -> int | None:
+    match = re.search(r"Output written on .+? \((\d+) pages?", log)
+    if not match:
+        return None
+    return int(match.group(1))
 
 
 async def _compile(tex_source: str) -> bytes:
@@ -180,28 +202,44 @@ async def _compile(tex_source: str) -> bytes:
         with tempfile.TemporaryDirectory() as tmpdir:
             tex_path = Path(tmpdir) / "main.tex"
             tex_path.write_text(tex_source, encoding="utf-8")
+            page_count_path = Path(tmpdir) / "pdf_page_count.tex"
+            page_count_path.write_text(r"\gdef\PDFLastPage{??}", encoding="utf-8")
 
             logger.debug("TeX source:\n%s", tex_source)
             for sty_file in TEMPLATES_DIR.glob("*.sty"):
                 shutil.copy(sty_file, tmpdir)
 
-            proc = await asyncio.create_subprocess_exec(
-                LUALATEX_BIN,
-                "--interaction=nonstopmode",
-                "--halt-on-error",
-                "main.tex",
-                cwd=tmpdir,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.STDOUT,
-            )
-            try:
-                stdout, _ = await asyncio.wait_for(
-                    proc.communicate(), timeout=COMPILE_TIMEOUT
+            stdout = b""
+            for pass_index in range(2):
+                proc = await asyncio.create_subprocess_exec(
+                    LUALATEX_BIN,
+                    "--interaction=nonstopmode",
+                    "--halt-on-error",
+                    "main.tex",
+                    cwd=tmpdir,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.STDOUT,
                 )
-            except asyncio.TimeoutError:
-                proc.kill()
-                await proc.communicate()
-                raise PdfError("PDFコンパイルがタイムアウトしました。")
+                try:
+                    stdout, _ = await asyncio.wait_for(
+                        proc.communicate(), timeout=COMPILE_TIMEOUT
+                    )
+                except asyncio.TimeoutError:
+                    proc.kill()
+                    await proc.communicate()
+                    raise PdfError("PDFコンパイルがタイムアウトしました。")
+                if proc.returncode:
+                    break
+                if pass_index == 0:
+                    log = stdout.decode(errors="replace") if stdout else ""
+                    page_count = _extract_pdf_page_count(log)
+                    if page_count is not None:
+                        page_count_path.write_text(
+                            rf"\gdef\PDFLastPage{{{page_count}}}",
+                            encoding="utf-8",
+                        )
+                    else:
+                        logger.warning("Could not read PDF page count from LuaLaTeX log.")
 
             pdf_path = Path(tmpdir) / "main.pdf"
             if not pdf_path.exists():
@@ -212,22 +250,47 @@ async def _compile(tex_source: str) -> bytes:
             return pdf_path.read_bytes()
 
 
-async def _build_haigo_map(
+def _display_name(user_id: int, haigo: str | None, guild: discord.Guild | None) -> str:
+    if haigo:
+        return haigo
+    if guild is not None:
+        member = guild.get_member(user_id)
+        if member:
+            return member.display_name
+    return f"UID:{user_id}"
+
+
+async def _build_participant_names(
     session: AsyncSession,
-    kukai_id: int,
+    kukai,
     guild: discord.Guild | None,
-) -> dict[int, str]:
-    entries = await entry_repo.list_by_kukai(session, kukai_id)
+) -> tuple[dict[int, str], list[str]]:
+    """Return display names for effective PDF participants.
+
+    Entry kukai use the same effective-participant rule as entry counting:
+    approval-required kukai count approved entries only; otherwise pending and
+    approved entries both count. Non-entry kukai use participant profiles
+    recorded through submission/select flows.
+    """
     result: dict[int, str] = {}
-    for e in entries:
-        if e.haigo:
-            result[e.user_id] = e.haigo
-        elif guild is not None:
-            member = guild.get_member(e.user_id)
-            result[e.user_id] = member.display_name if member else f"UID:{e.user_id}"
-        else:
-            result[e.user_id] = f"UID:{e.user_id}"
-    return result
+    names: list[str] = []
+    if kukai.entry_enabled:
+        statuses = {"approved"} if kukai.entry_approval else {"pending", "approved"}
+        entries = await entry_repo.list_by_kukai(session, kukai.id)
+        for entry in entries:
+            if entry.status not in statuses:
+                continue
+            name = _display_name(entry.user_id, entry.haigo, guild)
+            result[entry.user_id] = name
+            names.append(name)
+        return result, names
+
+    participants = await participant_repo.list_by_kukai(session, kukai.id)
+    for participant in participants:
+        name = _display_name(participant.user_id, participant.haigo, guild)
+        result[participant.user_id] = name
+        names.append(name)
+    return result, names
 
 
 def _format_date(kukai) -> str:
@@ -254,13 +317,13 @@ async def build_submission_pdf(
     if not published:
         raise PdfError("投句一覧がまだ公開されていません。")
 
-    haigo_map = await _build_haigo_map(session, kukai.id, guild)
+    haigo_map, participants = await _build_participant_names(session, kukai, guild)
 
     data = {
         "title": kukai.title,
         "kukai_theme": kukai.theme,
         "date": _format_date(kukai),
-        "participants": list(haigo_map.values()),
+        "participants": participants,
         "submissions": [
             {
                 "number": ps.number,
@@ -285,13 +348,13 @@ async def build_result_pdf(
 ) -> bytes:
     results = await result_service.compute_results(session, kukai)
     overall_comments = await select_repo.list_overall_comments(session, kukai.id)
-    haigo_map = await _build_haigo_map(session, kukai.id, guild)
+    haigo_map, participants = await _build_participant_names(session, kukai, guild)
 
     data = {
         "title": kukai.title,
         "kukai_theme": kukai.theme,
         "date": _format_date(kukai),
-        "participants": list(haigo_map.values()),
+        "participants": participants,
         "results": [
             {
                 "rank": r.rank,
@@ -302,6 +365,7 @@ async def build_result_pdf(
                 "label_selects": [
                     {
                         "label": ls.label,
+                        "point": ls.point,
                         "count": ls.count,
                         "comments": [
                             {

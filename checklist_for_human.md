@@ -8,11 +8,17 @@ THIS DOCUMENT IS NOT FOR CODING AGENT(S) TO CHECK; IT IS FOR MANUAL CHECK. FOR A
 - Shard対応可能な設計
 - pdf同時生成対応（cpu上限超えないように）
 - 番号順結果のフォーマット
+- 結果メッセージのラベルにshowauthorfalseのときでも選者名
+- pdfはshow author falseのときtrueにできない仕様に
 - 選句のみ参加ok/ng
 - 投句締切（半自動） まで約 0時間 です。
+- 進行中id制限の撤廃？（進行中＞終了）同じものが複数ある場合はid要求
+
+- 選評のラベル部分以外（点数など）は明朝に。
+- 作者未公開時はpdfも作者未公開only
 
 ### pdf
-- ページ番号、総評の扱い確認、選評のまとめ方改善、回・日付の数字、参加者判定確認、参加者下揃え
+- 総評の署名
 
 ＊＊＊要確認＊＊＊
 

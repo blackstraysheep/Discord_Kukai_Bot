@@ -17,14 +17,25 @@
 \newcommand{\emoji}[1]{\ifx\EmojiFont\relax #1\else{\EmojiFont #1}\fi}
 {% endraw %}
 \renewcommand{\baselinestretch}{1}
-\pagestyle{empty}
+{% raw %}
+\makeatletter
+\def\ps@pdfpagefooter{%
+  \let\@oddhead\@empty
+  \let\@evenhead\@empty
+  \def\@oddfoot{\hfil\raisebox{.3\baselineskip}{\thepage/\@ifundefined{PDFLastPage}{??}{\PDFLastPage}}\hfil}%
+  \let\@evenfoot\@oddfoot
+}
+\makeatother
+\input{pdf_page_count.tex}
+\pagestyle{pdfpagefooter}
+{% endraw %}
 \geometry{margin=1.5cm}
 
 \begin{document}
-{\gtfamily \large {{ title | tex }}\quad 投句一覧}%
+{\gtfamily \large {{ title | tex_tcy }}\quad 投句一覧}%
 {%- if kukai_theme %}\quad（兼題：{{ kukai_theme | tex }}）{% endif %}
 
-\hfill {{ date }}
+\hfill {{ date | tex_tcy }}
 
 {% if participants %}\hfill 参加者：{% for p in participants %}{{ p | tex }}{% if not loop.last %}・{% endif %}{% endfor %}
 {% endif %}
@@ -38,7 +49,7 @@
 \newpage
 
 \begin{center}
-{\gtfamily \large {{ title | tex }}\quad 投句一覧}%
+{\gtfamily \large {{ title | tex_tcy }}\quad 投句一覧}%
 {%- if kukai_theme %}\quad（兼題：{{ kukai_theme | tex }}）{% endif %}
 \end{center}
 
