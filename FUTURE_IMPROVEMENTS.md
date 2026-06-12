@@ -86,10 +86,11 @@
 
 ## I. 配布・インフラ
 
-- 定期バックアップ整備
-  - Oracle Free Tier はVM強制回収リスクがあるため、PostgreSQL dumpの定期バックアップが必要
-  - cronで `pg_dump` → 暗号化 → Oracle Object Storage（無料10GB）へアップロード
-  - リストア手順も `docs/operations.md` に追記する
+- バックアップ外部退避
+  - VM内cronによるPostgreSQL dumpは `docs/operations.md` に整備済み
+  - Oracle Free Tier/PAYG無料枠運用でもVM/boot volume喪失リスクがあるため、dumpを暗号化してVM外へ退避する
+  - 候補: Oracle Object Storage（無料10GB）または管理者PCへの定期コピー
+  - 外部退避後、別環境でのリストア演習手順も更新する
 - GitHub Actions + GHCRによるDockerイメージ配布
   - セルフホスト配布を楽にするため、ビルド済みイメージをGHCR（GitHub Container Registry）にpush
   - `docker-compose.yml` を `build: .` から `image: ghcr.io/...` に切り替える

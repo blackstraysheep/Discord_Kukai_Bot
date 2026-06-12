@@ -1,6 +1,6 @@
 # Kukai Bot 現在仕様（技術者向け）
 
-最終更新: 2026-06-08（PDFページ番号・選評サマリ・参加者判定整理）
+最終更新: 2026-06-09（PDF作者公開条件の整理）
 
 ## 1. 全体構成
 - 実装言語: Python 3.11+（開発・テスト環境は Python 3.13）
@@ -462,9 +462,13 @@ overall=全体に春らしい句が多かったです
 - `public=True` 時はチャンネルへ投稿（句会管理者のみ）
 - `public=False`（デフォルト）は自分だけに見える ephemeral 返信
 
-### `show_author` の制限（投句一覧のみ）
-- 句会ステートが `results` または `ended` の場合のみ `show_author=True` が有効
-- それ以前のステートでは `show_author` の指定に関わらず強制的に `False`（無記名）
+### `show_author` の制限
+- 投句一覧PDFでは、句会ステートが `results` または `ended` の場合のみ `show_author=True` が有効
+- 投句一覧PDFでは、それ以前のステートでは `show_author` の指定に関わらず強制的に `False`（無記名）
+- 句会の作者公開設定も反映する
+  - `author_reveal=false` の場合は、投句一覧PDF・結果PDFとも作者非公開
+  - `author_reveal=true` かつ `author_reveal_zero=false` の場合は、作者別合計点が0点以下の作者を非公開
+  - `author_reveal=true` かつ `author_reveal_zero=true` の場合は、0点以下の作者も公開
 
 ### ファイル名
 - 投句一覧: `submission_{kukai_id}_{named|anonymous}.pdf`

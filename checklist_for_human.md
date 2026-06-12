@@ -14,8 +14,7 @@ THIS DOCUMENT IS NOT FOR CODING AGENT(S) TO CHECK; IT IS FOR MANUAL CHECK. FOR A
 - 投句締切（半自動） まで約 0時間 です。
 - 進行中id制限の撤廃？（進行中＞終了）同じものが複数ある場合はid要求
 
-- 選評のラベル部分以外（点数など）は明朝に。
-- 作者未公開時はpdfも作者未公開only
+
 
 ### pdf
 - 総評の署名
