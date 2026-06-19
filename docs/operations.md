@@ -106,6 +106,52 @@ docker compose down
 
 Do not use `down -v` unless intentionally deleting the PostgreSQL database volume.
 
+## Local Test Environment
+
+Use a separate Discord application and bot token for local or staging tests. Do
+not run production and test runtimes with the same `BOT_TOKEN` at the same time.
+
+Recommended local setup:
+
+1. Create a test Discord application and bot in the Discord Developer Portal.
+2. Invite that test bot to a private test Discord server.
+3. Copy `.env.test.example` to `.env.test`.
+4. Set `BOT_TOKEN` to the test bot token.
+5. Set `DEV_GUILD_IDS` to the test Discord server ID.
+6. Keep all PostgreSQL values local/test-only. Do not copy production
+   `DATABASE_URL`, `SCHEDULER_DB_URL`, or `POSTGRES_PASSWORD`.
+
+Start the isolated test stack from the repository root:
+
+```powershell
+docker compose --env-file .env.test -f docker-compose.test.yml up -d --build
+```
+
+Follow the test bot log:
+
+```powershell
+docker compose --env-file .env.test -f docker-compose.test.yml logs -f bot
+```
+
+Stop the test stack:
+
+```powershell
+docker compose --env-file .env.test -f docker-compose.test.yml down
+```
+
+The test compose file uses the Compose project name `kukai_bot_test`, so its
+network and Docker volumes are separate from the production project. Do not use
+`down -v` unless intentionally deleting the local test database.
+
+Expected test environment boundaries:
+
+- Test bot token only.
+- Test Discord server only.
+- `DEV_GUILD_IDS` set to the test server for fast command sync.
+- Local/test PostgreSQL only.
+- No production Discord server, production bot token, or production database
+  connection values.
+
 ## Health Checks
 
 Confirm Alembic is at the latest revision:
