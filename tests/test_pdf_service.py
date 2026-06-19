@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -14,6 +15,7 @@ from bot.services.pdf_service import (
     _extract_pdf_page_count,
     _format_date,
     _render_template,
+    _visible_author_ids,
     is_available,
     publish_temp,
     tex_tcy_numbers,
@@ -80,6 +82,22 @@ class TestTexEscape:
 def test_extract_pdf_page_count_from_lualatex_log():
     log = "Output written on main.pdf (12 pages, 12345 bytes)."
     assert _extract_pdf_page_count(log) == 12
+
+
+def test_visible_author_ids_respects_zero_score_setting():
+    kukai = SimpleNamespace(author_reveal=True, author_reveal_zero=False)
+    results = [
+        SimpleNamespace(author_user_id=1, total_score=1),
+        SimpleNamespace(author_user_id=2, total_score=0),
+        SimpleNamespace(author_user_id=3, total_score=-1),
+    ]
+    assert _visible_author_ids(kukai, results) == {1}
+
+
+def test_visible_author_ids_hidden_when_author_unrevealed():
+    kukai = SimpleNamespace(author_reveal=False, author_reveal_zero=True)
+    results = [SimpleNamespace(author_user_id=1, total_score=10)]
+    assert _visible_author_ids(kukai, results) == set()
 
 
 # ---------------------------------------------------------------------------

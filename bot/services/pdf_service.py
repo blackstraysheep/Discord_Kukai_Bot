@@ -301,6 +301,17 @@ def _format_date(kukai) -> str:
     return f"{dt_jst.year}年{dt_jst.month}月{dt_jst.day}日"
 
 
+def _visible_author_ids(kukai, results) -> set[int]:
+    if not getattr(kukai, "author_reveal", False):
+        return set()
+    totals: dict[int, int] = {}
+    for result in results:
+        totals[result.author_user_id] = totals.get(result.author_user_id, 0) + result.total_score
+    if getattr(kukai, "author_reveal_zero", True):
+        return set(totals)
+    return {user_id for user_id, score in totals.items() if score > 0}
+
+
 # ---------------------------------------------------------------------------
 # Public PDF builders
 # ---------------------------------------------------------------------------
@@ -318,6 +329,12 @@ async def build_submission_pdf(
         raise PdfError("投句一覧がまだ公開されていません。")
 
     haigo_map, participants = await _build_participant_names(session, kukai, guild)
+    visible_author_ids: set[int] = set()
+    if show_author:
+        visible_author_ids = _visible_author_ids(
+            kukai,
+            await result_service.compute_results(session, kukai),
+        )
 
     data = {
         "title": kukai.title,
@@ -328,7 +345,11 @@ async def build_submission_pdf(
             {
                 "number": ps.number,
                 "text": ps.submission.text,
-                "author": haigo_map.get(ps.submission.user_id) if show_author else None,
+                "author": (
+                    haigo_map.get(ps.submission.user_id)
+                    if show_author and ps.submission.user_id in visible_author_ids
+                    else None
+                ),
             }
             for ps in published
         ],
@@ -349,6 +370,7 @@ async def build_result_pdf(
     results = await result_service.compute_results(session, kukai)
     overall_comments = await select_repo.list_overall_comments(session, kukai.id)
     haigo_map, participants = await _build_participant_names(session, kukai, guild)
+    visible_author_ids = _visible_author_ids(kukai, results) if show_author else set()
 
     data = {
         "title": kukai.title,
@@ -361,7 +383,11 @@ async def build_result_pdf(
                 "score": r.total_score,
                 "number": r.number,
                 "text": r.text,
-                "author": haigo_map.get(r.author_user_id) if show_author else None,
+                "author": (
+                    haigo_map.get(r.author_user_id)
+                    if show_author and r.author_user_id in visible_author_ids
+                    else None
+                ),
                 "label_selects": [
                     {
                         "label": ls.label,
