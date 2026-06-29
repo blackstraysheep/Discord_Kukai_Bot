@@ -188,7 +188,7 @@ class _SubmissionSelect(discord.ui.Select):
     def __init__(self, view_owner: "SelectView") -> None:
         self._view_owner = view_owner
         options = []
-        for ps in view_owner._pub_subs[:_SUBMISSION_OPTION_LIMIT]:
+        for ps in view_owner._page_submissions():
             options.append(
                 discord.SelectOption(
                     label=f"No.{ps.number}",
@@ -206,7 +206,7 @@ class _SubmissionSelect(discord.ui.Select):
             )
         )
         super().__init__(
-            placeholder="番号+句リストから1句選択",
+            placeholder=f"番号+句リストから1句選択 ({view_owner._page_index + 1}/{view_owner._page_count()})",
             options=options,
             min_values=1,
             max_values=1,
@@ -313,6 +313,7 @@ class SelectView(discord.ui.View):
         selector_user_id: int,
         selected_submission_id: int | None | object = _UNSET,
         selected_label_value: str | None = None,
+        page_index: int | None = None,
     ) -> None:
         super().__init__(timeout=600)
         self._kukai = kukai
@@ -325,6 +326,7 @@ class SelectView(discord.ui.View):
         self._selected_submission_id = (
             self._pub_subs[0].submission_id if selected_submission_id is _UNSET else selected_submission_id
         )
+        self._page_index = self._resolve_page_index(page_index)
         self._selected_label_value = selected_label_value or self._default_label_value()
         self._build_items()
 
@@ -333,6 +335,7 @@ class SelectView(discord.ui.View):
         *,
         selected_submission_id: int | None | object = _UNSET,
         selected_label_value: str | None = None,
+        page_index: int | None = None,
     ) -> "SelectView":
         return SelectView(
             self._kukai,
@@ -345,10 +348,36 @@ class SelectView(discord.ui.View):
             if selected_submission_id is not _UNSET
             else self._selected_submission_id,
             selected_label_value=selected_label_value,
+            page_index=self._page_index if page_index is None else page_index,
         )
 
     def _is_overall_selected(self) -> bool:
         return self._selected_submission_id is None
+
+    def _page_count(self) -> int:
+        if not self._pub_subs:
+            return 1
+        return max(1, (len(self._pub_subs) + _SUBMISSION_OPTION_LIMIT - 1) // _SUBMISSION_OPTION_LIMIT)
+
+    def _resolve_page_index(self, page_index: int | None) -> int:
+        if page_index is None and isinstance(self._selected_submission_id, int):
+            for index, ps in enumerate(self._pub_subs):
+                if ps.submission_id == self._selected_submission_id:
+                    page_index = index // _SUBMISSION_OPTION_LIMIT
+                    break
+        if page_index is None:
+            page_index = 0
+        return min(max(page_index, 0), self._page_count() - 1)
+
+    def _page_submissions(self) -> list[PublishedSubmission]:
+        start = self._page_index * _SUBMISSION_OPTION_LIMIT
+        return self._pub_subs[start:start + _SUBMISSION_OPTION_LIMIT]
+
+    def _first_submission_id_on_page(self, page_index: int) -> int | None:
+        start = page_index * _SUBMISSION_OPTION_LIMIT
+        if start >= len(self._pub_subs):
+            return None
+        return self._pub_subs[start].submission_id
 
     def _selected_ps(self) -> PublishedSubmission:
         for ps in self._pub_subs:
@@ -379,9 +408,12 @@ class SelectView(discord.ui.View):
             "1) 句を選択 → 2) 選種別を選択 → 3) 必要ならコメント入力\n"
             "（自分の句は作者コメントのみ設定できます）"
         )
-        lines = [f"`No.{item.number}` {discord_safe(item.submission.text[:70])}" for item in self._pub_subs[:25]]
-        if len(self._pub_subs) > 25:
-            lines.append(f"...他 {len(self._pub_subs) - 25} 句")
+        lines = [
+            f"`No.{item.number}` {discord_safe(item.submission.text[:70])}"
+            for item in self._page_submissions()
+        ]
+        if self._page_count() > 1:
+            lines.append(f"ページ {self._page_index + 1}/{self._page_count()}")
         lines.append("`総評` 句会全体へのコメント")
         embed.add_field(name="番号+句リスト", value="\n".join(lines), inline=False)
         embed.add_field(name="選句数", value=self._select_count_summary(), inline=False)
@@ -449,6 +481,43 @@ class SelectView(discord.ui.View):
         decide_btn.callback = self._on_decide
         self.add_item(decide_btn)
 
+        if self._page_count() > 1:
+            prev_btn = discord.ui.Button(
+                label="前へ",
+                style=discord.ButtonStyle.secondary,
+                row=3,
+                disabled=self._page_index <= 0,
+            )
+            prev_btn.callback = self._on_prev_page
+            self.add_item(prev_btn)
+
+            next_btn = discord.ui.Button(
+                label="次へ",
+                style=discord.ButtonStyle.secondary,
+                row=3,
+                disabled=self._page_index >= self._page_count() - 1,
+            )
+            next_btn.callback = self._on_next_page
+            self.add_item(next_btn)
+
+    async def _on_prev_page(self, interaction: discord.Interaction) -> None:
+        page_index = max(0, self._page_index - 1)
+        selected_submission_id = self._first_submission_id_on_page(page_index)
+        next_view = self._copy_with(
+            selected_submission_id=selected_submission_id,
+            page_index=page_index,
+        )
+        await interaction.response.edit_message(embed=next_view.build_embed(), view=next_view)
+
+    async def _on_next_page(self, interaction: discord.Interaction) -> None:
+        page_index = min(self._page_count() - 1, self._page_index + 1)
+        selected_submission_id = self._first_submission_id_on_page(page_index)
+        next_view = self._copy_with(
+            selected_submission_id=selected_submission_id,
+            page_index=page_index,
+        )
+        await interaction.response.edit_message(embed=next_view.build_embed(), view=next_view)
+
     async def _refresh(self, interaction: discord.Interaction) -> None:
         assert interaction.guild is not None
         async with get_session() as session:
@@ -464,6 +533,7 @@ class SelectView(discord.ui.View):
             overall_comment=overall_comment,
             selector_user_id=self._selector_user_id,
             selected_submission_id=self._selected_submission_id,
+            page_index=self._page_index,
         )
         await interaction.edit_original_response(embed=view.build_embed(), view=view)
 

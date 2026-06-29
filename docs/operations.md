@@ -231,12 +231,12 @@ Expected:
 
 The current manual deployment method is to copy the repository from the admin
 machine to the VM and rebuild the Compose stack there. Do not copy local runtime
-data or test caches.
+data, test caches, or local secret files.
 
 From the local repository root on Windows:
 
 ```powershell
-tar --exclude='.git' --exclude='data' --exclude='.pytest_cache' -czf C:\tmp\kukai_bot.tar.gz .
+tar --exclude='.git' --exclude='data' --exclude='.pytest_cache' --exclude='.env' -czf C:\tmp\kukai_bot.tar.gz .
 scp -i $HOME\.ssh\id_ed25519 C:\tmp\kukai_bot.tar.gz ubuntu@<public-ip>:/home/ubuntu/
 ```
 
@@ -247,7 +247,7 @@ cd /home/ubuntu
 cp -a kukai_bot kukai_bot.before_update_$(date +%F_%H%M)
 tar -xzf kukai_bot.tar.gz -C kukai_bot
 cd /home/ubuntu/kukai_bot
-docker compose up -d --build
+docker compose up -d --build bot
 docker compose logs --tail 100 bot
 ```
 
@@ -258,6 +258,22 @@ Before updating production:
 3. Take a manual PostgreSQL dump.
 4. Deploy and rebuild.
 5. Confirm Discord login and command sync in the bot log.
+
+Expected post-deploy checks:
+
+```sh
+cd /home/ubuntu/kukai_bot
+docker compose ps
+docker compose logs --tail 100 bot
+```
+
+Expected:
+
+- `bot` is `Up`.
+- `db` is `Up` and healthy.
+- bot log includes `Context impl PostgresqlImpl.`
+- bot log includes `Registered persistent kukai views: <count>`.
+- bot log includes `Logged in as ...`.
 
 Manual pre-update dump on the VM:
 
@@ -279,6 +295,26 @@ docker compose up -d --build
 
 If a migration has already modified production data, treat rollback as a database
 restore task and do not rely only on file rollback.
+
+If the bot restart-loops with a PostgreSQL password error such as
+`asyncpg.exceptions.InvalidPasswordError: password authentication failed for user "kukai"`,
+the most likely cause is that the VM's production `.env` was overwritten. Restore
+`.env` from the timestamped backup directory and restart only the bot:
+
+```sh
+cd /home/ubuntu
+ls -td kukai_bot.before_update_* | head -1
+cp /home/ubuntu/<backup-dir>/.env /home/ubuntu/kukai_bot/.env
+cd /home/ubuntu/kukai_bot
+docker compose up -d bot
+docker compose logs --tail 100 bot
+docker compose ps
+```
+
+Do not fix this by deleting the PostgreSQL volume. If `postgres_data` already
+exists, changing `.env` does not change the database user's stored password; the
+VM `.env` must match the existing database password unless the database password
+is intentionally changed.
 
 ## Daily and Weekly Operation
 
