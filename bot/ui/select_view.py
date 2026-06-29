@@ -22,6 +22,8 @@ if TYPE_CHECKING:
 
 _AUTHOR_COMMENT_LABEL = "作者コメント"
 _OVERALL_VALUE = "__overall__"
+_MAX_SELECT_OPTIONS = 25
+_SUBMISSION_OPTION_LIMIT = _MAX_SELECT_OPTIONS - 1
 SELECT_COMMENT_PREVIEW_LIMIT = 120
 OVERALL_COMMENT_PREVIEW_LIMIT = 300
 logger = logging.getLogger(__name__)
@@ -186,7 +188,7 @@ class _SubmissionSelect(discord.ui.Select):
     def __init__(self, view_owner: "SelectView") -> None:
         self._view_owner = view_owner
         options = []
-        for ps in view_owner._pub_subs[:25]:
+        for ps in view_owner._pub_subs[:_SUBMISSION_OPTION_LIMIT]:
             options.append(
                 discord.SelectOption(
                     label=f"No.{ps.number}",

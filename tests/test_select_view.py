@@ -53,3 +53,21 @@ def test_select_view_copy_with_label_does_not_mutate_current_view():
     assert view._selected_label_value == "1"
     assert view.children == original_children
     assert next_view._selected_label_value == "2"
+
+
+def test_submission_select_reserves_option_slot_for_overall_comment():
+    view = SelectView(
+        SimpleNamespace(id=123, title="テスト句会"),
+        [_published_submission(number, number) for number in range(1, 26)],
+        [_label(1, "特選")],
+        {},
+        overall_comment="",
+        selector_user_id=456,
+    )
+
+    submission_select = view.children[0]
+    option_values = [option.value for option in submission_select.options]
+
+    assert len(option_values) == 25
+    assert "__overall__" in option_values
+    assert "25" not in option_values
