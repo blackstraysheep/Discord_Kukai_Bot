@@ -18,6 +18,7 @@ from bot.services.pdf_service import (
     _visible_author_ids,
     is_available,
     publish_temp,
+    tex_submission_markup,
     tex_tcy_numbers,
     tex_escape,
 )
@@ -77,6 +78,12 @@ class TestTexEscape:
         assert tex_tcy_numbers("第10回 2026年5月") == (
             r"第\rensuji{10}回 \rensuji{2026}年\rensuji{5}月"
         )
+
+    def test_tex_submission_markup_converts_ruby(self):
+        assert tex_submission_markup("｜遠山（とおやま）") == r"\ruby{遠山}{とおやま}"
+
+    def test_tex_submission_markup_escapes_ruby_parts(self):
+        assert tex_submission_markup("｜A&B（50%）") == r"\ruby{A\&B}{50\%}"
 
 
 def test_extract_pdf_page_count_from_lualatex_log():
@@ -272,6 +279,15 @@ class TestRenderSubmissionList:
         assert r"春の海\emoji{🙂}" in tex
         assert r"芭蕉\emoji{😀}" in tex
 
+    def test_ruby_package_and_markup_appear(self):
+        data = self._data()
+        data["submissions"] = [
+            {"number": 1, "text": "｜遠山（とおやま）", "author": None}
+        ]
+        tex = _render_template("default", "submission_list.tex.j2", data)
+        assert r"\usepackage{luatexja-ruby}" in tex
+        assert r"\ruby{遠山}{とおやま}" in tex
+
     def test_no_theme_block_when_empty(self):
         data = self._data(kukai_theme=None)
         tex = _render_template("default", "submission_list.tex.j2", data)
@@ -387,6 +403,13 @@ class TestRenderResult:
         assert r"春の海\emoji{🙂}" in tex
         assert r"芭蕉\emoji{😀}" in tex
         assert r"よい\emoji{🙂}" in tex
+
+    def test_ruby_package_and_markup_appear(self):
+        data = self._data()
+        data["results"][0]["text"] = "｜枯野（かれの）かな"
+        tex = _render_template("default", "result.tex.j2", data)
+        assert r"\usepackage{luatexja-ruby}" in tex
+        assert r"\ruby{枯野}{かれの}かな" in tex
 
     def test_no_overall_section_when_empty(self):
         data = self._data(overall_comments=[])

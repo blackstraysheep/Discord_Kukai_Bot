@@ -4,6 +4,7 @@
 \usepackage{geometry}
 \usepackage{multicol}
 \usepackage{kintou}
+\usepackage{luatexja-ruby}
 {% raw %}
 \IfFontExistsTF{Noto Color Emoji}{%
   \newfontfamily\EmojiFont{Noto Color Emoji}[Renderer=HarfBuzz]%
@@ -56,7 +57,7 @@
 {% endif %}
 
 %% 句
-{\scriptsize \hspace*{.5\zw}\rensuji{No.{{ r.number }}}}\quad{\large\kintou{17}{ {{- r.text | tex -}} }}\par
+{\scriptsize \hspace*{.5\zw}\rensuji{No.{{ r.number }}}}\quad{\large\kintou{17}{ {{- r.text | tex_submission -}} }}\par
 {%- if r.author %}
 \hfill{\small {{ r.author | tex }}}\par
 {%- endif %}

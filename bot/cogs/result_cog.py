@@ -14,6 +14,7 @@ from bot.state_machine.states import KukaiState
 from bot.utils.channel import effective_channel_id
 from bot.utils.discord_retry import send_with_retry
 from bot.utils.embed_builder import COLOR_INFO, COLOR_RESULT, error_embed
+from bot.utils.submission_markup import discord_safe_submission_text
 from bot.utils.text import discord_safe
 
 logger = logging.getLogger(__name__)
@@ -60,7 +61,7 @@ def _score_embed(
 
         header = f"**{r.rank}位 ({r.total_score}点)** — No.{r.number}{author_line}"
         body_lines = [
-            f"> {discord_safe(r.text)}",
+            f"> {discord_safe_submission_text(r.text)}",
             label_str,
         ]
         # Inline comments (up to 3)
@@ -102,7 +103,7 @@ def _number_embed(
     lines = []
     for r in sorted_r:
         label_str = "　".join(f"{lv.label}×{lv.count}" for lv in r.label_selects) or "（無選）"
-        line = f"`No.{r.number}` {discord_safe(r.text)}　— {label_str} ({r.total_score}点)"
+        line = f"`No.{r.number}` {discord_safe_submission_text(r.text)}　— {label_str} ({r.total_score}点)"
         author_comments = [c for lv in r.label_selects if lv.label == "作者コメント" for c in lv.comments[:1]]
         if author_comments:
             line += f"\n　🖊 作者コメント: {discord_safe(author_comments[0].text[:COMMENT_PREVIEW_LIMIT])}"
@@ -140,7 +141,7 @@ def _author_embed(
         total = sum(r.total_score for r in subs)
         lines = []
         for r in subs:
-            line = f"`No.{r.number}` {discord_safe(r.text)} — {r.total_score}点 ({r.rank}位)"
+            line = f"`No.{r.number}` {discord_safe_submission_text(r.text)} — {r.total_score}点 ({r.rank}位)"
             author_comments = [c for lv in r.label_selects if lv.label == "作者コメント" for c in lv.comments[:1]]
             if author_comments:
                 line += f"\n　🖊 作者コメント: {discord_safe(author_comments[0].text[:COMMENT_PREVIEW_LIMIT])}"

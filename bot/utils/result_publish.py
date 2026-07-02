@@ -5,6 +5,7 @@ from __future__ import annotations
 import discord
 
 from bot.utils.embed_builder import COLOR_INFO, COLOR_RESULT
+from bot.utils.submission_markup import discord_safe_submission_text
 from bot.utils.text import discord_safe
 
 COMMENT_PREVIEW_LIMIT = 300
@@ -46,7 +47,7 @@ def _score_embeds(
         label_str = "　".join(label_parts) if label_parts else "（無選）"
         header = f"**{result.rank}位 ({result.total_score}点)** — No.{result.number}{author_line}"
 
-        body_lines = [f"> {discord_safe(result.text)}", label_str]
+        body_lines = [f"> {discord_safe_submission_text(result.text)}", label_str]
         for level in result.label_selects:
             for comment in level.comments[:3]:
                 body_lines.append(
@@ -73,7 +74,7 @@ def _number_embeds(kukai, results) -> list[discord.Embed]:
     lines = []
     for result in sorted_results:
         label = "　".join(f"{level.label}×{level.count}" for level in result.label_selects) or "（無選）"
-        lines.append(f"`No.{result.number}` {discord_safe(result.text)}　— {label} ({result.total_score}点)")
+        lines.append(f"`No.{result.number}` {discord_safe_submission_text(result.text)}　— {label} ({result.total_score}点)")
 
     embed = discord.Embed(
         title=f"📋 選句結果（番号順） — {kukai.title}",
@@ -137,7 +138,10 @@ def _author_embeds(
     for user_id, subs in by_author.items():
         author_name = _display_name(user_id, guild, display_names)
         total = sum(item.total_score for item in subs)
-        lines = [f"`No.{item.number}` {discord_safe(item.text)} — {item.total_score}点 ({item.rank}位)" for item in subs]
+        lines = [
+            f"`No.{item.number}` {discord_safe_submission_text(item.text)} — {item.total_score}点 ({item.rank}位)"
+            for item in subs
+        ]
         embed.add_field(
             name=f"{discord_safe(author_name)} (合計 {total}点)",
             value="\n".join(lines),

@@ -5,7 +5,7 @@ from __future__ import annotations
 import discord
 
 from bot.utils.embed_builder import COLOR_INFO
-from bot.utils.text import discord_safe
+from bot.utils.submission_markup import discord_safe_submission_text
 
 _MAX_EMBED_DESCRIPTION = 3900
 
@@ -15,7 +15,7 @@ def build_submission_publish_embeds(kukai, published_submissions) -> list[discor
     lines: list[str] = []
     for published in published_submissions:
         text = published.submission.text if published.submission else ""
-        lines.append(f"`{published.number}.` {discord_safe(text)}")
+        lines.append(f"`{published.number}.` {discord_safe_submission_text(text)}")
 
     pages: list[list[str]] = []
     current_page: list[str] = []

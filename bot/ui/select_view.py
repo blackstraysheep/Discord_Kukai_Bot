@@ -14,6 +14,7 @@ from bot.repositories import submission_repo, select_repo
 from bot.services import kukai_service, select_service
 from bot.services.errors import ServiceError
 from bot.utils.embed_builder import COLOR_INFO, COLOR_SUCCESS, error_embed
+from bot.utils.submission_markup import discord_safe_submission_text, render_submission_for_discord
 from bot.utils.text import discord_safe
 
 if TYPE_CHECKING:
@@ -193,7 +194,7 @@ class _SubmissionSelect(discord.ui.Select):
                 discord.SelectOption(
                     label=f"No.{ps.number}",
                     value=str(ps.submission_id),
-                    description=(ps.submission.text[:95] or "（空）"),
+                    description=(render_submission_for_discord(ps.submission.text)[:95] or "（空）"),
                     default=(not view_owner._is_overall_selected() and ps.submission_id == view_owner._selected_submission_id),
                 )
             )
@@ -409,7 +410,7 @@ class SelectView(discord.ui.View):
             "（自分の句は作者コメントのみ設定できます）"
         )
         lines = [
-            f"`No.{item.number}` {discord_safe(item.submission.text[:70])}"
+            f"`No.{item.number}` {discord_safe_submission_text(item.submission.text, limit=70)}"
             for item in self._page_submissions()
         ]
         if self._page_count() > 1:
@@ -427,7 +428,11 @@ class SelectView(discord.ui.View):
         ps = self._selected_ps()
         current_select = self._selects.get(ps.submission_id)
         is_own = ps.submission.user_id == self._selector_user_id
-        embed.add_field(name=f"選択中 No.{ps.number}", value=f"```{ps.submission.text}```", inline=False)
+        embed.add_field(
+            name=f"選択中 No.{ps.number}",
+            value=f"```{render_submission_for_discord(ps.submission.text)}```",
+            inline=False,
+        )
 
         if current_select:
             label_name = current_select.select_label.label if current_select.select_label else "?"

@@ -13,6 +13,7 @@ from bot.utils.channel import effective_channel_id
 from bot.services.errors import ServiceError
 from bot.state_machine.states import KukaiState
 from bot.utils.embed_builder import COLOR_INFO, error_embed
+from bot.utils.submission_markup import discord_safe_submission_text
 from bot.utils.text import discord_safe
 
 
@@ -90,7 +91,7 @@ class CheckCog(commands.Cog):
             KukaiState.RESULTS, KukaiState.ENDED,
         }:
             if subs:
-                lines = [f"`{i + 1}.` {discord_safe(s.text)}" for i, s in enumerate(subs)]
+                lines = [f"`{i + 1}.` {discord_safe_submission_text(s.text)}" for i, s in enumerate(subs)]
                 embed.add_field(
                     name=f"投句 ({len(subs)}/{kukai.submission_max})",
                     value="\n".join(lines),

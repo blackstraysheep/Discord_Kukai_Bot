@@ -23,6 +23,7 @@ logger = logging.getLogger(__name__)
 from bot.repositories import entry_repo, participant_repo, select_repo, submission_repo
 from bot.services import result_service
 from bot.services.errors import ServiceError
+from bot.utils.submission_markup import render_submission_for_tex
 
 if TYPE_CHECKING:
     import discord
@@ -157,6 +158,11 @@ def tex_tcy_numbers(s: str) -> str:
     return "".join(parts)
 
 
+def tex_submission_markup(s: str) -> str:
+    """Escape text and render supported submission markup for TeX."""
+    return render_submission_for_tex(s, tex_escape)
+
+
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
@@ -184,6 +190,7 @@ def _render_template(theme: str, template_name: str, data: dict) -> str:
         keep_trailing_newline=True,
     )
     env.filters["tex"] = tex_escape
+    env.filters["tex_submission"] = tex_submission_markup
     env.filters["tex_tcy"] = tex_tcy_numbers
     return env.get_template(template_name).render(**data, theme=theme_cfg)
 

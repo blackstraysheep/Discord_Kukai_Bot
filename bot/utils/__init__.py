@@ -10,6 +10,7 @@ from bot.database import get_session
 from bot.services import kukai_service, submission_service
 from bot.services.errors import ServiceError
 from bot.utils.embed_builder import COLOR_INFO, COLOR_WARNING, error_embed
+from bot.utils.submission_markup import discord_safe_submission_text, render_submission_for_discord
 from bot.utils.text import discord_safe
 
 if TYPE_CHECKING:
@@ -22,7 +23,7 @@ def _submissions_embed(kukai, subs: list[Submission]) -> discord.Embed:
     over = limit is not None and count > limit
 
     if subs:
-        lines = [f"`{i + 1}.` {discord_safe(s.text)}" for i, s in enumerate(subs)]
+        lines = [f"`{i + 1}.` {discord_safe_submission_text(s.text)}" for i, s in enumerate(subs)]
         desc = "\n".join(lines)
     else:
         desc = "まだ投句していません。"
@@ -209,7 +210,7 @@ class SubmissionEditSelect(discord.ui.Select):
         self._sub_map = {str(s.id): s for s in subs}
         options = [
             discord.SelectOption(
-                label=f"{i + 1}. {s.text[:80]}",
+                label=f"{i + 1}. {render_submission_for_discord(s.text)[:80]}",
                 value=str(s.id),
             )
             for i, s in enumerate(subs[:25])
@@ -235,7 +236,7 @@ class SubmissionDeleteSelect(discord.ui.Select):
         self.kukai_id = kukai_id
         options = [
             discord.SelectOption(
-                label=f"{i + 1}. {s.text[:80]}",
+                label=f"{i + 1}. {render_submission_for_discord(s.text)[:80]}",
                 value=str(s.id),
             )
             for i, s in enumerate(subs[:25])

@@ -12,6 +12,7 @@ from bot.models.select import OverallSelectComment, Select, SelectComment
 from bot.repositories import entry_repo, participant_repo, submission_repo
 from bot.services.errors import InvalidStateError, NotFoundError, ValidationError
 from bot.state_machine.states import KukaiState
+from bot.utils.submission_markup import SubmissionMarkupError, validate_submission_markup
 from bot.utils.text import normalize
 
 _SUBMISSION_OPEN = KukaiState.SUBMISSION_OPEN
@@ -44,6 +45,7 @@ async def submit(
     text = normalize(text.strip())
     if not text:
         raise ValidationError("俳句の本文が空です。")
+    _validate_markup(text)
 
     if kukai.entry_enabled:
         entry = await entry_repo.get_by_user(session, kukai.id, user_id)
@@ -104,6 +106,7 @@ async def edit(
     new_text = normalize(new_text.strip())
     if not new_text:
         raise ValidationError("俳句の本文が空です。")
+    _validate_markup(new_text)
 
     sub = await submission_repo.get(session, submission_id)
     if not sub or sub.kukai_id != kukai.id or sub.user_id != user_id or sub.is_discarded:
@@ -263,6 +266,13 @@ async def rollback_to_state(
 
 def _rollback_index(state: KukaiState) -> int:
     return _ROLLBACK_STATE_INDEX[KukaiState.from_value(state)]
+
+
+def _validate_markup(text: str) -> None:
+    try:
+        validate_submission_markup(text)
+    except SubmissionMarkupError as exc:
+        raise ValidationError(str(exc)) from exc
 
 
 async def _delete_selects(session: AsyncSession, kukai_id: int) -> None:

@@ -4,6 +4,7 @@
 \usepackage{geometry}
 \usepackage{array}
 \usepackage{kintou}
+\usepackage{luatexja-ruby}
 {% raw %}
 \IfFontExistsTF{Noto Color Emoji}{%
   \newfontfamily\EmojiFont{Noto Color Emoji}[Renderer=HarfBuzz]%
@@ -63,7 +64,7 @@
 \multicolumn{1}{>{\centering\arraybackslash}m{5\zw}|}{作　者} &
 \multicolumn{1}{>{\centering\arraybackslash}m{5\zw}|}{\strut} \\ \hline
 {% for s in group -%}
-\hbox{\yoko {{ s.number }}} & \strut & {% if s.text %}\kintou{20}{ {{- s.text | tex -}} }{% endif %} & { {{- s.author | tex if s.author -}} } & \strut \\ \hline
+\hbox{\yoko {{ s.number }}} & \strut & {% if s.text %}\kintou{20}{ {{- s.text | tex_submission -}} }{% endif %} & { {{- s.author | tex if s.author -}} } & \strut \\ \hline
 {% endfor %}
 \end{tabular}
 {% endfor %}

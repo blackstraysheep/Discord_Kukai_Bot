@@ -75,6 +75,29 @@ async def test_submit_normalizes_text(db_session):
 
 
 @pytest.mark.asyncio
+async def test_submit_accepts_natsugumo_ruby_markup(db_session):
+    kukai = await _make_kukai(db_session, entry_enabled=False)
+    await _advance_to_submission_open(db_session, kukai)
+
+    sub, _ = await submission_service.submit(
+        db_session, kukai, user_id=1, text="｜遠山（とおやま）に日の当たりたる"
+    )
+
+    assert sub.text == "｜遠山（とおやま）に日の当たりたる"
+
+
+@pytest.mark.asyncio
+async def test_submit_rejects_invalid_ruby_markup(db_session):
+    kukai = await _make_kukai(db_session, entry_enabled=False)
+    await _advance_to_submission_open(db_session, kukai)
+
+    with pytest.raises(ValidationError, match="読み終了"):
+        await submission_service.submit(
+            db_session, kukai, user_id=1, text="｜遠山（とおやま"
+        )
+
+
+@pytest.mark.asyncio
 async def test_submit_non_entry_saves_participant_haigo(db_session):
     kukai = await _make_kukai(db_session, entry_enabled=False)
     await _advance_to_submission_open(db_session, kukai)
@@ -200,6 +223,19 @@ async def test_edit(db_session):
         db_session, kukai, user_id=1, submission_id=sub.id, new_text="秋の山"
     )
     assert edited.text == "秋の山"
+
+
+@pytest.mark.asyncio
+async def test_edit_rejects_invalid_ruby_markup(db_session):
+    kukai = await _make_kukai(db_session, entry_enabled=False)
+    await _advance_to_submission_open(db_session, kukai)
+
+    sub, _ = await submission_service.submit(db_session, kukai, user_id=1, text="春の海")
+
+    with pytest.raises(ValidationError, match="読みが空"):
+        await submission_service.edit(
+            db_session, kukai, user_id=1, submission_id=sub.id, new_text="｜遠山（）"
+        )
 
 
 @pytest.mark.asyncio

@@ -10,7 +10,7 @@ from bot.database import get_session
 from bot.services import kukai_service, submission_service
 from bot.services.errors import ServiceError
 from bot.utils.embed_builder import COLOR_INFO, COLOR_WARNING, error_embed
-from bot.utils.text import discord_safe
+from bot.utils.submission_markup import discord_safe_submission_text, render_submission_for_discord
 
 if TYPE_CHECKING:
     from bot.models.submission import Submission
@@ -24,7 +24,7 @@ def _submissions_embed(kukai, subs: list[Submission]) -> discord.Embed:
     over = limit is not None and count > limit
 
     if subs:
-        lines = [f"`{i + 1}.` {discord_safe(s.text)}" for i, s in enumerate(subs)]
+        lines = [f"`{i + 1}.` {discord_safe_submission_text(s.text)}" for i, s in enumerate(subs)]
         desc = "\n".join(lines)
     else:
         desc = "まだ投句していません。"
@@ -52,7 +52,7 @@ def _submissions_embed(kukai, subs: list[Submission]) -> discord.Embed:
 def _submission_snapshot(subs: list[Submission]) -> str:
     if not subs:
         return "（未登録）"
-    lines = [f"`{i + 1}.` {discord_safe(s.text[:80])}" for i, s in enumerate(subs[:10])]
+    lines = [f"`{i + 1}.` {discord_safe_submission_text(s.text, limit=80)}" for i, s in enumerate(subs[:10])]
     if len(subs) > 10:
         lines.append(f"...他 {len(subs) - 10} 句")
     return "\n".join(lines)
@@ -204,7 +204,7 @@ class SubmissionEditSelect(discord.ui.Select):
         self._sub_map = {str(s.id): s for s in subs}
         options = [
             discord.SelectOption(
-                label=f"{i + 1}. {s.text[:80]}",
+                label=f"{i + 1}. {render_submission_for_discord(s.text)[:80]}",
                 value=str(s.id),
             )
             for i, s in enumerate(subs[:25])
@@ -230,7 +230,7 @@ class SubmissionDeleteSelect(discord.ui.Select):
         self.kukai_id = kukai_id
         options = [
             discord.SelectOption(
-                label=f"{i + 1}. {s.text[:80]}",
+                label=f"{i + 1}. {render_submission_for_discord(s.text)[:80]}",
                 value=str(s.id),
             )
             for i, s in enumerate(subs[:25])
