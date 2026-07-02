@@ -3,6 +3,8 @@ THIS DOCUMENT IS NOT FOR CODING AGENT(S) TO CHECK; IT IS FOR MANUAL CHECK. FOR A
 
 ＊＊＊将来改修＊＊＊
 
+
+- リスト、自動で特選になるのダメ
 - proceedの使い勝手が悪い（現在および次のstateがわかるべき、state指定できるようになるべき）
 - 選句モーダルの編集
 - Shard対応可能な設計
