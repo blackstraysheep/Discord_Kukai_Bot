@@ -206,6 +206,12 @@ Equivalent one-shot rebuild:
 docker compose up -d --build bot
 ```
 
+Normal code-only updates should keep Docker's build cache. Do not add
+`--no-cache`, run `docker builder prune`, or remove the builder cache unless you
+intentionally want to reinstall TeX and rebuild every image layer. The
+Dockerfile keeps TeX installation and LuaLaTeX warmup before the application
+source copy, so code changes should normally reuse those layers.
+
 Verify VM reboot recovery after infrastructure changes:
 
 ```sh

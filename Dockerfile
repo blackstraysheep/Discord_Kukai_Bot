@@ -8,20 +8,20 @@ RUN apt-get update && apt-get install -y \
     fonts-noto-color-emoji \
  && rm -rf /var/lib/apt/lists/*
 
+RUN printf '%s\n' '\documentclass{jlreq}' '\begin{document}' 'test' '\end{document}' > /tmp/warmup.tex \
+ && cd /tmp && lualatex --interaction=nonstopmode warmup.tex \
+ && rm -f /tmp/warmup.*
+
 WORKDIR /app
-
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-
-COPY . .
 
 RUN useradd --create-home --shell /usr/sbin/nologin botuser \
  && mkdir -p data \
  && chown -R botuser:botuser /app
 
-RUN printf '%s\n' '\documentclass{jlreq}' '\begin{document}' 'test' '\end{document}' > /tmp/warmup.tex \
- && cd /tmp && lualatex --interaction=nonstopmode warmup.tex \
- && rm -f /tmp/warmup.*
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY --chown=botuser:botuser . .
 
 USER botuser
 
