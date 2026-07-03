@@ -3,6 +3,7 @@ THIS DOCUMENT IS NOT FOR CODING AGENT(S) TO CHECK; IT IS FOR MANUAL CHECK. FOR A
 
 ＊＊＊将来改修＊＊＊
 
+- 結果公開を開始しました、のあとに結果公開のブロック
 - リスト、自動で特選になるのダメ（現在の内容反映＞空欄）
 - 参加者俳号とdiscord名の問題
 - 俳号の修正機能、discord表示名の変更扱いの確認
