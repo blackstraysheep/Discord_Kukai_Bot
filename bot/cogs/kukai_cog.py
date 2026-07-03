@@ -986,6 +986,53 @@ class KukaiCog(commands.Cog):
                 embed=error_embed("開催チャンネルへの送信権限がありません。")
             )
 
+    @kukai.command(name="panel", description="【句会管理者】管理パネル入口を管理者スレッドへ投稿します")
+    @app_commands.describe(kukai_id="句会ID（省略可: このチャンネルで1件なら自動特定）")
+    async def kukai_panel(self, interaction: discord.Interaction, kukai_id: int | None = None) -> None:
+        assert interaction.guild is not None
+        await interaction.response.defer(ephemeral=True)
+        try:
+            async with get_session() as session:
+                kukai = await kukai_service.resolve_kukai_in_channel(
+                    session,
+                    guild_id=interaction.guild.id,
+                    channel_id=effective_channel_id(interaction),
+                    kukai_id=kukai_id,
+                )
+                if not await permission_service.is_kukai_admin(session, kukai, interaction.user):  # type: ignore[arg-type]
+                    await interaction.edit_original_response(
+                        embed=error_embed("この操作は句会管理者のみ実行できます。")
+                    )
+                    return
+                thread = await admin_notice_service.ensure_admin_thread(
+                    self.bot,
+                    session,
+                    kukai,
+                )
+                if thread is None:
+                    await interaction.edit_original_response(
+                        embed=error_embed("管理者スレッドを作成できませんでした。")
+                    )
+                    return
+                from bot.ui.admin_panel_view import (
+                    KukaiAdminPanelEntryView,
+                    build_admin_panel_entry_embed,
+                )
+
+                await thread.send(
+                    embed=build_admin_panel_entry_embed(kukai),
+                    view=KukaiAdminPanelEntryView(kukai.id),
+                )
+            await interaction.edit_original_response(
+                embed=success_embed(f"句会「{kukai.title}」の管理パネル入口を投稿しました。")
+            )
+        except ServiceError as e:
+            await interaction.edit_original_response(embed=error_embed(str(e)))
+        except discord.Forbidden:
+            await interaction.edit_original_response(
+                embed=error_embed("管理者スレッドへの投稿権限がありません。")
+            )
+
     @kukai.command(name="reveal-authors", description="【句会管理者】結果公開後に作者を公開します")
     @app_commands.describe(kukai_id="句会ID（省略可: このチャンネルで1件なら自動特定）")
     async def kukai_reveal_authors(

@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 import discord
 
 from bot.database import get_session
-from bot.services import kukai_service, notification_service, voice_service
+from bot.services import admin_notice_service, kukai_service, notification_service, voice_service
 from bot.services.errors import ServiceError
 from bot.models.voice_session import VoiceSession
 from bot.ui.wizard.base import STEP_COUNT, cancel_wizard, goto_step
@@ -339,6 +339,31 @@ class StepConfirmView(discord.ui.View):
                 "通知ジョブの登録に失敗しました。`/kukai pause`→`/kukai resume` で再登録を試してください。"
             )
 
+        panel_warning: str | None = None
+        try:
+            async with get_session() as session:
+                kukai = await kukai_service.get_kukai(session, kukai_id, guild.id)
+                thread = await admin_notice_service.ensure_admin_thread(
+                    interaction.client,
+                    session,
+                    kukai,
+                )
+                if thread is None:
+                    panel_warning = "管理者スレッドを作成できなかったため、管理パネル入口は未投稿です。"
+                else:
+                    from bot.ui.admin_panel_view import (
+                        KukaiAdminPanelEntryView,
+                        build_admin_panel_entry_embed,
+                    )
+
+                    await thread.send(
+                        embed=build_admin_panel_entry_embed(kukai),
+                        view=KukaiAdminPanelEntryView(kukai.id),
+                    )
+        except Exception:
+            logger.exception("Failed to post admin panel for newly created kukai (id=%s)", kukai_id)
+            panel_warning = "管理パネル入口の投稿に失敗しました。`/kukai panel` で再投稿してください。"
+
         clear_wizard(state.user_id)
 
         success_description = (
@@ -352,6 +377,8 @@ class StepConfirmView(discord.ui.View):
             success_description += f"\n\n{name_collision_warning}"
         if schedule_warning:
             success_description += f"\n\n⚠️ {schedule_warning}"
+        if panel_warning:
+            success_description += f"\n\n⚠️ {panel_warning}"
 
         success_embed_ = discord.Embed(
             title="✅ 句会作成完了",

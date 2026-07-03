@@ -12,6 +12,7 @@ from discord.ext import commands
 from bot.database import get_session
 from bot.models.guild_settings import GuildSettings
 from bot.services.errors import ServiceError, ValidationError
+from bot.ui.portal_view import PortalView, build_portal_embed
 from bot.utils.embed_builder import error_embed, success_embed
 
 
@@ -41,6 +42,7 @@ class AdminCog(commands.Cog):
         self.bot = bot
 
     guild = app_commands.Group(name="guild", description="サーバー設定")
+    guild_portal_grp = app_commands.Group(name="portal", description="句会ポータル", parent=guild)
 
     @guild.command(name="settings", description="句会作成権限の確認・更新を行います")
     @app_commands.describe(
@@ -96,6 +98,81 @@ class AdminCog(commands.Cog):
             )
         except ServiceError as e:
             await interaction.response.send_message(embed=error_embed(str(e)), ephemeral=True)
+
+    @guild_portal_grp.command(name="setup", description="句会案内チャンネルを作成または再設定します")
+    async def portal_setup(self, interaction: discord.Interaction) -> None:
+        assert interaction.guild is not None
+        if not _is_owner_or_admin(interaction.user):  # type: ignore[arg-type]
+            await interaction.response.send_message(
+                embed=error_embed("ポータル設定はサーバー管理者のみ実行できます。"),
+                ephemeral=True,
+            )
+            return
+        await interaction.response.defer(ephemeral=True)
+        try:
+            channel = None
+            async with get_session() as session:
+                settings = await session.get(GuildSettings, interaction.guild.id)
+                if settings is None:
+                    settings = GuildSettings(guild_id=interaction.guild.id)
+                    session.add(settings)
+                    await session.flush()
+
+                if settings.portal_channel_id is not None:
+                    existing = interaction.guild.get_channel(settings.portal_channel_id)
+                    if isinstance(existing, discord.TextChannel):
+                        channel = existing
+
+                if channel is None:
+                    channel = await interaction.guild.create_text_channel(
+                        "句会案内",
+                        reason="Kukai portal setup",
+                    )
+                    settings.portal_channel_id = channel.id
+
+            await channel.send(embed=build_portal_embed(), view=PortalView())
+            await interaction.edit_original_response(
+                embed=success_embed(f"句会ポータルを設定しました。\nチャンネル: {channel.mention}")
+            )
+        except discord.Forbidden:
+            await interaction.edit_original_response(
+                embed=error_embed("チャンネル作成または投稿の権限がありません。")
+            )
+        except ServiceError as e:
+            await interaction.edit_original_response(embed=error_embed(str(e)))
+
+    @guild_portal_grp.command(name="repost", description="句会案内チャンネルにポータルボタンを再投稿します")
+    async def portal_repost(self, interaction: discord.Interaction) -> None:
+        assert interaction.guild is not None
+        if not _is_owner_or_admin(interaction.user):  # type: ignore[arg-type]
+            await interaction.response.send_message(
+                embed=error_embed("ポータル再投稿はサーバー管理者のみ実行できます。"),
+                ephemeral=True,
+            )
+            return
+        await interaction.response.defer(ephemeral=True)
+        async with get_session() as session:
+            settings = await session.get(GuildSettings, interaction.guild.id)
+            channel_id = settings.portal_channel_id if settings is not None else None
+        if channel_id is None:
+            await interaction.edit_original_response(
+                embed=error_embed("ポータルチャンネルが未設定です。`/guild portal setup` を実行してください。")
+            )
+            return
+        channel = interaction.guild.get_channel(channel_id)
+        if not isinstance(channel, discord.TextChannel):
+            await interaction.edit_original_response(
+                embed=error_embed("保存済みポータルチャンネルが見つかりません。`/guild portal setup` を再実行してください。")
+            )
+            return
+        try:
+            await channel.send(embed=build_portal_embed(), view=PortalView())
+        except discord.Forbidden:
+            await interaction.edit_original_response(embed=error_embed("ポータルチャンネルへの投稿権限がありません。"))
+            return
+        await interaction.edit_original_response(
+            embed=success_embed(f"ポータルボタンを再投稿しました。\nチャンネル: {channel.mention}")
+        )
 
 
 async def setup(bot: commands.Bot) -> None:

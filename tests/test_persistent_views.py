@@ -7,7 +7,14 @@ from bot.cogs.kukai_cog import StageActionView, stage_action_custom_id
 from bot.cogs.entry_cog import EntryHaigoModal
 from bot.cogs.result_cog import ResultOpenView, result_open_custom_id
 from bot.state_machine.states import KukaiState
+from bot.ui.admin_panel_view import KukaiAdminPanelEntryView, admin_panel_entry_custom_id
 from bot.ui.persistent_views import _register_views_for_kukais
+from bot.ui.portal_view import (
+    PORTAL_CHECK_CUSTOM_ID,
+    PORTAL_CREATE_CUSTOM_ID,
+    PORTAL_LIST_CUSTOM_ID,
+    PortalView,
+)
 from bot.utils.stage_announcement import build_action_button_message
 
 
@@ -49,6 +56,24 @@ def test_result_open_view_is_persistent_with_stable_custom_id():
     ]
 
 
+def test_portal_view_is_persistent_with_stable_custom_ids():
+    view = PortalView()
+
+    assert view.timeout is None
+    assert _custom_ids(view) == [
+        PORTAL_CREATE_CUSTOM_ID,
+        PORTAL_LIST_CUSTOM_ID,
+        PORTAL_CHECK_CUSTOM_ID,
+    ]
+
+
+def test_admin_panel_entry_view_is_persistent_with_stable_custom_id():
+    view = KukaiAdminPanelEntryView(123)
+
+    assert view.timeout is None
+    assert _custom_ids(view) == [admin_panel_entry_custom_id(123)]
+
+
 def test_register_views_adds_stage_buttons_and_result_buttons_for_result_kukai():
     bot = _FakeBot()
     kukais = [
@@ -58,8 +83,11 @@ def test_register_views_adds_stage_buttons_and_result_buttons_for_result_kukai()
 
     count = _register_views_for_kukais(bot, kukais)
 
-    assert count == 10
+    assert count == 13
     custom_ids = [item.custom_id for view in bot.views for item in view.children]
+    assert "kukai:portal:create" in custom_ids
+    assert "kukai:admin-panel:1" in custom_ids
+    assert "kukai:admin-panel:2" in custom_ids
     assert "kukai:stage:1:entry_open" in custom_ids
     assert "kukai:stage:1:submission_open" in custom_ids
     assert "kukai:stage:1:selecting_open" in custom_ids
