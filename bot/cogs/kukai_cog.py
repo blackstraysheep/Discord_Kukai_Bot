@@ -11,7 +11,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from bot.database import get_session
-from bot.repositories import select_repo
+from bot.repositories import participant_repo, select_repo
 from bot.services import (
     admin_notice_service,
     kukai_service,
@@ -1901,12 +1901,14 @@ class KukaiCog(commands.Cog):
                     .order_by(SelectLabel.display_order)
                 )
                 labels = list(label_result.scalars().all())
+                participants = await participant_repo.list_by_kukai(session, kukai.id)
         except ServiceError as e:
             await interaction.response.send_message(embed=error_embed(str(e)), ephemeral=True)
             return
 
         guild = interaction.guild
         entry_by_user = {entry.user_id: entry for entry in entries}
+        participant_by_user = {participant.user_id: participant for participant in participants}
         approved_entries = [entry for entry in entries if entry.status == "approved"]
         if kukai.entry_enabled:
             participant_user_ids = [entry.user_id for entry in approved_entries]
@@ -1915,6 +1917,7 @@ class KukaiCog(commands.Cog):
                 {row.user_id for row in submissions}
                 | {row.selector_user_id for row in selects}
                 | {row.user_id for row in overall_comments}
+                | set(participant_by_user)
             )
         submission_counts = Counter(row.user_id for row in submissions)
         selects_by_user: dict[int, list] = defaultdict(list)
@@ -1923,11 +1926,20 @@ class KukaiCog(commands.Cog):
         overall_user_ids = {row.user_id for row in overall_comments}
         non_author_labels = [label for label in labels if label.label != "作者コメント"]
 
+        def _haigo_for(user_id: int) -> str | None:
+            entry = entry_by_user.get(user_id)
+            if entry and entry.haigo:
+                return entry.haigo
+            participant = participant_by_user.get(user_id)
+            if participant and participant.haigo:
+                return participant.haigo
+            return None
+
         embed = discord.Embed(title=f"管理者用 進捗確認 — {kukai.title}", color=COLOR_INFO)
         embed.set_footer(text=f"句会ID: {kukai.id} | 状態: {kukai.state}")
         if kukai.entry_enabled:
             entry_lines = [
-                f"{_entry_status_icon(e.status)} {_member_name(guild, e.user_id, e.haigo)} ({_entry_status_label(e.status)})"
+                f"{_entry_status_icon(e.status)} {_member_name(guild, e.user_id, _haigo_for(e.user_id))} ({_entry_status_label(e.status)})"
                 for e in entries
             ]
             embed.add_field(
@@ -1939,14 +1951,13 @@ class KukaiCog(commands.Cog):
         max_label = "∞" if kukai.submission_max is None else str(kukai.submission_max)
         submission_lines = [
             f"{'✅' if submission_counts.get(u, 0) >= kukai.submission_min else '⚠️'} "
-            f"{_member_name(guild, u, entry_by_user.get(u).haigo if entry_by_user.get(u) else None)} "
+            f"{_member_name(guild, u, _haigo_for(u))} "
             f"{submission_counts.get(u, 0)}句投句済（必要 {kukai.submission_min}〜{max_label}句）"
             for u in participant_user_ids
         ]
         embed.add_field(name="投句状況", value=_field_value(submission_lines), inline=False)
         selection_lines = []
         for user_id in participant_user_ids:
-            entry = entry_by_user.get(user_id)
             user_selects = selects_by_user.get(user_id, [])
             label_counts = Counter(row.select_label_id for row in user_selects if not row.is_self_comment)
             missing = [lbl for lbl in non_author_labels if label_counts.get(lbl.id, 0) < lbl.min_count]
@@ -1963,7 +1974,7 @@ class KukaiCog(commands.Cog):
                 if missing else ""
             )
             selection_lines.append(
-                f"{icon} {_member_name(guild, user_id, entry.haigo if entry else None)} "
+                f"{icon} {_member_name(guild, user_id, _haigo_for(user_id))} "
                 f"{' '.join(parts)}{missing_text}"
             )
         if not non_author_labels:
