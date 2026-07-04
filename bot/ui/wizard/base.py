@@ -34,13 +34,17 @@ async def goto_step(
     first_send: bool = False,
 ) -> None:
     """Render the step view for state.step. Use first_send=True from the initial slash command."""
-    if state.step == 8:
-        await _ensure_notify_presets(state)
-    embed, view = _make_step(state)
+    embed, view = await render_step(state)
     if first_send:
         await interaction.edit_original_response(embed=embed, view=view)
     else:
         await interaction.response.edit_message(embed=embed, view=view)
+
+
+async def render_step(state: WizardState) -> tuple[discord.Embed, discord.ui.View]:
+    if state.step == 8:
+        await _ensure_notify_presets(state)
+    return _make_step(state)
 
 
 async def _ensure_notify_presets(state: WizardState) -> None:

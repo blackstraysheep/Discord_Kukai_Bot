@@ -3,6 +3,7 @@ from types import SimpleNamespace
 import pytest
 
 import bot.cogs.kukai_cog as kukai_cog
+from bot.services import admin_notice_service, kukai_list_view
 from bot.cogs.kukai_cog import StageActionView, stage_action_custom_id
 from bot.cogs.entry_cog import EntryHaigoModal
 from bot.cogs.result_cog import ResultOpenView, result_open_custom_id
@@ -72,6 +73,33 @@ def test_admin_panel_entry_view_is_persistent_with_stable_custom_id():
 
     assert view.timeout is None
     assert _custom_ids(view) == [admin_panel_entry_custom_id(123)]
+
+
+def test_kukai_list_embed_includes_channel_and_state_label():
+    kukais = [
+        SimpleNamespace(
+            id=123,
+            title="テスト句会",
+            state=KukaiState.ENTRY_OPEN.value,
+            channel_id=456,
+            submission_close_at=None,
+            selecting_close_at=None,
+        )
+    ]
+
+    embed = kukai_list_view.build_kukai_list_embed(kukais)
+
+    assert embed.title == "句会一覧"
+    assert embed.fields[0].name == "[123] テスト句会"
+    assert "状態: エントリー受付中" in embed.fields[0].value
+    assert "チャンネル: <#456>" in embed.fields[0].value
+
+
+def test_admin_thread_name_uses_parent_channel_name_with_admin_suffix():
+    parent = SimpleNamespace(name="summer-kukai")
+    kukai = SimpleNamespace(id=123, title="夏の句会")
+
+    assert admin_notice_service._thread_name(kukai, parent=parent) == "summer-kukai-admin"
 
 
 def test_register_views_adds_stage_buttons_and_result_buttons_for_result_kukai():

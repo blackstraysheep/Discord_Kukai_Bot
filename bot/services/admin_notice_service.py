@@ -83,7 +83,7 @@ async def ensure_admin_thread(bot, session: AsyncSession, kukai, *, admin_ids: l
 
     try:
         thread = await parent.create_thread(
-            name=_thread_name(kukai),
+            name=_thread_name(kukai, parent=parent),
             type=discord.ChannelType.private_thread,
             invitable=False,
             auto_archive_duration=10080,
@@ -92,7 +92,7 @@ async def ensure_admin_thread(bot, session: AsyncSession, kukai, *, admin_ids: l
     except TypeError:
         try:
             thread = await parent.create_thread(
-                name=_thread_name(kukai),
+                name=_thread_name(kukai, parent=parent),
                 type=discord.ChannelType.private_thread,
                 auto_archive_duration=10080,
                 reason="Kukai admin notices",
@@ -167,9 +167,12 @@ async def _fallback_admin_notice(
     return False
 
 
-def _thread_name(kukai) -> str:
-    base = re.sub(r"[\\/#@:]", "-", kukai.title).strip() or "kukai"
-    return f"管理-{kukai.id}-{base}"[:100]
+def _thread_name(kukai, *, parent=None) -> str:
+    source = getattr(parent, "name", None) or kukai.title or "kukai"
+    base = re.sub(r"[\\/#@:]", "-", source).strip("- ") or "kukai"
+    if base.endswith("-admin"):
+        return base[:100]
+    return f"{base}-admin"[:100]
 
 
 def _limited(value: str, *, limit: int = 1024) -> str:

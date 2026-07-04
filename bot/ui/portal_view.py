@@ -5,9 +5,9 @@ from __future__ import annotations
 import discord
 
 from bot.database import get_session
+from bot.services import kukai_list_view
 from bot.services import check_service, kukai_service, permission_service, select_rule_service
 from bot.services.errors import ServiceError
-from bot.utils.datetime_utils import format_jst
 from bot.utils.embed_builder import COLOR_INFO, error_embed
 
 
@@ -48,34 +48,14 @@ class PortalView(discord.ui.View):
             await interaction.followup.send(embed=error_embed("句会の作成権限がありません。"), ephemeral=True)
             return
 
-        from bot.ui.wizard.base import goto_step
-        from bot.ui.wizard.wizard_state import WizardState, set_wizard
+        from bot.ui.wizard.start import build_create_wizard_state, send_create_wizard_followup
 
-        state = WizardState(user_id=interaction.user.id, guild_id=interaction.guild.id)
-        state.select_preset_options = [{"id": t.id, "name": t.name} for t in templates]
-        default_template = next((t for t in templates if t.is_default), None)
-        if default_template is not None:
-            points_enabled, _ = select_rule_service.deserialize_template_payload(
-                default_template.definition_json
-            )
-            state.select_preset_template_id = default_template.id
-            state.select_preset_name = default_template.name
-            state.select_points_enabled = points_enabled
-            state.select_label_specs = select_rule_service.build_kukai_specs_from_template(
-                default_template
-            )
-        else:
-            state.select_label_specs = select_rule_service.default_kukai_specs()
-        state.selected_select_label = next(
-            (
-                str(spec["label"])
-                for spec in state.select_label_specs
-                if spec["label"] != select_rule_service.AUTHOR_COMMENT_LABEL
-            ),
-            "特選",
+        state = await build_create_wizard_state(
+            guild_id=interaction.guild.id,
+            user_id=interaction.user.id,
+            templates=templates,
         )
-        set_wizard(state)
-        await goto_step(interaction, state, first_send=True)
+        await send_create_wizard_followup(interaction, state)
 
     @discord.ui.button(
         label="句会一覧",
@@ -87,27 +67,10 @@ class PortalView(discord.ui.View):
         async with get_session() as session:
             kukais = await kukai_service.list_kukais(session, interaction.guild.id)
 
-        if not kukais:
-            embed = discord.Embed(
-                description="現在、開催中または招集中の句会はありません。",
-                color=COLOR_INFO,
-            )
-            await interaction.response.send_message(embed=embed, ephemeral=True)
-            return
-
-        embed = discord.Embed(title="句会一覧", color=COLOR_INFO)
-        for kukai in kukais[:10]:
-            lines = [f"状態: {kukai.state}"]
-            if kukai.channel_id:
-                lines.append(f"チャンネル: <#{kukai.channel_id}>")
-            if kukai.submission_close_at:
-                lines.append(f"投句締切: {format_jst(kukai.submission_close_at)}")
-            if kukai.selecting_close_at:
-                lines.append(f"選句締切: {format_jst(kukai.selecting_close_at)}")
-            embed.add_field(name=f"[{kukai.id}] {kukai.title}", value="\n".join(lines), inline=False)
-        if len(kukais) > 10:
-            embed.set_footer(text=f"他 {len(kukais) - 10} 件")
-        await interaction.response.send_message(embed=embed, ephemeral=True)
+        await interaction.response.send_message(
+            embed=kukai_list_view.build_kukai_list_embed(kukais),
+            ephemeral=True,
+        )
 
     @discord.ui.button(
         label="自分の状況",
