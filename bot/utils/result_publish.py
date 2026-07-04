@@ -18,6 +18,15 @@ def _display_name(user_id: int, guild: discord.Guild, display_names: dict[int, s
     return member.display_name if member else f"UID:{user_id}"
 
 
+def _label_select_summary(label_select, guild: discord.Guild, display_names: dict[int, str]) -> str:
+    selector_names = [
+        discord_safe(_display_name(user_id, guild, display_names))
+        for user_id in label_select.selector_user_ids
+    ]
+    selector_suffix = f"（{'・'.join(selector_names)}）" if selector_names else ""
+    return f"{discord_safe(label_select.label)}×{label_select.count}{selector_suffix}"
+
+
 def _comment_signature(user_id: int, guild: discord.Guild, display_names: dict[int, str]) -> str:
     return discord_safe(_display_name(user_id, guild, display_names))
 
@@ -43,7 +52,10 @@ def _score_embeds(
             author_name = _display_name(result.author_user_id, guild, display_names)
             author_line = f"　作者: {discord_safe(author_name)}"
 
-        label_parts = [f"{level.label}×{level.count}" for level in result.label_selects]
+        label_parts = [
+            _label_select_summary(level, guild, display_names)
+            for level in result.label_selects
+        ]
         label_str = "　".join(label_parts) if label_parts else "（無選）"
         header = f"**{result.rank}位 ({result.total_score}点)** — No.{result.number}{author_line}"
 
@@ -69,11 +81,14 @@ def _score_embeds(
     return pages
 
 
-def _number_embeds(kukai, results) -> list[discord.Embed]:
+def _number_embeds(kukai, results, guild: discord.Guild, display_names: dict[int, str]) -> list[discord.Embed]:
     sorted_results = sorted(results, key=lambda item: item.number)
     lines = []
     for result in sorted_results:
-        label = "　".join(f"{level.label}×{level.count}" for level in result.label_selects) or "（無選）"
+        label = "　".join(
+            _label_select_summary(level, guild, display_names)
+            for level in result.label_selects
+        ) or "（無選）"
         lines.append(f"`No.{result.number}` {discord_safe_submission_text(result.text)}　— {label} ({result.total_score}点)")
 
     embed = discord.Embed(
@@ -185,7 +200,7 @@ def build_result_publish_embeds(
                 display_names=display_names,
             )
         )
-    pages.extend(_number_embeds(kukai, results))
+    pages.extend(_number_embeds(kukai, results, guild, display_names))
     if kukai.author_reveal:
         pages.extend(
             _author_embeds(
