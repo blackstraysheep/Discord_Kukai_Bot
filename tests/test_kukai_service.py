@@ -9,7 +9,7 @@ from bot.models.kukai import Kukai
 from bot.models.select import OverallSelectComment, Select
 from bot.models.select_rule import SelectLabel
 from bot.models.submission import Submission
-from bot.services import kukai_service
+from bot.services import kukai_service, proceed_service
 from bot.services.errors import DeadlineConflictError, InvalidStateError, NotFoundError, ValidationError
 from bot.state_machine.states import KukaiState
 
@@ -466,6 +466,47 @@ async def test_state_machine_proceed(db_session):
     new_state = await kukai_service.proceed(db_session, kukai)
     assert new_state == KukaiState.SUBMISSION_OPEN
     assert kukai.state == KukaiState.SUBMISSION_OPEN
+
+
+@pytest.mark.asyncio
+async def test_proceed_preview_does_not_mutate_state(db_session):
+    kukai = await kukai_service.create_kukai(
+        db_session,
+        guild_id=1,
+        created_by=100,
+        channel_id=200,
+        title="進行プレビュー",
+        entry_close_at=_utc(3),
+        submission_close_at=_utc(7),
+        selecting_close_at=_utc(14),
+    )
+    kukai.state = KukaiState.SUBMISSION_CLOSED
+
+    preview = await proceed_service.preview_proceed(db_session, kukai)
+
+    assert preview.current_state == KukaiState.SUBMISSION_CLOSED
+    assert preview.next_state == KukaiState.SELECTING_OPEN
+    assert kukai.state == KukaiState.SUBMISSION_CLOSED
+    assert "投句一覧を番号付きで投稿します。" in preview.effects
+
+
+@pytest.mark.asyncio
+async def test_proceed_preview_reports_current_and_next_labels(db_session):
+    kukai = await kukai_service.create_kukai(
+        db_session,
+        guild_id=1,
+        created_by=100,
+        channel_id=200,
+        title="状態表示",
+        entry_close_at=_utc(3),
+        submission_close_at=_utc(7),
+        selecting_close_at=_utc(14),
+    )
+
+    preview = await proceed_service.preview_proceed(db_session, kukai)
+
+    assert proceed_service.state_label(preview.current_state) == "エントリー受付中"
+    assert proceed_service.state_label(preview.next_state) == "投句受付中"
 
 
 @pytest.mark.asyncio

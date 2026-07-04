@@ -7,10 +7,11 @@ from sqlalchemy import select
 
 from bot.database import get_session
 from bot.models.notification import NotificationSchedule
-from bot.services import kukai_service, notification_service, permission_service, result_service
+from bot.services import kukai_service, notification_service, permission_service, proceed_service, result_service
 from bot.services.errors import ServiceError
 from bot.state_machine.states import KukaiState
 from bot.ui.common import ConfirmView
+from bot.utils.channel import effective_channel_id
 from bot.utils.datetime_utils import format_jst
 from bot.utils.embed_builder import COLOR_INFO, error_embed, success_embed
 from bot.utils.stage_announcement import send_action_button_message, send_stage_announcement
@@ -78,18 +79,65 @@ class KukaiAdminPanelView(discord.ui.View):
         await self._refresh(interaction)
 
     @discord.ui.button(label="次へ進める", style=discord.ButtonStyle.primary)
-    async def proceed_hint(self, interaction: discord.Interaction, _: discord.ui.Button) -> None:
-        await interaction.response.send_message(
-            embed=discord.Embed(
-                description=(
-                    "次へ進める操作は既存 `/kukai proceed` を使ってください。\n"
-                    "条件未達確認、管理者スレッド記録、投稿・通知の副作用を既存経路に集約しています。"
-                ),
-                color=COLOR_INFO,
-            ),
-            ephemeral=True,
-        )
+    async def proceed(self, interaction: discord.Interaction, _: discord.ui.Button) -> None:
+        assert interaction.guild is not None
+        try:
+            async with get_session() as session:
+                kukai = await self._load_authorized(session, interaction)
+                preview = await proceed_service.preview_proceed(session, kukai)
+                title = kukai.title
+                kukai_id = kukai.id
 
+            view = ConfirmView(timeout=60)
+            if view.children:
+                view.children[0].label = "次へ進める"  # type: ignore[attr-defined]
+            await interaction.response.send_message(
+                embed=build_proceed_preview_embed(kukai_id=kukai_id, title=title, preview=preview),
+                view=view,
+                ephemeral=True,
+            )
+            await view.wait()
+            if not view.confirmed:
+                await interaction.edit_original_response(
+                    embed=discord.Embed(description="進行をキャンセルしました。", color=COLOR_INFO),
+                    view=None,
+                )
+                return
+
+            async with get_session() as session:
+                kukai = await self._load_authorized(session, interaction)
+                result = await proceed_service.execute_proceed(
+                    bot=interaction.client,  # type: ignore[arg-type]
+                    session=session,
+                    guild=interaction.guild,
+                    kukai=kukai,
+                    actor_user_id=interaction.user.id,
+                    source_label="管理パネル",
+                    interaction_id=getattr(interaction, "id", None),
+                    channel_id=effective_channel_id(interaction),
+                    allow_incomplete=True,
+                )
+            await interaction.edit_original_response(
+                embed=success_embed(result.success_description()),
+                view=None,
+            )
+            await proceed_service.announce_proceed_result(interaction.guild, kukai, result.after_state)
+        except ServiceError as error:
+            if interaction.response.is_done():
+                await interaction.edit_original_response(embed=error_embed(str(error)), view=None)
+            else:
+                await interaction.response.send_message(embed=error_embed(str(error)), ephemeral=True)
+        except proceed_service.ProceedNeedsConfirmation as error:
+            if interaction.response.is_done():
+                await interaction.edit_original_response(
+                    embed=build_proceed_preview_embed(kukai_id=self.kukai_id, title="句会", preview=error.preview),
+                    view=None,
+                )
+            else:
+                await interaction.response.send_message(
+                    embed=build_proceed_preview_embed(kukai_id=self.kukai_id, title="句会", preview=error.preview),
+                    ephemeral=True,
+                )
     @discord.ui.button(label="一時停止", style=discord.ButtonStyle.secondary)
     async def pause(self, interaction: discord.Interaction, _: discord.ui.Button) -> None:
         await self._change_state(interaction, "pause")
@@ -235,6 +283,39 @@ async def build_admin_panel_embed(session, kukai) -> discord.Embed:
     return embed
 
 
+def build_proceed_preview_embed(
+    *,
+    kukai_id: int,
+    title: str,
+    preview: proceed_service.ProceedPreview,
+) -> discord.Embed:
+    embed = discord.Embed(
+        title="次へ進める",
+        description=f"句会「**{title}**」を進行します。",
+        color=discord.Color.orange() if preview.has_incomplete else COLOR_INFO,
+    )
+    embed.add_field(
+        name="状態",
+        value=(
+            f"現在: **{proceed_service.state_label(preview.current_state)}**\n"
+            f"次: **{proceed_service.state_label(preview.next_state)}**"
+        ),
+        inline=False,
+    )
+    embed.add_field(name="実行される処理", value=_limited_field_value(list(preview.effects)), inline=False)
+    if preview.progress_report is not None:
+        report = preview.progress_report
+        embed.add_field(
+            name="条件確認",
+            value=report.summary(),
+            inline=False,
+        )
+        if not report.complete:
+            embed.add_field(name="未達状況", value=_limited_field_value(report.admin_lines()), inline=False)
+    embed.set_footer(text=f"句会ID: {kukai_id}")
+    return embed
+
+
 def build_admin_panel_entry_embed(kukai) -> discord.Embed:
     embed = discord.Embed(
         title="句会管理パネル",
@@ -243,3 +324,21 @@ def build_admin_panel_entry_embed(kukai) -> discord.Embed:
     )
     embed.set_footer(text=f"句会ID: {kukai.id}")
     return embed
+
+
+def _limited_field_value(lines: list[str], *, limit: int = 1024) -> str:
+    if not lines:
+        return "（なし）"
+    value = ""
+    shown = 0
+    for line in lines:
+        candidate = f"{value}\n{line}" if value else line
+        if len(candidate) > limit:
+            remaining = len(lines) - shown
+            suffix = f"\n...他 {remaining} 件"
+            if value and len(value) + len(suffix) <= limit:
+                value += suffix
+            break
+        value = candidate
+        shown += 1
+    return value or "（表示できる項目がありません）"
