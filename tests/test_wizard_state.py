@@ -11,6 +11,7 @@ def test_wizard_submission_max_defaults_to_five():
     state = WizardState(user_id=1, guild_id=1)
 
     assert state.submission_max == 5
+    assert state.channel_visibility_policy == "public"
 
 
 def test_default_select_comment_modes_are_optional_for_select_labels():

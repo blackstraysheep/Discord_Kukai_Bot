@@ -22,6 +22,7 @@ from bot.services import (
     select_rule_service,
     submission_service,
     voice_service,
+    channel_visibility_service,
 )
 from bot.services.errors import ServiceError
 from bot.state_machine.states import KukaiState
@@ -358,6 +359,7 @@ class KukaiCog(commands.Cog):
                     "description",
                     "channel",
                     "channel_name",
+                    "channel_visibility_policy",
                     "category_id",
                     "entry_enabled",
                     "entry_approval",
@@ -409,6 +411,14 @@ class KukaiCog(commands.Cog):
                 entry_mode = "auto"
             if entry_mode not in {"manual", "auto"}:
                 raise BulkParseError("entry_mode は manual/auto で指定してください。")
+
+            channel_visibility_policy = (
+                first_value(fields, "channel_visibility_policy", "public") or "public"
+            )
+            if channel_visibility_policy not in {"public", "public_until_participation_close"}:
+                raise BulkParseError(
+                    "channel_visibility_policy は public/public_until_participation_close で指定してください。"
+                )
 
             submission_open_raw = first_value(fields, "submission_open_at")
             submission_open_at = (
@@ -622,6 +632,7 @@ class KukaiCog(commands.Cog):
                         first_value(fields, "author_reveal_zero", "true") or "true",
                         name="author_reveal_zero",
                     ),
+                    channel_visibility_policy=channel_visibility_policy,
                     select_label_specs=select_label_specs,
                 )
                 bulk_voice_sess = None
@@ -734,7 +745,39 @@ class KukaiCog(commands.Cog):
         )
         if name_collision_warning:
             message += f"\n\n⚠️ {name_collision_warning.strip()}"
+        if channel_visibility_policy == "public_until_participation_close" and channel_setting != "new":
+            message += "\n\n⚠️ 締切後、この既存チャンネルの閲覧権限は参加者限定に変更されます。"
         await interaction.edit_original_response(embed=success_embed(message))
+
+    @kukai.command(name="visibility-sync", description="【句会管理者】参加者限定チャンネル権限を再同期します")
+    @app_commands.describe(kukai_id="句会ID（省略可: このチャンネルで1件なら自動特定）")
+    async def kukai_visibility_sync(self, interaction: discord.Interaction, kukai_id: int | None = None) -> None:
+        assert interaction.guild is not None
+        await interaction.response.defer(ephemeral=True)
+        try:
+            async with get_session() as session:
+                kukai = await kukai_service.resolve_kukai_in_channel(
+                    session,
+                    guild_id=interaction.guild.id,
+                    channel_id=effective_channel_id(interaction),
+                    kukai_id=kukai_id,
+                )
+                if not await permission_service.is_kukai_admin(session, kukai, interaction.user):  # type: ignore[arg-type]
+                    await interaction.followup.send(
+                        embed=error_embed("この操作は句会管理者のみ実行できます。"),
+                        ephemeral=True,
+                    )
+                    return
+                result = await channel_visibility_service.sync_channel_permissions(
+                    session,
+                    interaction.guild,
+                    kukai,
+                    force=True,
+                )
+            embed = success_embed(result.summary()) if result.ok else error_embed(result.summary())
+            await interaction.followup.send(embed=embed, ephemeral=True)
+        except ServiceError as e:
+            await interaction.followup.send(embed=error_embed(str(e)), ephemeral=True)
 
     @kukai.command(name="proceed", description="【句会管理者】句会を次の状態へ進めます")
     @app_commands.describe(kukai_id="句会ID（省略可: このチャンネルで1件なら自動特定）")

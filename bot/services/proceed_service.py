@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.services import (
     admin_notice_service,
+    channel_visibility_service,
     kukai_service,
     notification_service,
     progress_service,
@@ -155,6 +156,25 @@ async def execute_proceed(
             session=session,
             kukai=kukai,
             previous_state=current_state,
+        )
+
+    visibility_result = await channel_visibility_service.sync_channel_permissions(
+        session,
+        guild,
+        kukai,
+    )
+    if not visibility_result.ok:
+        await admin_notice_service.send_admin_notice(
+            bot,
+            session,
+            kukai,
+            title="チャンネル閲覧権限の同期に失敗しました",
+            description=(
+                "句会の状態は更新済みですが、参加者限定チャンネル権限の同期に失敗しました。"
+                "`/kukai visibility-sync` を実行してください。"
+            ),
+            fields=[("同期結果", visibility_result.summary())],
+            mention_admins=True,
         )
 
     if preview.has_incomplete:

@@ -1,6 +1,6 @@
 # Kukai Bot 現在仕様（技術者向け）
 
-最終更新: 2026-07-03（GUIポータル・管理パネル入口の追加）
+最終更新: 2026-07-05（段階的参加者限定チャンネルの追加）
 
 ## 1. 全体構成
 - 実装言語: Python 3.11+（開発・テスト環境は Python 3.13）
@@ -43,6 +43,7 @@
   - 新規チャンネル/既存チャンネル切替
   - 新規時はカテゴリ選択可
   - 新規時チャンネル名は別モーダルで設定可（未設定時は句会名）
+  - 閲覧モードを `公開` / `参加受付後は参加者限定` から選択可能
 - 締切表示:
   - エントリー無効時はエントリー締切を非表示
 - `/kukai create-bulk`:
@@ -51,6 +52,7 @@
   - `preset_id` 指定時は選句プリセットを句会ラベルへ展開
   - `label=` 行がある場合は `preset_id` より優先
   - `channel=current/new/<#channel_id>` に対応
+  - `channel_visibility_policy=public|public_until_participation_close` に対応
   - `voice_enabled`, `voice_channel`, `voice_start_at`, `voice_end_at` でボイス句会イベントを作成
   - `reminder=` 行で通知回ごとの時刻・通知先・対象・mention有無を指定
 - GUIウィザード:
@@ -130,6 +132,28 @@
 - スレッド対応:
   - スレッド内でコマンドを使用した場合、`interaction.channel_id`（スレッドID）ではなく親チャンネルIDを使って解決する
   - `bot/utils/channel.py` の `effective_channel_id()` で透過的に処理
+
+## 5b. 句会チャンネル閲覧モード
+- `Kukai.channel_visibility_policy`:
+  - `public`: 現在通り、Discord サーバー/チャンネル権限に従って閲覧できる
+  - `public_until_participation_close`: エントリー導線が必要な段階は公開し、締切到達後に参加者限定へ切り替える
+- `public_until_participation_close` の限定化タイミング:
+  - エントリー締切がある場合は `entry_close_at` 到達後
+  - エントリー締切がない場合、またはエントリー制なしの場合は `submission_close_at` 到達後
+  - scheduler の `entry_close` / `submission_close`、および `/kukai proceed` の手動進行時に権限同期を試みる
+- 参加者限定化時の権限:
+  - `@everyone` の `view_channel=False`
+  - Bot 自身に `view_channel/send_messages/manage_channels/read_message_history`
+  - 句会作成者、追加句会管理者、承認済みエントリーに `view_channel/send_messages/read_message_history`
+  - Discord サーバー管理者は Discord 側権限に従う
+- エントリー状態との同期:
+  - 限定化後の `/entry join`、承認、承認一括、却下、取消、削除、締切後申請承認/却下で個別 overwrite を付与/削除する
+  - 権限同期に失敗してもエントリー状態更新は成功扱いとし、管理者へ `/kukai visibility-sync` による再同期を促す
+- `/kukai visibility-sync [kukai_id]`:
+  - 句会管理者向けの手動再同期コマンド
+  - `public` の句会では no-op
+  - `public_until_participation_close` では、現在の DB 状態を正として開催チャンネル権限を再同期する
+- 作成後に閲覧モードを変更するコマンドは未実装
 
 ## 6. 句会情報表示
 - `/kukai info`:
@@ -316,6 +340,7 @@
     - `entry_enabled=true` の場合は `entry_close_at` も必須
   - 主な任意項目とデフォルト:
     - `channel=current`（`current` / `new` / `<#channel_id>`）
+    - `channel_visibility_policy=public`
     - `entry_enabled=true`
     - `entry_approval=false`
     - `min_participants=0`
@@ -386,6 +411,7 @@ title=春の句会
 theme=桜
 description=春季定例句会です
 channel=current
+channel_visibility_policy=public_until_participation_close
 entry_enabled=true
 entry_approval=false
 min_participants=0

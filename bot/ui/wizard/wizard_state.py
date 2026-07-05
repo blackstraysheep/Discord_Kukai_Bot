@@ -20,6 +20,7 @@ class WizardState:
     description: str = ""
     use_existing_channel: bool = False
     existing_channel_id: Optional[int] = None
+    channel_visibility_policy: str = "public"
 
     # Step 2: Entry
     entry_enabled: bool = True

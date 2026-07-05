@@ -48,6 +48,7 @@ _VALID_SELECTING_MODES = {"manual", "semi_auto", "full_auto"}
 _VALID_PUBLISH_MODES = {"manual", "auto"}
 _VALID_RESULT_MODES = {"manual", "auto"}
 _VALID_AUTHOR_PUBLICATION_MODES = {"with_result", "manual", "never"}
+_VALID_CHANNEL_VISIBILITY_POLICIES = {"public", "public_until_participation_close"}
 
 AUTHOR_PUBLICATION_LABELS = {
     "with_result": "結果公開と同時に作者を公開",
@@ -64,6 +65,15 @@ def _normalize_author_publication_mode(mode: str | None) -> str:
     normalized = mode or "with_result"
     if normalized not in _VALID_AUTHOR_PUBLICATION_MODES:
         raise ValidationError("author_publication_mode は with_result/manual/never で指定してください。")
+    return normalized
+
+
+def normalize_channel_visibility_policy(policy: str | None) -> str:
+    normalized = (policy or "public").strip()
+    if normalized not in _VALID_CHANNEL_VISIBILITY_POLICIES:
+        raise ValidationError(
+            "channel_visibility_policy は public/public_until_participation_close で指定してください。"
+        )
     return normalized
 
 
@@ -96,6 +106,7 @@ async def create_kukai(
     author_publication_mode: str = "with_result",
     author_reveal: bool | None = None,
     author_reveal_zero: bool = True,
+    channel_visibility_policy: str = "public",
     select_label_specs: list[dict] | None = None,
 ) -> Kukai:
     if not entry_enabled:
@@ -104,6 +115,7 @@ async def create_kukai(
     if author_reveal is not None and author_publication_mode == "with_result" and not author_reveal:
         author_publication_mode = "never"
     author_publication_mode = _normalize_author_publication_mode(author_publication_mode)
+    channel_visibility_policy = normalize_channel_visibility_policy(channel_visibility_policy)
     if author_reveal is None:
         author_reveal = author_publication_mode == "with_result"
     if author_publication_mode in {"manual", "never"}:
@@ -122,6 +134,7 @@ async def create_kukai(
         created_by=created_by,
         channel_id=channel_id,
         title=title,
+        channel_visibility_policy=channel_visibility_policy,
         theme=theme,
         description=description,
         state=initial_state,
@@ -159,13 +172,14 @@ async def create_kukai(
 
     logger.info(
         "event=create_kukai kukai_id=%s title=%r entry_enabled=%s initial_state=%s "
-        "created_by=%s channel_id=%s",
+        "created_by=%s channel_id=%s channel_visibility_policy=%s",
         kukai.id,
         kukai.title,
         kukai.entry_enabled,
         kukai.state,
         kukai.created_by,
         kukai.channel_id,
+        kukai.channel_visibility_policy,
     )
 
     return kukai

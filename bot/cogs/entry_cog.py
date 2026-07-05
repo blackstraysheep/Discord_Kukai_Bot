@@ -13,7 +13,13 @@ from discord import app_commands
 from discord.ext import commands
 
 from bot.database import get_session
-from bot.services import admin_notice_service, entry_service, kukai_service, permission_service
+from bot.services import (
+    admin_notice_service,
+    channel_visibility_service,
+    entry_service,
+    kukai_service,
+    permission_service,
+)
 from bot.services.errors import ServiceError
 from bot.ui.entry_manage_view import EntryManageView, LateEntryReviewView
 from bot.utils.channel import effective_channel_id
@@ -60,6 +66,14 @@ class EntryHaigoModal(discord.ui.Modal, title="エントリー"):
                 entry = await entry_service.enter(
                     session, kukai, interaction.user.id, haigo
                 )
+                visibility_result = None
+                if entry.status == "approved":
+                    visibility_result = await channel_visibility_service.grant_entry_access(
+                        session,
+                        interaction.guild,
+                        kukai,
+                        entry,
+                    )
             display_name = entry.haigo or interaction.user.display_name  # type: ignore[union-attr]
             if entry.status == "approved":
                 msg = f"「**{kukai.title}**」にエントリーしました。\n俳号: **{display_name}**"
@@ -78,6 +92,8 @@ class EntryHaigoModal(discord.ui.Modal, title="エントリー"):
                     f"俳号: **{display_name}**"
                 )
                 title = "エントリー申請送信済"
+            if visibility_result is not None:
+                msg += _visibility_sync_warning(visibility_result)
             await interaction.followup.send(
                 embed=success_embed(msg, title=title), ephemeral=True
             )
@@ -130,8 +146,16 @@ class EntryCog(commands.Cog):
                     kukai_id=kukai_id,
                 )
                 entry = await entry_service.withdraw(session, kukai, interaction.user.id)
+                visibility_result = await channel_visibility_service.revoke_entry_access(
+                    session,
+                    interaction.guild,
+                    kukai,
+                    entry.user_id,
+                )
+            msg = f"「{kukai.title}」のエントリーを取り消しました。"
+            msg += _visibility_sync_warning(visibility_result)
             await interaction.followup.send(
-                embed=success_embed(f"「{kukai.title}」のエントリーを取り消しました。"),
+                embed=success_embed(msg),
                 ephemeral=True,
             )
         except ServiceError as e:
@@ -224,6 +248,7 @@ class EntryCog(commands.Cog):
         await interaction.response.defer(ephemeral=True)
         try:
             approved_names: list[str] = []
+            visibility_warnings: list[str] = []
             async with get_session() as session:
                 kukai = await kukai_service.resolve_kukai_in_channel(
                     session,
@@ -244,6 +269,13 @@ class EntryCog(commands.Cog):
                         interaction.user.id,
                         entry.user_id,
                     )
+                    result = await channel_visibility_service.grant_entry_access(
+                        session,
+                        interaction.guild,
+                        kukai,
+                        approved,
+                    )
+                    visibility_warnings.append(_visibility_sync_warning(result))
                     member = interaction.guild.get_member(approved.user_id)
                     approved_names.append(
                         approved.haigo or (member.display_name if member else f"UID:{approved.user_id}")
@@ -256,8 +288,10 @@ class EntryCog(commands.Cog):
                 )
                 return
 
+            msg = f"{len(approved_names)}件のエントリーを承認しました。"
+            msg += "".join(dict.fromkeys(filter(None, visibility_warnings)))
             await interaction.followup.send(
-                embed=success_embed(f"{len(approved_names)}件のエントリーを承認しました。"),
+                embed=success_embed(msg),
                 ephemeral=True,
             )
             await notify_entries_approved(interaction.guild, kukai, display_names=approved_names)
@@ -298,8 +332,16 @@ class EntryCog(commands.Cog):
                     )
                     return
                 await entry_service.admin_remove(session, kukai, user.id)
+                visibility_result = await channel_visibility_service.revoke_entry_access(
+                    session,
+                    interaction.guild,
+                    kukai,
+                    user.id,
+                )
+            msg = f"{user.display_name} さんのエントリーを削除しました。"
+            msg += _visibility_sync_warning(visibility_result)
             await interaction.followup.send(
-                embed=success_embed(f"{user.display_name} さんのエントリーを削除しました。"),
+                embed=success_embed(msg),
                 ephemeral=True,
             )
         except ServiceError as e:
@@ -339,13 +381,27 @@ class EntryCog(commands.Cog):
                         entry = await entry_service.approve(
                             session, kukai, interaction.user.id, user.id
                         )
+                        visibility_result = await channel_visibility_service.grant_entry_access(
+                            session,
+                            interaction.guild,
+                            kukai,
+                            entry,
+                        )
                     else:
                         entry = await entry_service.reject(
                             session, kukai, interaction.user.id, user.id
                         )
+                        visibility_result = await channel_visibility_service.revoke_entry_access(
+                            session,
+                            interaction.guild,
+                            kukai,
+                            user.id,
+                        )
                     name = entry.haigo or user.display_name
+                    msg = f"**{name}** さんを{action_ja}しました。"
+                    msg += _visibility_sync_warning(visibility_result)
                     await interaction.followup.send(
-                        embed=success_embed(f"**{name}** さんを{action_ja}しました。"),
+                        embed=success_embed(msg),
                         ephemeral=True,
                     )
                     if action == "approve":
@@ -391,6 +447,12 @@ class EntryCog(commands.Cog):
 
 async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(EntryCog(bot))
+
+
+def _visibility_sync_warning(result) -> str:
+    if result is None or result.ok:
+        return ""
+    return "\n\n⚠️ 参加状態は更新済みですが、チャンネル権限同期に失敗しました。`/kukai visibility-sync` を実行してください。"
 
 
 async def _notify_late_entry_request(
