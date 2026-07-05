@@ -64,7 +64,9 @@
   - 現状は参加者ごとの permission overwrite 方式
   - 参加者が多い句会では Discord の overwrite 上限や管理負荷が問題になるため、句会ごとの一時ロール作成・付与方式を検討する
 - 既存チャンネル権限の完全保存・復元
-  - 現状の `public_until_participation_close` は DB 状態を正として締切後に `@everyone` を閉じ、参加者個別 overwrite を付与する
+  - 現状の `public_until_participation_close` は新規チャンネル作成時のみ利用可能
+  - 既存チャンネルは既存 overwrite の保存・復元やBot自身のアクセス喪失リスクがあるため v1 では禁止
+  - 将来、既存チャンネル対応を入れる場合は変更前 overwrite の保存、復元、失敗時ロールバック、事前権限検査を設計する
   - 作成後に公開へ戻す、終了後に公開/アーカイブ権限へ変更する、既存 overwrite を完全復元する機能は未実装
 - コマンド同期戦略の整理
   - 開発環境（guild sync）と本番（global sync）の運用手順を文書化

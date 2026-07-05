@@ -194,6 +194,15 @@ class StepConfirmView(discord.ui.View):
                 view=None,
             )
             return
+        if state.use_existing_channel and state.channel_visibility_policy == "public_until_participation_close":
+            await interaction.edit_original_response(
+                embed=error_embed(
+                    "参加者限定チャンネルは v1 では新規チャンネル作成時のみ使用できます。"
+                    "\nステップ1で「新規チャンネルを作成」に変更してください。"
+                ),
+                view=None,
+            )
+            return
 
         ch_name = _sanitize_channel_name(state.channel_name or state.title)
         channel: discord.abc.GuildChannel | None = None
@@ -385,9 +394,6 @@ class StepConfirmView(discord.ui.View):
             success_description += f"\n\n⚠️ {schedule_warning}"
         if panel_warning:
             success_description += f"\n\n⚠️ {panel_warning}"
-        if state.channel_visibility_policy == "public_until_participation_close" and state.use_existing_channel:
-            success_description += "\n\n⚠️ 締切後、この既存チャンネルの閲覧権限は参加者限定に変更されます。"
-
         success_embed_ = discord.Embed(
             title="✅ 句会作成完了",
             description=success_description,

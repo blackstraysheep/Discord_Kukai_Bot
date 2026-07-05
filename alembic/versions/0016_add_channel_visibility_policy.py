@@ -29,7 +29,7 @@ def upgrade() -> None:
         "kukais",
         sa.Column(
             "channel_visibility_policy",
-            sa.String(length=30),
+            sa.String(length=50),
             nullable=False,
             server_default="public",
         ),

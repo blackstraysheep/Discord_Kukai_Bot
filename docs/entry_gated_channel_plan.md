@@ -249,6 +249,8 @@ v1では `public` への切り替え時、Botが過去に付与した参加者�
 
 推奨実装順では、新規チャンネルのみ先に対応し、既存チャンネル対応は最後に回す。
 
+実装時点のv1では、既存チャンネル + `public_until_participation_close` は禁止する。既存チャンネルには手作業の overwrite や他用途の権限設計が混在しやすく、Bot自身のアクセス喪失や復元不能な権限変更につながるため。
+
 ### 限定化のトリガー
 
 - `public_until_participation_close`:

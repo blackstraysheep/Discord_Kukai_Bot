@@ -9,7 +9,14 @@ from bot.ui.wizard.wizard_state import WizardState, set_wizard
 
 
 def build(state: WizardState) -> tuple[discord.Embed, discord.ui.View]:
-    channel_ready = (not state.use_existing_channel) or (state.existing_channel_id is not None)
+    existing_closed_invalid = (
+        state.use_existing_channel
+        and state.channel_visibility_policy == "public_until_participation_close"
+    )
+    channel_ready = (
+        ((not state.use_existing_channel) or (state.existing_channel_id is not None))
+        and not existing_closed_invalid
+    )
     filled = bool(state.title and channel_ready)
     embed = discord.Embed(
         title=f"ステップ 1/{STEP_COUNT}: 基本情報",
@@ -40,6 +47,12 @@ def build(state: WizardState) -> tuple[discord.Embed, discord.ui.View]:
         "public_until_participation_close": "参加受付後は参加者限定",
     }.get(state.channel_visibility_policy, state.channel_visibility_policy)
     embed.add_field(name="閲覧モード", value=visibility_label, inline=False)
+    if existing_closed_invalid:
+        embed.add_field(
+            name="設定エラー",
+            value="参加者限定チャンネルは v1 では新規チャンネル作成時のみ使用できます。",
+            inline=False,
+        )
     embed.set_footer(text="✅ 句会名とチャンネル設定がそろうと次へ進めます。")
     return embed, StepBasicView(state, filled=filled)
 
@@ -66,7 +79,7 @@ class StepBasicView(discord.ui.View):
             channel_name_btn = discord.ui.Button(
                 label="📝 チャンネル名を設定",
                 style=discord.ButtonStyle.secondary,
-                row=3,
+                row=4,
             )
             channel_name_btn.callback = self._set_channel_name
             self.add_item(channel_name_btn)

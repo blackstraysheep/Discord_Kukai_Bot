@@ -5,7 +5,6 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Iterable
 
 import discord
 from sqlalchemy import select
@@ -122,10 +121,6 @@ async def sync_channel_permissions(
     allowed_user_ids = await _allowed_user_ids(session, kukai)
 
     try:
-        everyone = getattr(guild, "default_role", None)
-        if everyone is not None:
-            await _set_overwrite(channel, everyone, view_channel=False)
-
         bot_member = getattr(guild, "me", None)
         if bot_member is not None:
             await _set_overwrite(
@@ -159,6 +154,10 @@ async def sync_channel_permissions(
                     user_id,
                 )
                 result.failed_user_ids.append(user_id)
+
+        everyone = getattr(guild, "default_role", None)
+        if everyone is not None:
+            await _set_overwrite(channel, everyone, view_channel=False)
     except (discord.Forbidden, discord.HTTPException) as error:
         logger.warning(
             "event=channel_visibility_sync_failed kukai_id=%s channel_id=%s error=%s",

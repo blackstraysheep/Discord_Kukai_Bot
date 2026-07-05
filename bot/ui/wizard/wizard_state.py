@@ -80,6 +80,8 @@ class WizardState:
             return False
         if self.use_existing_channel and self.existing_channel_id is None:
             return False
+        if self.use_existing_channel and self.channel_visibility_policy != "public":
+            return False
         if self.voice_enabled and not (self.voice_channel_id and self.voice_start_at):
             return False
         return True

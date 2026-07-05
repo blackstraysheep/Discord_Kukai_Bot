@@ -138,6 +138,7 @@
   - `public`: 現在通り、Discord サーバー/チャンネル権限に従って閲覧できる
   - `public_until_participation_close`: エントリー導線が必要な段階は公開し、締切到達後に参加者限定へ切り替える
 - `public_until_participation_close` の限定化タイミング:
+  - v1では新規チャンネル作成時のみ指定可能。既存チャンネル利用時は指定不可
   - エントリー締切がある場合は `entry_close_at` 到達後
   - エントリー締切がない場合、またはエントリー制なしの場合は `submission_close_at` 到達後
   - scheduler の `entry_close` / `submission_close`、および `/kukai proceed` の手動進行時に権限同期を試みる
@@ -154,6 +155,7 @@
   - `public` の句会では no-op
   - `public_until_participation_close` では、現在の DB 状態を正として開催チャンネル権限を再同期する
 - 作成後に閲覧モードを変更するコマンドは未実装
+- 既存チャンネルの参加者限定化は未実装。既存 overwrite の保存・復元が必要なため将来課題とする
 
 ## 6. 句会情報表示
 - `/kukai info`:
@@ -357,6 +359,7 @@
   - `channel=new` の場合:
     - `channel_name` 未指定時は `title` からチャンネル名を生成
     - `category_id` で作成先カテゴリを指定可能
+    - `channel_visibility_policy=public_until_participation_close` は `channel=new` の場合のみ指定可能
   - 選句ラベル:
     - `label=名前,点数,rank,最小数,最大数,コメントモード`
     - rank省略: `label=名前,点数,最小数,最大数,コメントモード`

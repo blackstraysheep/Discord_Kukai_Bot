@@ -32,7 +32,7 @@ class Kukai(Base, TimestampMixin):
     pre_pause_state: Mapped[Optional[str]] = mapped_column(String(30), nullable=True)
     created_by: Mapped[int] = mapped_column(BigInteger, nullable=False)
     # 'public' | 'public_until_participation_close'
-    channel_visibility_policy: Mapped[str] = mapped_column(String(30), nullable=False, default="public")
+    channel_visibility_policy: Mapped[str] = mapped_column(String(50), nullable=False, default="public")
 
     # --- Deadlines ---
     entry_open_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)

@@ -526,6 +526,14 @@ class KukaiCog(commands.Cog):
         await interaction.response.defer(ephemeral=True)
 
         channel_setting = (first_value(fields, "channel", "current") or "current").strip().lower()
+        if channel_visibility_policy == "public_until_participation_close" and channel_setting != "new":
+            await interaction.edit_original_response(
+                embed=error_embed(
+                    "channel_visibility_policy=public_until_participation_close は "
+                    "v1 では channel=new の場合のみ指定できます。"
+                )
+            )
+            return
         channel: discord.TextChannel | None = None
         created_new_channel = False
         name_collision_warning: str | None = None
@@ -745,8 +753,6 @@ class KukaiCog(commands.Cog):
         )
         if name_collision_warning:
             message += f"\n\n⚠️ {name_collision_warning.strip()}"
-        if channel_visibility_policy == "public_until_participation_close" and channel_setting != "new":
-            message += "\n\n⚠️ 締切後、この既存チャンネルの閲覧権限は参加者限定に変更されます。"
         await interaction.edit_original_response(embed=success_embed(message))
 
     @kukai.command(name="visibility-sync", description="【句会管理者】参加者限定チャンネル権限を再同期します")

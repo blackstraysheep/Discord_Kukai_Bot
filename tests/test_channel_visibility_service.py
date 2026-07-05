@@ -21,6 +21,7 @@ class FakeChannel:
     def __init__(self, channel_id: int) -> None:
         self.id = channel_id
         self.permissions: dict[int, discord.PermissionOverwrite | None] = {}
+        self.permission_order: list[int] = []
 
     def overwrites_for(self, target) -> discord.PermissionOverwrite:
         current = self.permissions.get(target.id)
@@ -29,6 +30,7 @@ class FakeChannel:
         return current
 
     async def set_permissions(self, target, *, overwrite=None) -> None:
+        self.permission_order.append(target.id)
         self.permissions[target.id] = overwrite
 
 
@@ -116,6 +118,7 @@ async def test_sync_restricts_channel_to_approved_entries_creator_and_admin(db_s
     assert channel.permissions[101].view_channel is True
     assert channel.permissions[103].view_channel is True
     assert 102 not in channel.permissions
+    assert channel.permission_order.index(999) < channel.permission_order.index(0)
 
 
 @pytest.mark.asyncio
