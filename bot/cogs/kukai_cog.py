@@ -1,6 +1,5 @@
 """Kukai management commands: /kukai *"""
 
-import asyncio
 import logging
 import re
 
@@ -14,10 +13,11 @@ from bot.database import get_session
 from bot.repositories import participant_repo, select_repo
 from bot.services import (
     admin_notice_service,
+    kukai_list_view,
     kukai_service,
     notification_service,
     permission_service,
-    progress_service,
+    proceed_service,
     result_service,
     select_rule_service,
     submission_service,
@@ -43,7 +43,6 @@ from bot.utils.bulk_parser import (
 from bot.utils.channel import effective_channel_id
 from bot.utils.discord_retry import send_with_retry
 from bot.utils.datetime_utils import format_jst, parse_datetime
-from bot.utils.submission_publish import build_submission_publish_embeds
 from bot.utils.stage_announcement import send_action_button_message, send_stage_announcement
 from bot.utils.embed_builder import (
     COLOR_INFO,
@@ -266,33 +265,10 @@ class KukaiCog(commands.Cog):
         async with get_session() as session:
             kukais = await kukai_service.list_kukais(session, interaction.guild.id)
 
-        if not kukais:
-            await interaction.response.send_message(
-                embed=discord.Embed(
-                    description="現在、開催中または招集中の句会はありません。",
-                    color=COLOR_INFO,
-                ),
-                ephemeral=True,
-            )
-            return
-
-        embed = discord.Embed(title="📜 句会一覧", color=COLOR_INFO)
-        for k in kukais[:10]:
-            state_ja = STATE_LABEL.get(k.state, k.state)
-            lines = [f"状態: {state_ja}"]
-            if k.submission_close_at:
-                lines.append(f"投句締切: {format_jst(k.submission_close_at)}")
-            if k.selecting_close_at:
-                lines.append(f"選句締切: {format_jst(k.selecting_close_at)}")
-            embed.add_field(
-                name=f"[{k.id}] {k.title}",
-                value="\n".join(lines),
-                inline=False,
-            )
-        if len(kukais) > 10:
-            embed.set_footer(text=f"他 {len(kukais) - 10} 件")
-
-        await interaction.response.send_message(embed=embed, ephemeral=True)
+        await interaction.response.send_message(
+            embed=kukai_list_view.build_kukai_list_embed(kukais),
+            ephemeral=True,
+        )
 
     @app_commands.command(name="info", description="句会の詳細を表示します")
     @app_commands.describe(kukai_id="句会ID（省略可: このチャンネルで1件なら自動特定）")
@@ -359,32 +335,13 @@ class KukaiCog(commands.Cog):
             return
 
         from bot.ui.wizard.base import goto_step
-        from bot.ui.wizard.wizard_state import WizardState, set_wizard
+        from bot.ui.wizard.start import build_create_wizard_state
 
-        state = WizardState(user_id=interaction.user.id, guild_id=interaction.guild.id)
-        state.select_preset_options = [{"id": t.id, "name": t.name} for t in templates]
-        default_template = next((t for t in templates if t.is_default), None)
-        if default_template is not None:
-            points_enabled, _ = select_rule_service.deserialize_template_payload(
-                default_template.definition_json
-            )
-            state.select_preset_template_id = default_template.id
-            state.select_preset_name = default_template.name
-            state.select_points_enabled = points_enabled
-            state.select_label_specs = select_rule_service.build_kukai_specs_from_template(
-                default_template
-            )
-        else:
-            state.select_label_specs = select_rule_service.default_kukai_specs()
-        state.selected_select_label = next(
-            (
-                str(spec["label"])
-                for spec in state.select_label_specs
-                if spec["label"] != select_rule_service.AUTHOR_COMMENT_LABEL
-            ),
-            "特選",
+        state = await build_create_wizard_state(
+            guild_id=interaction.guild.id,
+            user_id=interaction.user.id,
+            templates=templates,
         )
-        set_wizard(state)
         await goto_step(interaction, state, first_send=True)
 
     @kukai.command(name="create-bulk", description="【作成権限者】行形式で新しい句会を一括作成します")
@@ -785,10 +742,6 @@ class KukaiCog(commands.Cog):
         assert interaction.guild is not None
         await interaction.response.defer(ephemeral=True)
         try:
-            published_count: int | None = None
-            publish_warning: str | None = None
-            result_count: int | None = None
-            result_warning: str | None = None
             interaction_channel_id = effective_channel_id(interaction)
             async with get_session() as session:
                 kukai = await kukai_service.resolve_kukai_in_channel(
@@ -802,18 +755,10 @@ class KukaiCog(commands.Cog):
                         embed=error_embed("この操作は句会管理者のみ実行できます。"), ephemeral=True
                     )
                     return
-                current_state = KukaiState.from_value(kukai.state)
-                logger.info(
-                    "event=kukai_proceed_command_start kukai_id=%s actor_user_id=%s "
-                    "before_state=%s interaction_id=%s channel_id=%s",
-                    kukai.id,
-                    interaction.user.id,
-                    current_state,
-                    getattr(interaction, "id", None),
-                    interaction_channel_id,
-                )
-                override_report = await progress_service.report_for_state(session, kukai, current_state)
-                if override_report is not None and not override_report.complete:
+                preview = await proceed_service.preview_proceed(session, kukai)
+                if preview.has_incomplete:
+                    override_report = preview.progress_report
+                    assert override_report is not None
                     view = ConfirmView(timeout=60)
                     if view.children:
                         view.children[0].label = "それでも進める"  # type: ignore[attr-defined]
@@ -839,74 +784,26 @@ class KukaiCog(commands.Cog):
                             ephemeral=True,
                         )
                         return
-                else:
-                    override_report = None
-                if current_state in {KukaiState.SUBMISSION_CLOSED, KukaiState.WAITING_PUBLISH}:
-                    await kukai_service.jump(session, kukai, KukaiState.WAITING_PUBLISH)
-                    published = await submission_service.publish(session, kukai)
-                    published_count = len(published)
-                    publish_warning, message_id = await self._post_submission_list(
-                        interaction.guild, kukai, published
-                    )
-                    if message_id is not None:
-                        kukai.submission_message_id = message_id
-                    new_state = await kukai_service.proceed(session, kukai)
-                else:
-                    new_state = await kukai_service.proceed(session, kukai)
-                    if new_state == KukaiState.RESULTS:
-                        result_count, result_warning, result_message_id = await self._post_result_list(
-                            session, interaction.guild, kukai
-                        )
-                        if result_message_id is not None:
-                            kukai.result_message_id = result_message_id
-                if new_state == KukaiState.SUBMISSION_CLOSED:
-                    from bot.scheduler import jobs as scheduler_jobs
-
-                    await scheduler_jobs.notify_entry_closed_for_manual_submission_close(
-                        bot=self.bot,
-                        session=session,
-                        kukai=kukai,
-                        previous_state=current_state,
-                    )
-                if override_report is not None:
-                    await admin_notice_service.send_admin_notice(
-                        self.bot,
-                        session,
-                        kukai,
-                        title="条件未達のまま手動進行しました",
-                        description=(
-                            f"<@{interaction.user.id}> が `/kukai proceed` で確認し、"
-                            "条件未達の参加者がいる状態で句会を進行しました。"
-                        ),
-                        fields=[("未達状況", "\n".join(override_report.admin_lines()))],
-                    )
-                await notification_service.cancel_kukai_jobs(session, kukai.id)
-                await notification_service.schedule_kukai_jobs(session, kukai)
-                logger.info(
-                    "event=kukai_proceed_command kukai_id=%s actor_user_id=%s "
-                    "before_state=%s after_state=%s interaction_id=%s channel_id=%s",
-                    kukai.id,
-                    interaction.user.id,
-                    current_state,
-                    new_state,
-                    getattr(interaction, "id", None),
-                    interaction_channel_id,
+                result = await proceed_service.execute_proceed(
+                    bot=self.bot,
+                    session=session,
+                    guild=interaction.guild,
+                    kukai=kukai,
+                    actor_user_id=interaction.user.id,
+                    source_label="`/kukai proceed`",
+                    interaction_id=getattr(interaction, "id", None),
+                    channel_id=interaction_channel_id,
+                    allow_incomplete=preview.has_incomplete,
                 )
-            state_ja = STATE_LABEL.get(str(new_state), str(new_state))
-            description = f"句会「{kukai.title}」を **{state_ja}** へ進めました。"
-            if published_count is not None:
-                description += f"\n{published_count}句を番号付きで公開しました。"
-                if publish_warning:
-                    description += f"\n⚠️ {publish_warning}"
-            if result_count is not None:
-                description += f"\n結果 {result_count}句を公開しました。"
-                if result_warning:
-                    description += f"\n⚠️ {result_warning}"
             await interaction.followup.send(
-                embed=success_embed(description),
+                embed=success_embed(result.success_description()),
                 ephemeral=True,
             )
-            await self._announce_to_kukai_channel(interaction.guild, kukai, new_state)
+            await proceed_service.announce_proceed_result(interaction.guild, kukai, result.after_state)
+        except proceed_service.ProceedNeedsConfirmation as e:
+            report = e.preview.progress_report
+            message = report.summary() if report is not None else "進行前の確認が必要です。"
+            await interaction.followup.send(embed=error_embed(message), ephemeral=True)
         except ServiceError as e:
             await interaction.followup.send(embed=error_embed(str(e)), ephemeral=True)
 
@@ -984,6 +881,53 @@ class KukaiCog(commands.Cog):
         except discord.Forbidden:
             await interaction.edit_original_response(
                 embed=error_embed("開催チャンネルへの送信権限がありません。")
+            )
+
+    @kukai.command(name="panel", description="【句会管理者】管理パネル入口を管理者スレッドへ投稿します")
+    @app_commands.describe(kukai_id="句会ID（省略可: このチャンネルで1件なら自動特定）")
+    async def kukai_panel(self, interaction: discord.Interaction, kukai_id: int | None = None) -> None:
+        assert interaction.guild is not None
+        await interaction.response.defer(ephemeral=True)
+        try:
+            async with get_session() as session:
+                kukai = await kukai_service.resolve_kukai_in_channel(
+                    session,
+                    guild_id=interaction.guild.id,
+                    channel_id=effective_channel_id(interaction),
+                    kukai_id=kukai_id,
+                )
+                if not await permission_service.is_kukai_admin(session, kukai, interaction.user):  # type: ignore[arg-type]
+                    await interaction.edit_original_response(
+                        embed=error_embed("この操作は句会管理者のみ実行できます。")
+                    )
+                    return
+                thread = await admin_notice_service.ensure_admin_thread(
+                    self.bot,
+                    session,
+                    kukai,
+                )
+                if thread is None:
+                    await interaction.edit_original_response(
+                        embed=error_embed("管理者スレッドを作成できませんでした。")
+                    )
+                    return
+                from bot.ui.admin_panel_view import (
+                    KukaiAdminPanelEntryView,
+                    build_admin_panel_entry_embed,
+                )
+
+                await thread.send(
+                    embed=build_admin_panel_entry_embed(kukai),
+                    view=KukaiAdminPanelEntryView(kukai.id),
+                )
+            await interaction.edit_original_response(
+                embed=success_embed(f"句会「{kukai.title}」の管理パネル入口を投稿しました。")
+            )
+        except ServiceError as e:
+            await interaction.edit_original_response(embed=error_embed(str(e)))
+        except discord.Forbidden:
+            await interaction.edit_original_response(
+                embed=error_embed("管理者スレッドへの投稿権限がありません。")
             )
 
     @kukai.command(name="reveal-authors", description="【句会管理者】結果公開後に作者を公開します")
@@ -1147,33 +1091,6 @@ class KukaiCog(commands.Cog):
             else:
                 await interaction.response.send_message(embed=error_embed(str(e)), ephemeral=True)
 
-    async def _post_submission_list(
-        self,
-        guild: discord.Guild,
-        kukai,
-        published_submissions,
-    ) -> tuple[str | None, int | None]:
-        if not kukai.channel_id:
-            return "公開先チャンネルが未設定のため、投句一覧を投稿できません。", None
-
-        channel = guild.get_channel(kukai.channel_id)
-        if not isinstance(channel, discord.TextChannel):
-            return "公開先チャンネルが見つからないため、投句一覧を投稿できません。", None
-
-        embeds = build_submission_publish_embeds(kukai, published_submissions)
-        first_message_id: int | None = None
-        try:
-            for index, embed in enumerate(embeds):
-                sent = await send_with_retry(lambda e=embed: channel.send(embed=e))
-                if index == 0:
-                    first_message_id = sent.id
-                if index < len(embeds) - 1:
-                    await asyncio.sleep(0.35)
-        except discord.Forbidden:
-            return "公開チャンネルへの送信権限がないため、投句一覧を投稿できません。", None
-
-        return None, first_message_id
-
     async def _announce_to_kukai_channel(self, guild: discord.Guild, kukai, state: KukaiState) -> None:
         await send_stage_announcement(guild, kukai, state)
 
@@ -1219,39 +1136,6 @@ class KukaiCog(commands.Cog):
             await send_with_retry(lambda: channel.send(embed=embed))
         except Exception:
             pass
-
-    async def _post_result_list(
-        self,
-        session,
-        guild: discord.Guild,
-        kukai,
-    ) -> tuple[int | None, str | None, int | None]:
-        if not kukai.channel_id:
-            return None, "公開先チャンネルが未設定のため、結果を投稿できません。", None
-
-        channel = guild.get_channel(kukai.channel_id)
-        if not isinstance(channel, discord.TextChannel):
-            return None, "公開先チャンネルが見つからないため、結果を投稿できません。", None
-
-        results = await result_service.compute_results(session, kukai)
-        if not results:
-            return 0, "集計対象の投句がないため、結果投稿をスキップしました。", None
-        from bot.cogs.result_cog import ResultOpenView, build_result_entry_embed, _resolve_initial_format
-
-        first_message_id: int | None = None
-        try:
-            initial_format = _resolve_initial_format(kukai, None)
-            sent = await send_with_retry(
-                lambda: channel.send(
-                    embed=build_result_entry_embed(kukai, result_count=len(results)),
-                    view=ResultOpenView(kukai.id, initial_format=initial_format),
-                )
-            )
-            first_message_id = sent.id
-        except discord.Forbidden:
-            return len(results), "公開チャンネルへの送信権限がないため、結果を投稿できません。", None
-
-        return len(results), None, first_message_id
 
     @kukai.command(name="rollback", description="【句会管理者】句会を指定した前段階へ戻します")
     @app_commands.describe(kukai_id="句会ID（省略可: このチャンネルで1件なら自動特定）", target_state="戻す先の状態")

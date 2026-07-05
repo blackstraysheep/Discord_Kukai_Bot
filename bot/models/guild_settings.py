@@ -17,3 +17,4 @@ class GuildSettings(Base, TimestampMixin):
     # JSON list of user snowflakes (used when create_role='specific')
     create_user_ids: Mapped[str] = mapped_column(String, nullable=False, default="[]")
     common_vc_id: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
+    portal_channel_id: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)

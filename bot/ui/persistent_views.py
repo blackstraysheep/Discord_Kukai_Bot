@@ -14,6 +14,8 @@ from bot.cogs.result_cog import ResultOpenView
 from bot.database import get_session
 from bot.models.kukai import Kukai
 from bot.state_machine.states import KukaiState
+from bot.ui.admin_panel_view import KukaiAdminPanelEntryView
+from bot.ui.portal_view import PortalView
 
 logger = logging.getLogger(__name__)
 
@@ -67,8 +69,12 @@ async def _list_kukais_for_persistent_views(session: AsyncSession) -> list[Kukai
 
 
 def _register_views_for_kukais(bot: commands.Bot, kukais: Iterable[Kukai]) -> int:
-    count = 0
+    bot.add_view(PortalView())
+    count = 1
     for kukai in kukais:
+        bot.add_view(KukaiAdminPanelEntryView(kukai.id))
+        count += 1
+
         for state in _STAGE_BUTTON_STATES:
             bot.add_view(StageActionView(kukai.id, state))
             count += 1

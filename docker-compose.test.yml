@@ -8,9 +8,6 @@ services:
     depends_on:
       db:
         condition: service_healthy
-    environment:
-      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://${POSTGRES_USER:-kukai_test}:${POSTGRES_PASSWORD:-change-me-local-test-only}@db:5432/${POSTGRES_DB:-kukai_test}}
-      SCHEDULER_DB_URL: ${SCHEDULER_DB_URL:-postgresql+psycopg://${POSTGRES_USER:-kukai_test}:${POSTGRES_PASSWORD:-change-me-local-test-only}@db:5432/${POSTGRES_DB:-kukai_test}}
     volumes:
       - test_data:/app/data
 
@@ -18,13 +15,13 @@ services:
     image: postgres:16
     restart: unless-stopped
     environment:
-      POSTGRES_DB: ${POSTGRES_DB:-kukai_test}
-      POSTGRES_USER: ${POSTGRES_USER:-kukai_test}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me-local-test-only}
+      POSTGRES_DB: kukai_test
+      POSTGRES_USER: kukai_test
+      POSTGRES_PASSWORD: change-me-local-test-only
     volumes:
       - test_postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-kukai_test} -d ${POSTGRES_DB:-kukai_test}"]
+      test: ["CMD-SHELL", "pg_isready -U kukai_test -d kukai_test"]
       interval: 5s
       timeout: 5s
       retries: 12
