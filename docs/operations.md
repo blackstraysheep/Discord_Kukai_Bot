@@ -152,6 +152,32 @@ Expected test environment boundaries:
 - No production Discord server, production bot token, or production database
   connection values.
 
+### Local test update with Alembic migration
+
+If the branch adds or changes an Alembic migration, do not start only with
+`docker compose ... up -d --build`. Build the bot image, run the migration from
+inside the Compose network, then start the bot.
+
+From the repository root on Windows:
+
+```powershell
+git switch <branch-name>
+docker compose --env-file .env.test -f docker-compose.test.yml stop bot
+docker compose --env-file .env.test -f docker-compose.test.yml up -d db
+docker compose --env-file .env.test -f docker-compose.test.yml build bot
+docker compose --env-file .env.test -f docker-compose.test.yml run --rm bot python -m alembic upgrade head
+docker compose --env-file .env.test -f docker-compose.test.yml up -d bot
+docker compose --env-file .env.test -f docker-compose.test.yml logs --tail 100 bot
+```
+
+Use this for feature branches such as `feature/entry-gated-channel` that add a
+new column or otherwise require the database schema to move forward.
+
+Do not run host-side `py -m alembic upgrade head` when `DATABASE_URL` points to
+`db:5432`. The hostname `db` is a Docker Compose service name and resolves only
+inside the Compose network. In that case, run Alembic with
+`docker compose ... run --rm bot python -m alembic upgrade head` as shown above.
+
 ## Health Checks
 
 Confirm Alembic is at the latest revision:
@@ -256,6 +282,23 @@ cd /home/ubuntu/kukai_bot
 docker compose up -d --build bot
 docker compose logs --tail 100 bot
 ```
+
+If the update includes Alembic migrations, stop the bot before rebuilding,
+keep PostgreSQL running, run the migration from inside the Compose network, and
+then start the bot:
+
+```sh
+cd /home/ubuntu/kukai_bot
+docker compose stop bot
+docker compose up -d db
+docker compose build bot
+docker compose run --rm bot python -m alembic upgrade head
+docker compose up -d bot
+docker compose logs --tail 100 bot
+```
+
+Plain `docker compose up -d --build bot` is not enough for migration-bearing
+updates because Compose does not run Alembic automatically.
 
 Before updating production:
 

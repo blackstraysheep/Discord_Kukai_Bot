@@ -1,6 +1,6 @@
 """add channel visibility policy
 
-Revision ID: 0016_add_channel_visibility_policy
+Revision ID: 0016_channel_visibility
 Revises: 0015_add_portal_channel_id
 Create Date: 2026-07-05 00:00:00.000000
 """
@@ -11,7 +11,7 @@ import sqlalchemy as sa
 from alembic import op
 
 
-revision: str = "0016_add_channel_visibility_policy"
+revision: str = "0016_channel_visibility"
 down_revision: Union[str, None] = "0015_add_portal_channel_id"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
