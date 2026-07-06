@@ -9,7 +9,9 @@ from bot.ui.wizard.wizard_state import WizardState, set_wizard
 
 
 def build(state: WizardState) -> tuple[discord.Embed, discord.ui.View]:
-    channel_ready = (not state.use_existing_channel) or (state.existing_channel_id is not None)
+    channel_ready = (
+        ((not state.use_existing_channel) or (state.existing_channel_id is not None))
+    )
     filled = bool(state.title and channel_ready)
     embed = discord.Embed(
         title=f"ステップ 1/{STEP_COUNT}: 基本情報",
@@ -35,6 +37,11 @@ def build(state: WizardState) -> tuple[discord.Embed, discord.ui.View]:
         else:
             channel_value += "\nカテゴリ: サーバーのルート"
     embed.add_field(name="句会チャンネル", value=channel_value, inline=False)
+    visibility_label = {
+        "public": "公開",
+        "public_until_participation_close": "参加受付後は参加者限定",
+    }.get(state.channel_visibility_policy, state.channel_visibility_policy)
+    embed.add_field(name="閲覧モード", value=visibility_label, inline=False)
     embed.set_footer(text="✅ 句会名とチャンネル設定がそろうと次へ進めます。")
     return embed, StepBasicView(state, filled=filled)
 
@@ -52,6 +59,7 @@ class StepBasicView(discord.ui.View):
         fill_btn.callback = self._fill
         self.add_item(fill_btn)
 
+        self.add_item(_ChannelVisibilitySelect(state))
         self.add_item(_ChannelModeSelect(state))
         if state.use_existing_channel:
             self.add_item(_ExistingChannelSelect(state))
@@ -60,7 +68,7 @@ class StepBasicView(discord.ui.View):
             channel_name_btn = discord.ui.Button(
                 label="📝 チャンネル名を設定",
                 style=discord.ButtonStyle.secondary,
-                row=3,
+                row=4,
             )
             channel_name_btn.callback = self._set_channel_name
             self.add_item(channel_name_btn)
@@ -99,21 +107,27 @@ class StepBasicView(discord.ui.View):
 class _ChannelModeSelect(discord.ui.Select):
     def __init__(self, state: WizardState) -> None:
         self.state = state
+        locked_to_new = state.channel_visibility_policy == "public_until_participation_close"
         super().__init__(
-            placeholder="句会チャンネルの作成方法",
+            placeholder=(
+                "参加者限定のため新規チャンネル作成に固定"
+                if locked_to_new
+                else "句会チャンネルの作成方法"
+            ),
             options=[
                 discord.SelectOption(
                     label="新規チャンネルを作成",
                     value="new",
-                    default=not state.use_existing_channel,
+                    default=(not state.use_existing_channel) or locked_to_new,
                 ),
                 discord.SelectOption(
                     label="既存チャンネルを使用",
                     value="existing",
-                    default=state.use_existing_channel,
+                    default=state.use_existing_channel and not locked_to_new,
                 ),
             ],
-            row=1,
+            row=2,
+            disabled=locked_to_new,
         )
 
     async def callback(self, interaction: discord.Interaction) -> None:
@@ -122,6 +136,38 @@ class _ChannelModeSelect(discord.ui.Select):
             self.state.existing_channel_id = None
         else:
             self.state.category_id = None
+        set_wizard(self.state)
+        embed, view = build(self.state)
+        await interaction.response.edit_message(embed=embed, view=view)
+
+
+class _ChannelVisibilitySelect(discord.ui.Select):
+    def __init__(self, state: WizardState) -> None:
+        self.state = state
+        super().__init__(
+            placeholder="句会チャンネルの閲覧モード",
+            options=[
+                discord.SelectOption(
+                    label="公開",
+                    value="public",
+                    description="現在通り、サーバー権限に従って閲覧できます",
+                    default=state.channel_visibility_policy == "public",
+                ),
+                discord.SelectOption(
+                    label="参加受付後は参加者限定",
+                    value="public_until_participation_close",
+                    description="締切後に承認済み参加者と管理者だけ閲覧できます",
+                    default=state.channel_visibility_policy == "public_until_participation_close",
+                ),
+            ],
+            row=1,
+        )
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        self.state.channel_visibility_policy = self.values[0]
+        if self.state.channel_visibility_policy == "public_until_participation_close":
+            self.state.use_existing_channel = False
+            self.state.existing_channel_id = None
         set_wizard(self.state)
         embed, view = build(self.state)
         await interaction.response.edit_message(embed=embed, view=view)
@@ -138,7 +184,7 @@ class _ExistingChannelSelect(discord.ui.ChannelSelect):
             channel_types=[discord.ChannelType.text],
             min_values=1,
             max_values=1,
-            row=2,
+            row=3,
             **kwargs,
         )
 
@@ -161,7 +207,7 @@ class _CategorySelect(discord.ui.ChannelSelect):
             channel_types=[discord.ChannelType.category],
             min_values=0,
             max_values=1,
-            row=2,
+            row=3,
             **kwargs,
         )
 

@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 import discord
 
 from bot.database import get_session
-from bot.services import entry_service, kukai_service
+from bot.services import channel_visibility_service, entry_service, kukai_service
 from bot.services.errors import ServiceError
 from bot.utils.embed_builder import error_embed, success_embed
 from bot.utils.entry_notifications import notify_entry_approved
@@ -64,10 +64,22 @@ class EntryActionSelect(discord.ui.Select):
                     entry = await entry_service.approve(
                         session, kukai, interaction.user.id, target_user_id
                     )
+                    visibility_result = await channel_visibility_service.grant_entry_access(
+                        session,
+                        interaction.guild,
+                        kukai,
+                        entry,
+                    )
                     verb = "承認"
                 else:
                     entry = await entry_service.reject(
                         session, kukai, interaction.user.id, target_user_id
+                    )
+                    visibility_result = await channel_visibility_service.revoke_entry_access(
+                        session,
+                        interaction.guild,
+                        kukai,
+                        target_user_id,
                     )
                     verb = "却下"
 
@@ -77,7 +89,10 @@ class EntryActionSelect(discord.ui.Select):
                 or (member.display_name if member else f"UID:{target_user_id}")
             )
             await interaction.response.send_message(
-                embed=success_embed(f"**{name}** さんを{verb}しました。"),
+                embed=success_embed(
+                    f"**{name}** さんを{verb}しました。"
+                    + _visibility_sync_warning(visibility_result)
+                ),
                 ephemeral=True,
             )
             if self.action == "approve":
@@ -146,11 +161,23 @@ class LateEntryReviewView(discord.ui.View):
                     entry = await entry_service.approve(
                         session, kukai, interaction.user.id, self.target_user_id
                     )
+                    visibility_result = await channel_visibility_service.grant_entry_access(
+                        session,
+                        interaction.guild,
+                        kukai,
+                        entry,
+                    )
                     approved = True
                     verb = "承認"
                 else:
                     entry = await entry_service.reject(
                         session, kukai, interaction.user.id, self.target_user_id
+                    )
+                    visibility_result = await channel_visibility_service.revoke_entry_access(
+                        session,
+                        interaction.guild,
+                        kukai,
+                        self.target_user_id,
                     )
                     approved = False
                     verb = "却下"
@@ -161,7 +188,10 @@ class LateEntryReviewView(discord.ui.View):
                 child.disabled = True  # type: ignore[attr-defined]
             await interaction.response.edit_message(view=self)
             await interaction.followup.send(
-                embed=success_embed(f"**{name}** さんを{verb}しました。"),
+                embed=success_embed(
+                    f"**{name}** さんを{verb}しました。"
+                    + _visibility_sync_warning(visibility_result)
+                ),
                 ephemeral=True,
             )
             if approved:
@@ -181,3 +211,9 @@ class LateEntryReviewView(discord.ui.View):
             await interaction.response.send_message(
                 embed=error_embed(str(e)), ephemeral=True
             )
+
+
+def _visibility_sync_warning(result) -> str:
+    if result is None or result.ok:
+        return ""
+    return "\n\n⚠️ 参加状態は更新済みですが、チャンネル権限同期に失敗しました。`/kukai visibility-sync` を実行してください。"

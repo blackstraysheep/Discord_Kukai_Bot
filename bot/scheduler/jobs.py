@@ -184,7 +184,12 @@ async def deadline_job(kukai_id: int, event_type: str) -> None:
     await _bot.wait_until_ready()
 
     from bot.database import get_session
-    from bot.services import admin_notice_service, kukai_service, notification_service, progress_service
+    from bot.services import (
+        admin_notice_service,
+        kukai_service,
+        notification_service,
+        progress_service,
+    )
     from bot.services.errors import ServiceError
     from bot.state_machine.states import KukaiState
     from bot.utils.embed_builder import COLOR_INFO
@@ -218,6 +223,7 @@ async def deadline_job(kukai_id: int, event_type: str) -> None:
                 return
 
             if event_type == "submission_close":
+                await _sync_visibility_if_due(session, kukai)
                 mode = kukai.submission_mode
                 if mode == "manual":
                     return
@@ -296,6 +302,7 @@ async def deadline_job(kukai_id: int, event_type: str) -> None:
             if event_type == "entry_close":
                 if not getattr(kukai, "entry_enabled", False):
                     return
+                await _sync_visibility_if_due(session, kukai)
                 mode = getattr(kukai, "entry_mode", "manual")
                 if not kukai_service.is_entry_mode_auto(mode):
                     await _notify_entry_closed(bot=_bot, session=session, kukai=kukai)
@@ -499,6 +506,24 @@ async def _notify_channel(bot, kukai, message: str) -> None:
             await send_with_retry(lambda: channel.send(embed=embed))
         except Exception as e:
             logger.error("_notify_channel failed: %s", e)
+
+
+async def _sync_visibility_if_due(session, kukai) -> None:
+    if _bot is None:
+        return
+    from bot.services import channel_visibility_service
+
+    guild = _bot.get_guild(kukai.guild_id)
+    if guild is None:
+        return
+    result = await channel_visibility_service.sync_channel_permissions(session, guild, kukai)
+    if not result.ok:
+        logger.warning(
+            "event=channel_visibility_sync_failed kukai_id=%s channel_id=%s summary=%s",
+            getattr(kukai, "id", None),
+            getattr(kukai, "channel_id", None),
+            result.summary(),
+        )
 
 
 async def _open_submission(*, bot, session, kukai, notification_service, kukai_service) -> None:

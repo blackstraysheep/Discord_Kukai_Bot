@@ -20,6 +20,7 @@ class WizardState:
     description: str = ""
     use_existing_channel: bool = False
     existing_channel_id: Optional[int] = None
+    channel_visibility_policy: str = "public"
 
     # Step 2: Entry
     entry_enabled: bool = True
@@ -78,6 +79,8 @@ class WizardState:
         if not (self.title and self.submission_close_at and self.selecting_close_at):
             return False
         if self.use_existing_channel and self.existing_channel_id is None:
+            return False
+        if self.use_existing_channel and self.channel_visibility_policy != "public":
             return False
         if self.voice_enabled and not (self.voice_channel_id and self.voice_start_at):
             return False

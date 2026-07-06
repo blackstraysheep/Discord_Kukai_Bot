@@ -92,6 +92,11 @@ def build(state: WizardState) -> tuple[discord.Embed, discord.ui.View]:
         else f"新規チャンネルを作成（`{_sanitize_channel_name(state.channel_name or state.title)}`）"
     )
     embed.add_field(name="句会チャンネル", value=channel_target, inline=False)
+    visibility_label = {
+        "public": "公開",
+        "public_until_participation_close": "参加受付後は参加者限定",
+    }.get(state.channel_visibility_policy, state.channel_visibility_policy)
+    embed.add_field(name="閲覧モード", value=visibility_label, inline=False)
     label_lines = []
     for spec in state.select_label_specs:
         max_count = "∞" if spec.get("max_count") is None else str(spec.get("max_count"))
@@ -189,6 +194,15 @@ class StepConfirmView(discord.ui.View):
                 view=None,
             )
             return
+        if state.use_existing_channel and state.channel_visibility_policy == "public_until_participation_close":
+            await interaction.edit_original_response(
+                embed=error_embed(
+                    "参加者限定チャンネルは v1 では新規チャンネル作成時のみ使用できます。"
+                    "\nステップ1で「新規チャンネルを作成」に変更してください。"
+                ),
+                view=None,
+            )
+            return
 
         ch_name = _sanitize_channel_name(state.channel_name or state.title)
         channel: discord.abc.GuildChannel | None = None
@@ -268,6 +282,7 @@ class StepConfirmView(discord.ui.View):
                     publish_mode="manual",
                     author_publication_mode=state.author_publication_mode,
                     author_reveal_zero=state.author_reveal_zero,
+                    channel_visibility_policy=state.channel_visibility_policy,
                     select_label_specs=state.select_label_specs,
                 )
                 if state.voice_enabled and state.voice_channel_id and state.voice_start_at:
@@ -379,7 +394,6 @@ class StepConfirmView(discord.ui.View):
             success_description += f"\n\n⚠️ {schedule_warning}"
         if panel_warning:
             success_description += f"\n\n⚠️ {panel_warning}"
-
         success_embed_ = discord.Embed(
             title="✅ 句会作成完了",
             description=success_description,

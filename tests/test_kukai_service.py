@@ -68,6 +68,39 @@ async def test_create_kukai_can_set_submission_max_unlimited(db_session):
 
 
 @pytest.mark.asyncio
+async def test_create_kukai_can_set_channel_visibility_policy(db_session):
+    kukai = await kukai_service.create_kukai(
+        db_session,
+        guild_id=1,
+        created_by=100,
+        channel_id=200,
+        title="クローズド句会",
+        entry_close_at=_utc(3),
+        submission_close_at=_utc(7),
+        selecting_close_at=_utc(14),
+        channel_visibility_policy="public_until_participation_close",
+    )
+
+    assert kukai.channel_visibility_policy == "public_until_participation_close"
+
+
+@pytest.mark.asyncio
+async def test_create_kukai_rejects_invalid_channel_visibility_policy(db_session):
+    with pytest.raises(ValidationError):
+        await kukai_service.create_kukai(
+            db_session,
+            guild_id=1,
+            created_by=100,
+            channel_id=200,
+            title="不正な閲覧モード",
+            entry_close_at=_utc(3),
+            submission_close_at=_utc(7),
+            selecting_close_at=_utc(14),
+            channel_visibility_policy="private",
+        )
+
+
+@pytest.mark.asyncio
 async def test_create_kukai_manual_author_publication_keeps_zero_policy(db_session):
     kukai = await kukai_service.create_kukai(
         db_session,

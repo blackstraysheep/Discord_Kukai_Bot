@@ -3,6 +3,7 @@
 from datetime import datetime, timezone
 
 from bot.services import select_rule_service
+from bot.ui.wizard import step_basic
 from bot.ui.wizard.step_schedule import StepScheduleModal, _placeholder_datetime
 from bot.ui.wizard.wizard_state import WizardState
 
@@ -11,6 +12,7 @@ def test_wizard_submission_max_defaults_to_five():
     state = WizardState(user_id=1, guild_id=1)
 
     assert state.submission_max == 5
+    assert state.channel_visibility_policy == "public"
 
 
 def test_default_select_comment_modes_are_optional_for_select_labels():
@@ -40,3 +42,60 @@ def test_schedule_modal_prefills_deadline_defaults():
     assert modal.entry_close.default
     assert modal.submission_close.default
     assert modal.selecting_close.default
+
+
+def test_basic_step_view_fits_discord_rows_for_new_channel():
+    state = WizardState(user_id=1, guild_id=1, title="テスト句会")
+
+    embed, view = step_basic.build(state)
+
+    assert embed.title
+    assert view.children
+
+
+def test_basic_step_view_fits_discord_rows_for_existing_channel():
+    state = WizardState(
+        user_id=1,
+        guild_id=1,
+        title="テスト句会",
+        use_existing_channel=True,
+        existing_channel_id=123,
+    )
+
+    embed, view = step_basic.build(state)
+
+    assert embed.title
+    assert view.children
+
+
+def test_existing_channel_with_closed_visibility_cannot_confirm():
+    state = WizardState(
+        user_id=1,
+        guild_id=1,
+        title="テスト句会",
+        use_existing_channel=True,
+        existing_channel_id=123,
+        channel_visibility_policy="public_until_participation_close",
+    )
+
+    assert state.can_confirm is False
+
+
+def test_basic_step_locks_channel_mode_to_new_for_closed_visibility():
+    state = WizardState(
+        user_id=1,
+        guild_id=1,
+        title="テスト句会",
+        channel_visibility_policy="public_until_participation_close",
+    )
+
+    embed, view = step_basic.build(state)
+    channel_mode = next(
+        child for child in view.children
+        if getattr(child, "placeholder", "") == "参加者限定のため新規チャンネル作成に固定"
+    )
+
+    assert embed.title
+    assert channel_mode.disabled is True
+    assert channel_mode.options[0].default is True
+    assert channel_mode.options[1].default is False
