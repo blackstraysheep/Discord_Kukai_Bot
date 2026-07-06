@@ -79,3 +79,23 @@ def test_existing_channel_with_closed_visibility_cannot_confirm():
     )
 
     assert state.can_confirm is False
+
+
+def test_basic_step_locks_channel_mode_to_new_for_closed_visibility():
+    state = WizardState(
+        user_id=1,
+        guild_id=1,
+        title="テスト句会",
+        channel_visibility_policy="public_until_participation_close",
+    )
+
+    embed, view = step_basic.build(state)
+    channel_mode = next(
+        child for child in view.children
+        if getattr(child, "placeholder", "") == "参加者限定のため新規チャンネル作成に固定"
+    )
+
+    assert embed.title
+    assert channel_mode.disabled is True
+    assert channel_mode.options[0].default is True
+    assert channel_mode.options[1].default is False
