@@ -34,8 +34,13 @@ def _can_show_pdf_author(kukai, requested: bool, *, state: KukaiState | None = N
     return True
 
 
-def _can_show_result_author(kukai, requested: bool) -> bool:
-    return _can_show_pdf_author(kukai, requested)
+def _can_show_result_author(
+    kukai,
+    requested: bool,
+    *,
+    state: KukaiState | None = None,
+) -> bool:
+    return _can_show_pdf_author(kukai, requested, state=state)
 
 
 async def _send_pdf(
@@ -198,7 +203,7 @@ class PdfCog(commands.Cog):
                         ephemeral=True,
                     )
                     return
-                show_author = _can_show_result_author(kukai, show_author)
+                show_author = _can_show_result_author(kukai, show_author, state=state)
 
                 pdf_bytes = await pdf_service.build_result_pdf(
                     session,

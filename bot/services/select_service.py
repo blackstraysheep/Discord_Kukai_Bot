@@ -85,6 +85,9 @@ async def cast_select(
                 vc = SelectComment(select_id=sel.id, comment=comment_text)
                 session.add(vc)
                 sel.comment = vc
+        elif sel.comment:
+            await session.delete(sel.comment)
+            sel.comment = None
         await session.flush()
     else:
         sel = Select(

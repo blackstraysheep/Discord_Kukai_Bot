@@ -159,6 +159,12 @@ async def test_cast_select_updates_label(db_session):
     sel = await select_service.cast_select(db_session, kukai, selector_user_id=2, submission_id=sub_id, select_label_id=label2_id)
     assert sel.select_label_id == label2_id
 
+    from bot.repositories import select_repo
+
+    rows = await select_repo.get_selects_by_selector(db_session, kukai.id, 2)
+    assert len(rows) == 1
+    assert rows[0].select_label_id == label2_id
+
 
 @pytest.mark.asyncio
 async def test_cast_select_with_comment(db_session):
@@ -172,6 +178,38 @@ async def test_cast_select_with_comment(db_session):
     )
     assert sel.comment is not None
     assert sel.comment.comment == "素晴らしい句です"
+
+
+@pytest.mark.asyncio
+async def test_cast_select_empty_optional_comment_clears_existing_comment(db_session):
+    kukai = await _setup_selecting(db_session, comment_mode="optional")
+    sub_id = await _get_submission_id(db_session, kukai.id)
+    label_id = kukai.select_labels[0].id
+
+    await select_service.cast_select(
+        db_session,
+        kukai,
+        selector_user_id=2,
+        submission_id=sub_id,
+        select_label_id=label_id,
+        comment="消したいコメント",
+    )
+    sel = await select_service.cast_select(
+        db_session,
+        kukai,
+        selector_user_id=2,
+        submission_id=sub_id,
+        select_label_id=label_id,
+        comment="",
+    )
+    await db_session.flush()
+
+    from bot.repositories import select_repo
+
+    loaded = await select_repo.get_select(db_session, kukai.id, 2, sub_id)
+    assert loaded is not None
+    assert loaded.id == sel.id
+    assert loaded.comment is None
 
 
 @pytest.mark.asyncio

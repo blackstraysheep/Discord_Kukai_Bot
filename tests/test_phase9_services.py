@@ -239,3 +239,13 @@ async def test_import_payload_rejects_oversized_submission_text(db_session):
 
     with pytest.raises(ValidationError, match="submissions.text"):
         await export_service.import_payload(db_session, guild_id=1, payload=payload)
+
+
+@pytest.mark.asyncio
+async def test_import_payload_rejects_string_boolean_values(db_session):
+    kukai = await _make_kukai(db_session, entry_enabled=False)
+    payload = await export_service.export_payload(db_session, guild_id=1, kukai_id=kukai.id)
+    payload["kukais"][0]["kukai"]["author_reveal"] = "false"
+
+    with pytest.raises(ValidationError, match="author_reveal"):
+        await export_service.import_payload(db_session, guild_id=1, payload=payload)

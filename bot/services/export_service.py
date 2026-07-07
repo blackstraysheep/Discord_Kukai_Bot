@@ -406,6 +406,14 @@ def _import_int(
     return parsed
 
 
+def _import_bool(value: Any, name: str, *, default: bool = False) -> bool:
+    if value is None:
+        return default
+    if not isinstance(value, bool):
+        raise ValidationError(f"{name} は真偽値である必要があります。")
+    return value
+
+
 def _validate_text(value: Any, name: str, *, max_length: int = MAX_IMPORT_TEXT_LENGTH) -> None:
     if value is None:
         return
@@ -452,6 +460,16 @@ def _validate_import_payload(*, guild_id: int, bundles: list[Any]) -> None:
         state = source_kukai.get("state") or "draft"
         if state not in _KUKAI_STATES:
             raise ValidationError(f"{prefix}.state が不正です。")
+        for field, default in (
+            ("entry_enabled", True),
+            ("entry_approval", False),
+            ("submission_overflow", False),
+            ("submission_underflow", False),
+            ("points_enabled", True),
+            ("author_reveal", True),
+            ("author_reveal_zero", True),
+        ):
+            _import_bool(source_kukai.get(field), f"{prefix}.{field}", default=default)
         _import_int(source_kukai.get("min_participants", 0), f"{prefix}.min_participants", max_value=10000)
         _import_int(source_kukai.get("submission_min", 1), f"{prefix}.submission_min", min_value=1, max_value=1000)
         if source_kukai.get("submission_max") is not None:
@@ -487,6 +505,7 @@ def _validate_import_payload(*, guild_id: int, bundles: list[Any]) -> None:
         for row in _require_list(bundle.get("entries"), "entries"):
             _import_int(row.get("user_id"), "entries.user_id")
             _validate_text(row.get("haigo"), "entries.haigo", max_length=80)
+            _import_bool(row.get("is_special"), "entries.is_special", default=False)
             if (row.get("status") or "pending") not in _ENTRY_STATUSES:
                 raise ValidationError("entries.status が不正です。")
         for row in _require_list(bundle.get("participants"), "participants"):
@@ -496,6 +515,7 @@ def _validate_import_payload(*, guild_id: int, bundles: list[Any]) -> None:
             _import_int(row.get("id"), "submissions.id")
             _import_int(row.get("user_id"), "submissions.user_id")
             _validate_text(row.get("text"), "submissions.text")
+            _import_bool(row.get("is_discarded"), "submissions.is_discarded", default=False)
         for row in _require_list(bundle.get("published_submissions"), "published_submissions"):
             _import_int(row.get("submission_id"), "published_submissions.submission_id")
             _import_int(row.get("number"), "published_submissions.number", min_value=1, max_value=10000)
@@ -504,6 +524,7 @@ def _validate_import_payload(*, guild_id: int, bundles: list[Any]) -> None:
             _import_int(row.get("selector_user_id"), "selects.selector_user_id")
             _import_int(row.get("submission_id"), "selects.submission_id")
             _import_int(row.get("select_label_id"), "selects.select_label_id")
+            _import_bool(row.get("is_self_comment"), "selects.is_self_comment", default=False)
         for row in _require_list(bundle.get("select_comments"), "select_comments"):
             source_select_id = row.get("select_id", row.get("vote_id"))
             _import_int(source_select_id, "select_comments.select_id")
@@ -524,6 +545,8 @@ def _validate_import_payload(*, guild_id: int, bundles: list[Any]) -> None:
                 raise ValidationError("notification_schedules.target が不正です。")
             if row.get("channel_id") is not None:
                 _import_int(row.get("channel_id"), "notification_schedules.channel_id", min_value=-2)
+            _import_bool(row.get("mention"), "notification_schedules.mention", default=False)
+            _import_bool(row.get("fired"), "notification_schedules.fired", default=False)
         for row in _require_list(bundle.get("notification_logs"), "notification_logs"):
             _import_int(row.get("schedule_id"), "notification_logs.schedule_id")
             _import_int(row.get("target_count", 0), "notification_logs.target_count", max_value=100000)
@@ -575,8 +598,8 @@ async def import_payload(
                 source_kukai.get("selecting_close_at") or source_kukai.get("selecting_close_at")
             ),
             results_at=_str_to_dt(source_kukai.get("results_at")),
-            entry_enabled=bool(source_kukai.get("entry_enabled", True)),
-            entry_approval=bool(source_kukai.get("entry_approval", False)),
+            entry_enabled=_import_bool(source_kukai.get("entry_enabled"), "kukai.entry_enabled", default=True),
+            entry_approval=_import_bool(source_kukai.get("entry_approval"), "kukai.entry_approval", default=False),
             entry_mode=_normalize_entry_mode_value(source_kukai.get("entry_mode") or "manual"),
             min_participants=int(source_kukai.get("min_participants", 0)),
             min_participants_action=source_kukai.get("min_participants_action") or "admin",
@@ -586,8 +609,16 @@ async def import_payload(
                 if source_kukai.get("submission_max") is not None
                 else None
             ),
-            submission_overflow=bool(source_kukai.get("submission_overflow", False)),
-            submission_underflow=bool(source_kukai.get("submission_underflow", False)),
+            submission_overflow=_import_bool(
+                source_kukai.get("submission_overflow"),
+                "kukai.submission_overflow",
+                default=False,
+            ),
+            submission_underflow=_import_bool(
+                source_kukai.get("submission_underflow"),
+                "kukai.submission_underflow",
+                default=False,
+            ),
             submission_mode=source_kukai.get("submission_mode") or "manual",
             submission_incomplete=source_kukai.get("submission_incomplete") or "keep",
             selecting_mode=(
@@ -600,15 +631,23 @@ async def import_payload(
                 or source_kukai.get("selecting_incomplete")
                 or "keep"
             ),
-            points_enabled=bool(source_kukai.get("points_enabled", True)),
+            points_enabled=_import_bool(source_kukai.get("points_enabled"), "kukai.points_enabled", default=True),
             publish_mode=source_kukai.get("publish_mode") or "manual",
             result_mode=source_kukai.get("result_mode") or "manual",
             author_publication_mode=(
                 source_kukai.get("author_publication_mode")
-                or ("with_result" if bool(source_kukai.get("author_reveal", True)) else "never")
+                or (
+                    "with_result"
+                    if _import_bool(source_kukai.get("author_reveal"), "kukai.author_reveal", default=True)
+                    else "never"
+                )
             ),
-            author_reveal=bool(source_kukai.get("author_reveal", True)),
-            author_reveal_zero=bool(source_kukai.get("author_reveal_zero", True)),
+            author_reveal=_import_bool(source_kukai.get("author_reveal"), "kukai.author_reveal", default=True),
+            author_reveal_zero=_import_bool(
+                source_kukai.get("author_reveal_zero"),
+                "kukai.author_reveal_zero",
+                default=True,
+            ),
             result_display_default=source_kukai.get("result_display_default") or "score",
             notify_channel_id=source_kukai.get("notify_channel_id"),
             admin_thread_id=source_kukai.get("admin_thread_id"),
@@ -659,7 +698,7 @@ async def import_payload(
                     user_id=int(row["user_id"]),
                     haigo=row.get("haigo"),
                     status=row.get("status") or "pending",
-                    is_special=bool(row.get("is_special", False)),
+                    is_special=_import_bool(row.get("is_special"), "entries.is_special", default=False),
                     approved_by=row.get("approved_by"),
                     approved_at=_str_to_dt(row.get("approved_at")),
                 )
@@ -679,7 +718,7 @@ async def import_payload(
                 kukai_id=kukai.id,
                 user_id=int(row["user_id"]),
                 text=row.get("text") or "",
-                is_discarded=bool(row.get("is_discarded", False)),
+                is_discarded=_import_bool(row.get("is_discarded"), "submissions.is_discarded", default=False),
             )
             session.add(submission)
             await session.flush()
@@ -709,7 +748,7 @@ async def import_payload(
                 selector_user_id=int(row["selector_user_id"]),
                 submission_id=mapped_submission_id,
                 select_label_id=mapped_label_id,
-                is_self_comment=bool(row.get("is_self_comment", False)),
+                is_self_comment=_import_bool(row.get("is_self_comment"), "selects.is_self_comment", default=False),
             )
             session.add(sel)
             await session.flush()
@@ -756,8 +795,8 @@ async def import_payload(
                 offset_secs=int(row.get("offset_secs", 86400)),
                 target=row.get("target") or "all",
                 channel_id=row.get("channel_id"),
-                mention=bool(row.get("mention", False)),
-                fired=bool(row.get("fired", False)),
+                mention=_import_bool(row.get("mention"), "notification_schedules.mention", default=False),
+                fired=_import_bool(row.get("fired"), "notification_schedules.fired", default=False),
                 job_id=None,
             )
             session.add(schedule)

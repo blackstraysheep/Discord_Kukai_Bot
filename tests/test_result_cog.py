@@ -48,10 +48,32 @@ def test_result_pdf_requires_admin_before_public_results():
     assert _result_pdf_requires_admin(KukaiState.ENDED) is False
 
 
-def test_result_pdf_author_visibility_follows_reveal_flag():
+def test_result_pdf_author_visibility_requires_results_and_reveal_flag():
     assert _can_show_result_author(SimpleNamespace(author_reveal=False), True) is False
-    assert _can_show_result_author(SimpleNamespace(author_reveal=True), True) is True
-    assert _can_show_result_author(SimpleNamespace(author_reveal=True), False) is False
+    assert (
+        _can_show_result_author(
+            SimpleNamespace(author_reveal=True),
+            True,
+            state=KukaiState.RESULTS,
+        )
+        is True
+    )
+    assert (
+        _can_show_result_author(
+            SimpleNamespace(author_reveal=True),
+            True,
+            state=KukaiState.SELECTING_CLOSED,
+        )
+        is False
+    )
+    assert (
+        _can_show_result_author(
+            SimpleNamespace(author_reveal=True),
+            False,
+            state=KukaiState.RESULTS,
+        )
+        is False
+    )
 
 
 def test_submission_pdf_author_visibility_requires_results_and_reveal_flag():

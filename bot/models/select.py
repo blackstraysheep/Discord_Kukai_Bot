@@ -38,7 +38,12 @@ class Select(Base, TimestampMixin):
     )
 
     __table_args__ = (
-        UniqueConstraint("kukai_id", "selector_user_id", "submission_id", "select_label_id"),
+        UniqueConstraint(
+            "kukai_id",
+            "selector_user_id",
+            "submission_id",
+            name="uq_selects_kukai_selector_submission",
+        ),
     )
 
 
