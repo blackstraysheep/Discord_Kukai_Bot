@@ -6,6 +6,7 @@
 \usepackage{kintou}
 \usepackage{luatexja-ruby}
 {% raw %}
+\newenvironment{submissiontablewrap}{\noindent\hbox to \linewidth\bgroup}{\hss\egroup}
 \IfFontExistsTF{Noto Color Emoji}{%
   \newfontfamily\EmojiFont{Noto Color Emoji}[Renderer=HarfBuzz]%
 }{%
@@ -30,7 +31,7 @@
 \input{pdf_page_count.tex}
 \pagestyle{pdfpagefooter}
 {% endraw %}
-\geometry{margin=1.5cm}
+\geometry{top=1.5cm,bottom=1.5cm,left=1cm,right=1cm}
 
 \begin{document}
 {\gtfamily \large {{ title | tex_tcy }}\quad 投句一覧}%
@@ -38,7 +39,8 @@
 
 \hfill {{ date | tex_tcy }}
 
-{% if participants %}\hfill 参加者：{% for p in participants %}{{ p | tex }}{% if not loop.last %}・{% endif %}{% endfor %}
+{% if participants %}{% set participant_text = '参加者：' ~ (participants | join('・')) %}\noindent 参加者：{% for p in participants %}{{ p | tex }}{% if not loop.last %}・{% endif %}{% endfor %}\par
+{%- if participant_text | length <= 50 %}\vspace*{6mm}{% endif %}
 {% endif %}
 \vspace{2\baselineskip}
 
@@ -49,13 +51,13 @@
 {%- if not loop.first %}
 \newpage
 
-\begin{center}
 {\gtfamily \large {{ title | tex_tcy }}\quad 投句一覧}%
 {%- if kukai_theme %}\quad（兼題：{{ kukai_theme | tex }}）{% endif %}
-\end{center}
 
 \vspace{1\baselineskip}
 {% endif %}
+{%- if not loop.first %}\vspace*{23.5mm}{% endif %}
+\begin{submissiontablewrap}
 \begin{tabular}{|>{\centering\arraybackslash}p{1\zw}|>{\raggedright\arraybackslash}p{5\zw}|>{\raggedright\arraybackslash}p{26\zw}|>{\raggedright\arraybackslash}p{5\zw}|>{\raggedright\arraybackslash}p{5\zw}|}
 \hline
 \multicolumn{1}{|>{\centering\arraybackslash}p{1\zw}|}{№} &
@@ -64,8 +66,9 @@
 \multicolumn{1}{>{\centering\arraybackslash}m{5\zw}|}{作　者} &
 \multicolumn{1}{>{\centering\arraybackslash}m{5\zw}|}{\strut} \\ \hline
 {% for s in group -%}
-\hbox{\yoko {{ s.number }}} & \strut & {% if s.text %}\kintou{20}{ {{- s.text | tex_submission -}} }{% endif %} & { {{- s.author | tex if s.author -}} } & \strut \\ \hline
+\hbox{\yoko {{ s.number }}} & \strut & {% if s.text %}\kintou{20}{ {{- s.text | tex_submission -}} }{% else %}\kintou{20}{\phantom{春の海ひねもすのたりのたりかな}}{% endif %} & { {{- s.author | tex if s.author -}} } & \strut \\ \hline
 {% endfor %}
 \end{tabular}
+\end{submissiontablewrap}
 {% endfor %}
 \end{document}

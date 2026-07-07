@@ -265,6 +265,39 @@ class TestRenderSubmissionList:
         tex = _render_template("default", "submission_list.tex.j2", self._data())
         assert "芭蕉" in tex
 
+    def test_short_participants_reserve_two_columns(self):
+        tex = _render_template(
+            "default",
+            "submission_list.tex.j2",
+            self._data(participants=["芭蕉", "蕪村", "一茶", "子規"]),
+        )
+        assert r"\noindent 参加者：芭蕉・蕪村・一茶・子規\par" in tex
+        assert r"\vspace*{6mm}" in tex
+        assert r"\hfill 参加者" not in tex
+
+    def test_long_participants_do_not_add_short_reserve(self):
+        participants = [
+            "芭蕉",
+            "蕪村",
+            "一茶",
+            "子規",
+            "長谷川かな女",
+            "高浜虚子",
+            "川端茅舎",
+            "中村草田男",
+            "石田波郷",
+            "水原秋桜子",
+            "山口誓子",
+            "飯田蛇笏",
+            "富安風生",
+        ]
+        tex = _render_template(
+            "default",
+            "submission_list.tex.j2",
+            self._data(participants=participants),
+        )
+        assert r"\vspace*{6mm}" not in tex
+
     def test_no_author_when_none(self):
         data = self._data()
         data["submissions"] = [{"number": 1, "text": "古池や", "author": None}]
