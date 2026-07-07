@@ -11,6 +11,7 @@ import pytest
 
 from bot.services.pdf_service import (
     PdfError,
+    cleanup_temp_pdfs,
     _cleanup_expired_temp_pdfs,
     _extract_pdf_page_count,
     _format_date,
@@ -149,6 +150,18 @@ class TestTempPdfPublishing:
         assert removed == 1
         assert not old_pdf.exists()
         assert new_pdf.exists()
+
+    def test_cleanup_temp_pdfs_uses_configured_directory(self, tmp_path):
+        old_pdf = tmp_path / "old.pdf"
+        old_pdf.write_bytes(b"old")
+        now = 1_000_000.0
+        os.utime(old_pdf, (now - 90_000, now - 90_000))
+
+        with patch("bot.services.pdf_service.PDF_SERVE_DIR", tmp_path):
+            removed = cleanup_temp_pdfs(now=now)
+
+        assert removed == 1
+        assert not old_pdf.exists()
 
     @pytest.mark.asyncio
     async def test_publish_temp_cleans_expired_files_and_returns_url(self, tmp_path):

@@ -39,10 +39,18 @@ class KukaiBot(commands.Bot):
 
         from bot.scheduler.jobs import set_bot
         from bot.scheduler.setup import init_scheduler
+        from bot.services import pdf_service
 
         scheduler = init_scheduler(self.settings.scheduler_sync_db_url)
         set_bot(self)
         scheduler.start()
+
+        try:
+            removed = pdf_service.cleanup_temp_pdfs()
+            if removed:
+                logger.info("Cleaned expired temporary PDFs: removed=%d", removed)
+        except Exception:
+            logger.exception("Failed to clean expired temporary PDFs")
 
         for cog in COGS:
             try:
@@ -50,6 +58,7 @@ class KukaiBot(commands.Bot):
                 logger.info("Loaded cog: %s", cog)
             except Exception:
                 logger.exception("Failed to load cog: %s", cog)
+                raise
 
         from bot.ui.persistent_views import register_persistent_views
 

@@ -437,7 +437,7 @@ async def publish_temp(pdf_bytes: bytes, filename: str, kukai_id: int) -> str:
         raise PdfError(
             "PDF_SERVE_BASE_URL が設定されていないため一時URLを発行できません。"
         )
-    _cleanup_expired_temp_pdfs(PDF_SERVE_DIR)
+    cleanup_temp_pdfs()
     subdir = PDF_SERVE_DIR / str(kukai_id)
     subdir.mkdir(parents=True, exist_ok=True)
 
@@ -447,6 +447,11 @@ async def publish_temp(pdf_bytes: bytes, filename: str, kukai_id: int) -> str:
     out_path.write_bytes(pdf_bytes)
 
     return f"{PDF_SERVE_BASE_URL}/{kukai_id}/{out_path.name}"
+
+
+def cleanup_temp_pdfs(*, now: float | None = None) -> int:
+    """Remove expired PDF files from the configured temporary serve directory."""
+    return _cleanup_expired_temp_pdfs(PDF_SERVE_DIR, now=now)
 
 
 def _cleanup_expired_temp_pdfs(base_dir: Path, *, now: float | None = None) -> int:
