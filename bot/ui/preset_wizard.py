@@ -8,6 +8,7 @@ from bot.database import get_session
 from bot.services import preset_service, select_rule_service
 from bot.services.errors import ServiceError, ValidationError
 from bot.ui.common import ConfirmView
+from bot.ui.wizard.base import EXIT_NOTE
 from bot.utils.embed_builder import COLOR_INFO, error_embed, success_embed
 
 _OP_ADD = "add"
@@ -336,20 +337,13 @@ class PresetWizardView(discord.ui.View):
         else:
             target_text = "新規作成（対象選択不要）" if self.operation == _OP_ADD else "未選択"
             embed.add_field(name="対象", value=target_text, inline=True)
+        embed.set_footer(text=EXIT_NOTE)
         return embed
 
     def rebuild(self) -> None:
         self.clear_items()
         self.add_item(_ActionSelect(self))
         self.add_item(_PresetSelect(self))
-
-        close_btn = discord.ui.Button(
-            label="閉じる",
-            style=discord.ButtonStyle.danger,
-            row=2,
-        )
-        close_btn.callback = self._on_close
-        self.add_item(close_btn)
 
         refresh_btn = discord.ui.Button(
             label="再読込",
@@ -455,16 +449,6 @@ class PresetWizardView(discord.ui.View):
     async def _on_refresh(self, interaction: discord.Interaction) -> None:
         await self.reload()
         await self.respond_edit(interaction)
-
-    async def _on_close(self, interaction: discord.Interaction) -> None:
-        try:
-            await interaction.response.edit_message(
-                embed=discord.Embed(description="プリセットGUIを閉じました。", color=COLOR_INFO),
-                view=None,
-            )
-        except discord.NotFound:
-            self.stop()
-
 
 async def open_preset_wizard(interaction: discord.Interaction) -> None:
     assert interaction.guild is not None

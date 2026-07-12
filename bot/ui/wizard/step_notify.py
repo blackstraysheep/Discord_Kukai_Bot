@@ -7,7 +7,7 @@ import discord
 from bot.repositories import notification_preset_repo
 from bot.services import notification_preset_service
 from bot.database import get_session
-from bot.ui.wizard.base import STEP_COUNT, cancel_wizard, goto_step
+from bot.ui.wizard.base import STEP_COUNT, goto_step
 from bot.ui.wizard.wizard_state import WizardState, set_wizard
 from bot.utils.bulk_parser import BulkParseError, parse_reminder_spec
 
@@ -134,10 +134,6 @@ class StepNotifyView(discord.ui.View):
         clear_btn.callback = self._clear
         self.add_item(clear_btn)
 
-        cancel_btn = discord.ui.Button(label="❌ キャンセル", style=discord.ButtonStyle.danger, row=4)
-        cancel_btn.callback = self._cancel
-        self.add_item(cancel_btn)
-
         back_btn = discord.ui.Button(label="← 戻る", style=discord.ButtonStyle.secondary, row=4)
         back_btn.callback = self._back
         self.add_item(back_btn)
@@ -163,9 +159,6 @@ class StepNotifyView(discord.ui.View):
     async def _next(self, interaction: discord.Interaction) -> None:
         self.state.step = 9
         await goto_step(interaction, self.state)
-
-    async def _cancel(self, interaction: discord.Interaction) -> None:
-        await cancel_wizard(interaction, self.state)
 
 
 class NotificationModal(discord.ui.Modal, title="通知設定"):

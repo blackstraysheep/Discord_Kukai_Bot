@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import discord
 
-from bot.ui.wizard.base import STEP_COUNT, cancel_wizard, goto_step
+from bot.ui.wizard.base import STEP_COUNT, goto_step
 from bot.ui.wizard.wizard_state import WizardState, set_wizard
 from bot.utils.datetime_utils import format_jst, parse_datetime, to_jst
 
@@ -46,10 +46,6 @@ class StepVoiceView(discord.ui.View):
             schedule_btn.callback = self._schedule
             self.add_item(schedule_btn)
 
-        cancel_btn = discord.ui.Button(label="❌ キャンセル", style=discord.ButtonStyle.danger, row=4)
-        cancel_btn.callback = self._cancel
-        self.add_item(cancel_btn)
-
         back_btn = discord.ui.Button(label="← 戻る", style=discord.ButtonStyle.secondary, row=4)
         back_btn.callback = self._back
         self.add_item(back_btn)
@@ -84,9 +80,6 @@ class StepVoiceView(discord.ui.View):
     async def _next(self, interaction: discord.Interaction) -> None:
         self.state.step = 8
         await goto_step(interaction, self.state)
-
-    async def _cancel(self, interaction: discord.Interaction) -> None:
-        await cancel_wizard(interaction, self.state)
 
 
 class _VoiceChannelSelect(discord.ui.ChannelSelect):

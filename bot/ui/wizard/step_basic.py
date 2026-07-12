@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import discord
 
-from bot.ui.wizard.base import STEP_COUNT, cancel_wizard, goto_step
+from bot.ui.wizard.base import STEP_COUNT, goto_step
 from bot.ui.wizard.wizard_state import WizardState, set_wizard
 
 
@@ -73,14 +73,6 @@ class StepBasicView(discord.ui.View):
             channel_name_btn.callback = self._set_channel_name
             self.add_item(channel_name_btn)
 
-        cancel_btn = discord.ui.Button(
-            label="❌ キャンセル",
-            style=discord.ButtonStyle.danger,
-            row=4,
-        )
-        cancel_btn.callback = self._cancel
-        self.add_item(cancel_btn)
-
         next_btn = discord.ui.Button(
             label="次へ ➜",
             style=discord.ButtonStyle.success,
@@ -99,9 +91,6 @@ class StepBasicView(discord.ui.View):
     async def _next(self, interaction: discord.Interaction) -> None:
         self.state.step = 2
         await goto_step(interaction, self.state)
-
-    async def _cancel(self, interaction: discord.Interaction) -> None:
-        await cancel_wizard(interaction, self.state)
 
 
 class _ChannelModeSelect(discord.ui.Select):

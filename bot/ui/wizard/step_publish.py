@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import discord
 
-from bot.ui.wizard.base import STEP_COUNT, cancel_wizard, goto_step
+from bot.ui.wizard.base import STEP_COUNT, goto_step
 from bot.ui.wizard.wizard_state import WizardState, set_wizard
 
 
@@ -189,12 +189,6 @@ class StepPublishView(discord.ui.View):
         self.add_item(_AuthorPublicationModeSelect(state))
         self.add_item(_AuthorRevealZeroSelect(state))
 
-        cancel_btn = discord.ui.Button(
-            label="❌ キャンセル", style=discord.ButtonStyle.danger, row=4
-        )
-        cancel_btn.callback = self._cancel
-        self.add_item(cancel_btn)
-
         back_btn = discord.ui.Button(
             label="← 戻る", style=discord.ButtonStyle.secondary, row=4
         )
@@ -215,5 +209,3 @@ class StepPublishView(discord.ui.View):
         self.state.step = 7
         await goto_step(interaction, self.state)
 
-    async def _cancel(self, interaction: discord.Interaction) -> None:
-        await cancel_wizard(interaction, self.state)

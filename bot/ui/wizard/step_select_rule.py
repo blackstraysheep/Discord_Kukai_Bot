@@ -9,7 +9,7 @@ import discord
 from bot.database import get_session
 from bot.services import select_rule_service
 from bot.services.errors import ServiceError
-from bot.ui.wizard.base import STEP_COUNT, cancel_wizard, goto_step
+from bot.ui.wizard.base import STEP_COUNT, goto_step
 from bot.ui.wizard.wizard_state import WizardState, set_wizard
 from bot.utils.bulk_parser import BulkParseError, parse_label_spec
 
@@ -314,10 +314,6 @@ class StepSelectRuleView(discord.ui.View):
         custom_btn.callback = self._edit_custom_labels
         self.add_item(custom_btn)
 
-        cancel_btn = discord.ui.Button(label="❌ キャンセル", style=discord.ButtonStyle.danger, row=3)
-        cancel_btn.callback = self._cancel
-        self.add_item(cancel_btn)
-
         back_btn = discord.ui.Button(label="← 戻る", style=discord.ButtonStyle.secondary, row=3)
         back_btn.callback = self._back
         self.add_item(back_btn)
@@ -359,5 +355,3 @@ class StepSelectRuleView(discord.ui.View):
         self.state.step = 6
         await goto_step(interaction, self.state)
 
-    async def _cancel(self, interaction: discord.Interaction) -> None:
-        await cancel_wizard(interaction, self.state)

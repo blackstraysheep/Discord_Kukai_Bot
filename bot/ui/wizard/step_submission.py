@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import discord
 
-from bot.ui.wizard.base import STEP_COUNT, cancel_wizard, goto_step
+from bot.ui.wizard.base import STEP_COUNT, goto_step
 from bot.ui.wizard.wizard_state import WizardState, set_wizard
 
 def build(state: WizardState) -> tuple[discord.Embed, discord.ui.View]:
@@ -32,12 +32,6 @@ class StepSubmissionView(discord.ui.View):
         detail_btn.callback = self._detail
         self.add_item(detail_btn)
 
-        cancel_btn = discord.ui.Button(
-            label="❌ キャンセル", style=discord.ButtonStyle.danger, row=1
-        )
-        cancel_btn.callback = self._cancel
-        self.add_item(cancel_btn)
-
         back_btn = discord.ui.Button(
             label="← 戻る", style=discord.ButtonStyle.secondary, row=1
         )
@@ -60,9 +54,6 @@ class StepSubmissionView(discord.ui.View):
     async def _next(self, interaction: discord.Interaction) -> None:
         self.state.step = 5
         await goto_step(interaction, self.state)
-
-    async def _cancel(self, interaction: discord.Interaction) -> None:
-        await cancel_wizard(interaction, self.state)
 
 
 class SubmissionDetailModal(discord.ui.Modal, title="投句数制限の設定"):

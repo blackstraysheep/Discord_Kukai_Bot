@@ -7,9 +7,10 @@ import discord
 from bot.database import get_session
 from bot.repositories import notification_preset_repo
 from bot.services import notification_preset_service
-from bot.ui.wizard.wizard_state import WizardState, clear_wizard, set_wizard
+from bot.ui.wizard.wizard_state import WizardState, set_wizard
 
 STEP_COUNT = 9
+EXIT_NOTE = "中止する場合はこのメッセージを削除してください。"
 STEP_NAMES = {
     1: "基本情報",
     2: "エントリー設定",
@@ -44,7 +45,17 @@ async def goto_step(
 async def render_step(state: WizardState) -> tuple[discord.Embed, discord.ui.View]:
     if state.step == 8:
         await _ensure_notify_presets(state)
-    return _make_step(state)
+    embed, view = _make_step(state)
+    _append_exit_note(embed)
+    return embed, view
+
+
+def _append_exit_note(embed: discord.Embed) -> None:
+    footer_text = embed.footer.text or ""
+    if EXIT_NOTE in footer_text:
+        return
+    text = f"{footer_text} / {EXIT_NOTE}" if footer_text else EXIT_NOTE
+    embed.set_footer(text=text)
 
 
 async def _ensure_notify_presets(state: WizardState) -> None:
@@ -90,13 +101,3 @@ def _make_step(state: WizardState) -> tuple[discord.Embed, discord.ui.View]:
         raise ValueError(f"Unknown wizard step: {state.step}")
     return build(state)  # type: ignore[possibly-undefined]
 
-
-async def cancel_wizard(interaction: discord.Interaction, state: WizardState) -> None:
-    clear_wizard(state.user_id)
-    await interaction.response.edit_message(
-        embed=discord.Embed(
-            description="句会作成をキャンセルしました。",
-            color=discord.Color.red(),
-        ),
-        view=None,
-    )

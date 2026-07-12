@@ -12,7 +12,7 @@ from bot.database import get_session
 from bot.services import admin_notice_service, kukai_service, notification_service, voice_service
 from bot.services.errors import ServiceError
 from bot.models.voice_session import VoiceSession
-from bot.ui.wizard.base import STEP_COUNT, cancel_wizard, goto_step
+from bot.ui.wizard.base import STEP_COUNT, goto_step
 from bot.ui.wizard.wizard_state import WizardState, clear_wizard
 from bot.utils.datetime_utils import format_jst
 from bot.utils.embed_builder import COLOR_INFO, COLOR_SUCCESS, build_select_summary, error_embed
@@ -140,12 +140,6 @@ class StepConfirmView(discord.ui.View):
         super().__init__(timeout=900)
         self.state = state
 
-        cancel_btn = discord.ui.Button(
-            label="❌ キャンセル", style=discord.ButtonStyle.danger, row=0
-        )
-        cancel_btn.callback = self._cancel
-        self.add_item(cancel_btn)
-
         back_btn = discord.ui.Button(
             label="← 戻る", style=discord.ButtonStyle.secondary, row=0
         )
@@ -164,9 +158,6 @@ class StepConfirmView(discord.ui.View):
     async def _back(self, interaction: discord.Interaction) -> None:
         self.state.step = 8
         await goto_step(interaction, self.state)
-
-    async def _cancel(self, interaction: discord.Interaction) -> None:
-        await cancel_wizard(interaction, self.state)
 
     async def _confirm(self, interaction: discord.Interaction) -> None:
         await interaction.response.defer(ephemeral=True)

@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 
 import discord
 
-from bot.ui.wizard.base import STEP_COUNT, cancel_wizard, goto_step
+from bot.ui.wizard.base import STEP_COUNT, goto_step
 from bot.ui.wizard.wizard_state import WizardState, set_wizard
 from bot.utils.datetime_utils import JST, format_jst, parse_datetime
 
@@ -56,14 +56,6 @@ class StepScheduleView(discord.ui.View):
         fill_btn.callback = self._fill
         self.add_item(fill_btn)
 
-        cancel_btn = discord.ui.Button(
-            label="❌ キャンセル",
-            style=discord.ButtonStyle.danger,
-            row=1,
-        )
-        cancel_btn.callback = self._cancel
-        self.add_item(cancel_btn)
-
         back_btn = discord.ui.Button(
             label="← 戻る",
             style=discord.ButtonStyle.secondary,
@@ -91,9 +83,6 @@ class StepScheduleView(discord.ui.View):
     async def _next(self, interaction: discord.Interaction) -> None:
         self.state.step = 4
         await goto_step(interaction, self.state)
-
-    async def _cancel(self, interaction: discord.Interaction) -> None:
-        await cancel_wizard(interaction, self.state)
 
 
 class StepScheduleModal(discord.ui.Modal, title="日程の入力"):
