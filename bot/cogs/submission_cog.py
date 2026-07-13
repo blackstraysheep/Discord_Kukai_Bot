@@ -8,7 +8,12 @@ from bot.database import get_session
 from bot.services import kukai_service, submission_service
 from bot.utils.channel import effective_channel_id
 from bot.services.errors import ServiceError
-from bot.ui.submission_view import SubmissionView, _submissions_embed
+from bot.ui.submission_view import (
+    SubmissionView,
+    _submissions_embed,
+    build_bulk_submission_embed,
+    submit_bulk_poems,
+)
 from bot.utils.embed_builder import error_embed
 
 
@@ -59,8 +64,6 @@ class SubmissionCog(commands.Cog):
             return
 
         await interaction.response.defer(ephemeral=True)
-        accepted = 0
-        over_limit_count = 0
         try:
             async with get_session() as session:
                 kukai = await kukai_service.resolve_kukai_in_channel(
@@ -69,25 +72,17 @@ class SubmissionCog(commands.Cog):
                     channel_id=effective_channel_id(interaction),
                     kukai_id=kukai_id,
                 )
-                for poem in poems:
-                    _, over_limit = await submission_service.submit(
-                        session, kukai, interaction.user.id, poem
-                    )
-                    accepted += 1
-                    if over_limit:
-                        over_limit_count += 1
-
-                subs = await submission_service.list_user_submissions(
-                    session, kukai.id, interaction.user.id
+                result = await submit_bulk_poems(
+                    session,
+                    kukai,
+                    interaction.user.id,
+                    poems,
                 )
 
-            embed = _submissions_embed(kukai, subs)
-            embed.description = f"{accepted}句を登録しました。\n\n{embed.description or ''}"
-            if over_limit_count:
-                embed.description += (
-                    f"\n⚠️ {over_limit_count}句は上限（{kukai.submission_max}句）超過扱いです。"
-                )
-            await interaction.followup.send(embed=embed, ephemeral=True)
+            await interaction.followup.send(
+                embed=build_bulk_submission_embed(kukai, result),
+                ephemeral=True,
+            )
         except ServiceError as e:
             await interaction.followup.send(embed=error_embed(str(e)), ephemeral=True)
 

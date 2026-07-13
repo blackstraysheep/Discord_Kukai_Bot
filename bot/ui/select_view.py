@@ -13,6 +13,7 @@ from bot.models.select_rule import SelectLabel
 from bot.repositories import submission_repo, select_repo
 from bot.services import kukai_service, select_service
 from bot.services.errors import ServiceError
+from bot.state_machine.states import KukaiState
 from bot.utils.embed_builder import COLOR_INFO, COLOR_SUCCESS, error_embed
 from bot.utils.submission_markup import discord_safe_submission_text, render_submission_for_discord
 from bot.utils.text import discord_safe
@@ -45,6 +46,53 @@ async def load_select_data(
     selects_by_sub = {sel.submission_id: sel for sel in selects}
     overall = await select_repo.get_overall_comment(session, kukai_id, selector_user_id)
     return pub_subs, labels, selects_by_sub, (overall.comment if overall else "")
+
+
+async def build_select_entry_response(
+    session,
+    kukai,
+    selector_user_id: int,
+) -> tuple[discord.Embed, discord.ui.View | None]:
+    if KukaiState.from_value(kukai.state) != KukaiState.SELECTING_OPEN:
+        return error_embed("現在選句を受け付けていません。"), None
+
+    pub_subs, labels, selects_by_sub, overall_comment = await load_select_data(
+        session, kukai.id, selector_user_id
+    )
+    if not any(lbl.label == _AUTHOR_COMMENT_LABEL for lbl in labels):
+        session.add(
+            SelectLabel(
+                kukai_id=kukai.id,
+                template_id=None,
+                display_order=999,
+                label=_AUTHOR_COMMENT_LABEL,
+                point=0,
+                rank_priority=999,
+                min_count=0,
+                max_count=None,
+                comment_mode="required",
+            )
+        )
+        await session.flush()
+        pub_subs, labels, selects_by_sub, overall_comment = await load_select_data(
+            session, kukai.id, selector_user_id
+        )
+
+    if not pub_subs:
+        return discord.Embed(description="公開済みの投句がありません。", color=COLOR_INFO), None
+
+    if not labels:
+        return error_embed("選句ラベルが設定されていません。管理者にお問い合わせください。"), None
+
+    view = SelectView(
+        kukai,
+        pub_subs,
+        labels,
+        selects_by_sub,
+        overall_comment=overall_comment,
+        selector_user_id=selector_user_id,
+    )
+    return view.build_embed(), view
 
 
 def _select_snapshot(pub_subs: list[PublishedSubmission], selects_by_sub: dict[int, Select], overall_comment: str) -> str:

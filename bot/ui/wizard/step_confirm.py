@@ -15,7 +15,11 @@ from bot.models.voice_session import VoiceSession
 from bot.ui.wizard.base import STEP_COUNT, goto_step
 from bot.ui.wizard.wizard_state import WizardState, clear_wizard
 from bot.utils.datetime_utils import format_jst
-from bot.utils.embed_builder import COLOR_INFO, COLOR_SUCCESS, build_select_summary, error_embed
+from bot.utils.embed_builder import error_embed
+from bot.utils.kukai_creation import (
+    build_created_kukai_success_embed,
+    post_created_kukai_channel_messages,
+)
 
 logger = logging.getLogger(__name__)
 AUTHOR_PUBLICATION_LABELS = {
@@ -162,8 +166,6 @@ class StepConfirmView(discord.ui.View):
     async def _confirm(self, interaction: discord.Interaction) -> None:
         await interaction.response.defer(ephemeral=True)
         state = self.state
-        entry_mode_labels = {"manual": "手動", "auto": "自動", "full_auto": "自動"}
-        sub_mode_labels = {"manual": "手動", "semi_auto": "半自動", "full_auto": "全自動"}
         guild = interaction.guild
         assert guild is not None
 
@@ -372,85 +374,38 @@ class StepConfirmView(discord.ui.View):
 
         clear_wizard(state.user_id)
 
-        success_description = (
-            f"句会「**{kukai_title}**」を作成しました。\n"
-            f"チャンネル: {channel.mention}\n"
-            f"句会ID: `{kukai_id}`\n\n"
-            "投句受付は `/kukai proceed` で開始します。\n"
-            "このウィザードは完了しました（再操作不可）。"
-        )
-        if name_collision_warning:
-            success_description += f"\n\n{name_collision_warning}"
-        if schedule_warning:
-            success_description += f"\n\n⚠️ {schedule_warning}"
-        if panel_warning:
-            success_description += f"\n\n⚠️ {panel_warning}"
-        success_embed_ = discord.Embed(
-            title="✅ 句会作成完了",
-            description=success_description,
-            color=COLOR_SUCCESS,
-        )
-        await interaction.edit_original_response(embed=success_embed_, view=None)
-
-        # Post info embed to the new channel
-        sub_str = format_jst(state.submission_close_at) if state.submission_close_at else "未定"
-        selecting_str = format_jst(state.selecting_close_at) if state.selecting_close_at else "未定"
-        info = discord.Embed(
-            title=f"📋 {kukai_title}",
-            description=state.description or "",
-            color=COLOR_INFO,
-        )
-        if state.theme:
-            info.add_field(name="題", value=state.theme, inline=True)
-        summary = build_select_summary(
-            state.submission_min, state.submission_max, state.select_label_specs,
-            override_text=summary_override,
-        )
-        info.add_field(name="句数", value=summary, inline=False)
-        if state.entry_enabled:
-            entry_deadline = format_jst(state.entry_close_at) if state.entry_close_at else "未定"
-            info.add_field(
-                name=f"エントリー締切（{entry_mode_labels.get(state.entry_mode, state.entry_mode)}）",
-                value=entry_deadline,
-                inline=False,
+        channel_warning: str | None = None
+        try:
+            assert isinstance(channel, discord.TextChannel)
+            await post_created_kukai_channel_messages(
+                guild=guild,
+                channel=channel,
+                kukai=kukai,
+                select_label_specs=state.select_label_specs,
+                summary_override=summary_override,
+                voice_channel_id=state.voice_channel_id if state.voice_enabled else None,
+                voice_start_at=state.voice_start_at if state.voice_enabled else None,
+                voice_end_at=state.voice_end_at if state.voice_enabled else None,
             )
-        info.add_field(
-            name=f"投句締切（{sub_mode_labels.get(state.submission_mode, state.submission_mode)}）",
-            value=sub_str,
-            inline=False,
-        )
-        info.add_field(
-            name=f"選句締切（{sub_mode_labels.get(state.selecting_mode, state.selecting_mode)}）",
-            value=selecting_str,
-            inline=False,
-        )
-        if state.voice_enabled and state.voice_channel_id and state.voice_start_at:
-            voice_value = f"開始: {format_jst(state.voice_start_at)}\n場所: <#{state.voice_channel_id}>"
-            if state.voice_end_at:
-                voice_value += f"\n終了: {format_jst(state.voice_end_at)}"
-            info.add_field(name="ボイス句会", value=voice_value, inline=False)
-        info.set_footer(text=f"句会ID: {kukai_id}")
-        await channel.send(embed=info)
+        except discord.Forbidden:
+            channel_warning = "開催チャンネルへの投稿権限がありません。"
+        except discord.HTTPException:
+            channel_warning = "開催チャンネルへの初期案内投稿に失敗しました。"
 
-        if state.entry_enabled:
-            from bot.cogs.kukai_cog import StageActionView
-            from bot.state_machine.states import KukaiState
-
-            entry_embed = discord.Embed(
-                description=f"句会「**{kukai_title}**」の **エントリー受付** を開始しました。",
-                color=COLOR_INFO,
-            )
-            if state.entry_close_at:
-                entry_embed.add_field(
-                    name=f"エントリー締切（{entry_mode_labels.get(state.entry_mode, state.entry_mode)}）",
-                    value=format_jst(state.entry_close_at),
-                    inline=False,
-                )
-            entry_embed.set_footer(text=f"句会ID: {kukai_id}")
-            await channel.send(
-                embed=entry_embed,
-                view=StageActionView(kukai_id, KukaiState.ENTRY_OPEN),
-            )
+        warnings = [warning for warning in [name_collision_warning, schedule_warning, panel_warning, channel_warning] if warning]
+        await interaction.edit_original_response(
+            embed=build_created_kukai_success_embed(
+                title=kukai_title,
+                channel_mention=channel.mention,
+                kukai_id=kukai_id,
+                notes=[
+                    "投句受付は `/kukai proceed` で開始します。",
+                    "このウィザードは完了しました（再操作不可）。",
+                ],
+                warnings=warnings,
+            ),
+            view=None,
+        )
 
         if interaction.channel and interaction.channel.id != channel.id:
             try:

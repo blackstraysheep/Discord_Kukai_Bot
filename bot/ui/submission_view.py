@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import discord
@@ -16,6 +17,13 @@ if TYPE_CHECKING:
     from bot.models.submission import Submission
 
 GUI_BULK_LIMIT = 5
+
+
+@dataclass(frozen=True)
+class BulkSubmissionResult:
+    accepted: int
+    over_limit_count: int
+    submissions: list[Submission]
 
 
 def _submissions_embed(kukai, subs: list[Submission]) -> discord.Embed:
@@ -46,6 +54,40 @@ def _submissions_embed(kukai, subs: list[Submission]) -> discord.Embed:
     if kukai.submission_max is None or kukai.submission_max > GUI_BULK_LIMIT:
         footer += f"　|　GUIでは一度に{GUI_BULK_LIMIT}句まで追加できます"
     embed.set_footer(text=footer)
+    return embed
+
+
+async def submit_bulk_poems(
+    session,
+    kukai,
+    user_id: int,
+    poems: list[str],
+    *,
+    haigo: str | None = None,
+) -> BulkSubmissionResult:
+    accepted = 0
+    over_limit_count = 0
+    for poem in poems:
+        _, over_limit = await submission_service.submit(session, kukai, user_id, poem, haigo=haigo)
+        accepted += 1
+        if over_limit:
+            over_limit_count += 1
+
+    subs = await submission_service.list_user_submissions(session, kukai.id, user_id)
+    return BulkSubmissionResult(
+        accepted=accepted,
+        over_limit_count=over_limit_count,
+        submissions=subs,
+    )
+
+
+def build_bulk_submission_embed(kukai, result: BulkSubmissionResult) -> discord.Embed:
+    embed = _submissions_embed(kukai, result.submissions)
+    embed.description = f"{result.accepted}句を登録しました。\n\n{embed.description or ''}"
+    if result.over_limit_count:
+        embed.description += (
+            f"\n⚠️ {result.over_limit_count}句は上限（{kukai.submission_max}句）超過扱いです。"
+        )
     return embed
 
 
@@ -119,38 +161,26 @@ class SubmitBulkModal(discord.ui.Modal):
             )
             return
 
-        accepted = 0
-        over_limit_count = 0
         try:
             async with get_session() as session:
                 kukai = await kukai_service.get_kukai(session, self.kukai_id, interaction.guild.id)
                 haigo = self._haigo_input.value.strip() if self._haigo_input is not None else None
-                for poem in poems:
-                    _, over_limit = await submission_service.submit(
-                        session, kukai, interaction.user.id, poem, haigo=haigo
-                    )
-                    accepted += 1
-                    if over_limit:
-                        over_limit_count += 1
-                subs = await submission_service.list_user_submissions(
-                    session, kukai.id, interaction.user.id
+                result = await submit_bulk_poems(
+                    session,
+                    kukai,
+                    interaction.user.id,
+                    poems,
+                    haigo=haigo,
                 )
-            embed = _submissions_embed(kukai, subs)
-            embed.description = (
-                f"{accepted}句を追加しました。\n\n{embed.description or ''}"
-            )
-            if over_limit_count:
-                embed.description += (
-                    f"\n⚠️ {over_limit_count}句は上限（{kukai.submission_max}句）超過扱いです。"
-                )
+            embed = build_bulk_submission_embed(kukai, result)
             await interaction.edit_original_response(
                 embed=embed,
-                view=SubmissionView(self.kukai_id, subs, kukai),
+                view=SubmissionView(self.kukai_id, result.submissions, kukai),
             )
             await _send_submission_status_message(
                 interaction,
                 title="✅ 投句を登録しました",
-                subs=subs,
+                subs=result.submissions,
             )
         except ServiceError as e:
             await interaction.followup.send(embed=error_embed(str(e)), ephemeral=True)

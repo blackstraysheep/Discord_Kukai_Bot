@@ -11,7 +11,7 @@ from bot.repositories import submission_repo
 from bot.services import kukai_service, select_service
 from bot.services.errors import ServiceError
 from bot.state_machine.states import KukaiState
-from bot.ui.select_view import SelectView, load_select_data
+from bot.ui.select_view import build_select_entry_response
 from bot.utils.bulk_parser import BulkParseError, parse_fields
 from bot.utils.channel import effective_channel_id
 from bot.utils.embed_builder import COLOR_INFO, error_embed
@@ -33,62 +33,9 @@ class SelectCog(commands.Cog):
                     channel_id=effective_channel_id(interaction),
                     kukai_id=kukai_id,
                 )
-                if KukaiState.from_value(kukai.state) != KukaiState.SELECTING_OPEN:
-                    await interaction.response.send_message(
-                        embed=error_embed("現在選句を受け付けていません。"), ephemeral=True
-                    )
-                    return
+                embed, view = await build_select_entry_response(session, kukai, interaction.user.id)
 
-                pub_subs, labels, selects_by_sub, overall_comment = await load_select_data(
-                    session, kukai.id, interaction.user.id
-                )
-                if not any(lbl.label == "作者コメント" for lbl in labels):
-                    session.add(
-                        SelectLabel(
-                            kukai_id=kukai.id,
-                            template_id=None,
-                            display_order=999,
-                            label="作者コメント",
-                            point=0,
-                            rank_priority=999,
-                            min_count=0,
-                            max_count=None,
-                            comment_mode="required",
-                        )
-                    )
-                    await session.flush()
-                    pub_subs, labels, selects_by_sub, overall_comment = await load_select_data(
-                        session, kukai.id, interaction.user.id
-                    )
-
-            if not pub_subs:
-                await interaction.response.send_message(
-                    embed=discord.Embed(
-                        description="公開済みの投句がありません。",
-                        color=COLOR_INFO,
-                    ),
-                    ephemeral=True,
-                )
-                return
-
-            if not labels:
-                await interaction.response.send_message(
-                    embed=error_embed("選句ラベルが設定されていません。管理者にお問い合わせください。"),
-                    ephemeral=True,
-                )
-                return
-
-            view = SelectView(
-                kukai,
-                pub_subs,
-                labels,
-                selects_by_sub,
-                overall_comment=overall_comment,
-                selector_user_id=interaction.user.id,
-            )
-            await interaction.response.send_message(
-                embed=view.build_embed(), view=view, ephemeral=True
-            )
+            await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
         except ServiceError as e:
             await interaction.response.send_message(embed=error_embed(str(e)), ephemeral=True)
 

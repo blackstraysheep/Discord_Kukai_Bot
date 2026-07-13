@@ -53,6 +53,10 @@ from bot.utils.embed_builder import (
     error_embed,
     success_embed,
 )
+from bot.utils.kukai_creation import (
+    build_created_kukai_success_embed,
+    post_created_kukai_channel_messages,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -161,55 +165,12 @@ class StageActionView(discord.ui.View):
                         return
 
                     if self.state == KukaiState.SELECTING_OPEN:
-                        if current != KukaiState.SELECTING_OPEN:
-                            await interaction.response.send_message(
-                                embed=error_embed("現在は選句受付中ではありません。"),
-                                ephemeral=True,
-                            )
-                            return
-                        from bot.models.select_rule import SelectLabel
-                        from bot.ui.select_view import SelectView, load_select_data
+                        from bot.ui.select_view import build_select_entry_response
 
-                        pub_subs, labels, selects_by_sub, overall_comment = await load_select_data(
-                            session, kukai.id, interaction.user.id
+                        embed, view = await build_select_entry_response(
+                            session, kukai, interaction.user.id
                         )
-                        if not any(lbl.label == "作者コメント" for lbl in labels):
-                            session.add(
-                                SelectLabel(
-                                    kukai_id=kukai.id,
-                                    template_id=None,
-                                    display_order=999,
-                                    label="作者コメント",
-                                    point=0,
-                                    rank_priority=999,
-                                    min_count=0,
-                                    max_count=None,
-                                    comment_mode="required",
-                                )
-                            )
-                            await session.flush()
-                            pub_subs, labels, selects_by_sub, overall_comment = await load_select_data(
-                                session, kukai.id, interaction.user.id
-                            )
-                        if not pub_subs:
-                            await interaction.response.send_message(
-                                embed=discord.Embed(description="公開済みの投句がありません。", color=COLOR_INFO),
-                                ephemeral=True,
-                            )
-                            return
-                        view = SelectView(
-                            kukai,
-                            pub_subs,
-                            labels,
-                            selects_by_sub,
-                            overall_comment=overall_comment,
-                            selector_user_id=interaction.user.id,
-                        )
-                        await interaction.response.send_message(
-                            embed=view.build_embed(),
-                            view=view,
-                            ephemeral=True,
-                        )
+                        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
                         return
 
             except ServiceError as e:
@@ -682,78 +643,32 @@ class KukaiCog(commands.Cog):
                     if vs is not None:
                         vs.discord_event_id = event_id
 
-        info = discord.Embed(
-            title=f"📋 {kukai_title}",
-            description=first_value(fields, "description") or "",
-            color=COLOR_INFO,
-        )
-        if first_value(fields, "theme"):
-            info.add_field(name="題", value=first_value(fields, "theme"), inline=True)
-        info.add_field(
-            name="句数",
-            value=build_select_summary(
-                submission_min, submission_max, select_label_specs,
-                override_text=bulk_summary_override,
-            ),
-            inline=False,
-        )
-        if entry_enabled and entry_close_at:
-            info.add_field(
-                name=f"エントリー締切（{_entry_mode_label(entry_mode)}）",
-                value=format_jst(entry_close_at),
-                inline=False,
-            )
-        if submission_open_at:
-            info.add_field(
-                name="投句開始",
-                value=format_jst(submission_open_at),
-                inline=False,
-            )
-        info.add_field(
-            name=f"投句締切（{_mode_label(submission_mode)}）",
-            value=format_jst(submission_close_at),
-            inline=False,
-        )
-        info.add_field(
-            name=f"選句締切（{_mode_label(selecting_mode)}）",
-            value=format_jst(selecting_close_at),
-            inline=False,
-        )
-        if voice_enabled and voice_channel_id is not None and voice_start_at is not None:
-            voice_value = f"開始: {format_jst(voice_start_at)}\n場所: <#{voice_channel_id}>"
-            if voice_end_at is not None:
-                voice_value += f"\n終了: {format_jst(voice_end_at)}"
-            info.add_field(name="ボイス句会", value=voice_value, inline=False)
-        info.set_footer(text=f"句会ID: {kukai_id}")
+        channel_warning: str | None = None
         try:
-            await channel.send(embed=info)
-            if entry_enabled:
-                entry_embed = discord.Embed(
-                    description=f"句会「**{kukai_title}**」の **エントリー受付** を開始しました。",
-                    color=COLOR_INFO,
-                )
-                if entry_close_at:
-                    entry_embed.add_field(
-                        name=f"エントリー締切（{_entry_mode_label(entry_mode)}）",
-                        value=format_jst(entry_close_at),
-                        inline=False,
-                    )
-                entry_embed.set_footer(text=f"句会ID: {kukai_id}")
-                await channel.send(
-                    embed=entry_embed,
-                    view=StageActionView(kukai_id, KukaiState.ENTRY_OPEN),
-                )
+            await post_created_kukai_channel_messages(
+                guild=interaction.guild,
+                channel=channel,
+                kukai=kukai,
+                select_label_specs=select_label_specs,
+                summary_override=bulk_summary_override,
+                voice_channel_id=voice_channel_id if voice_enabled else None,
+                voice_start_at=voice_start_at if voice_enabled else None,
+                voice_end_at=voice_end_at if voice_enabled else None,
+            )
         except discord.Forbidden:
-            name_collision_warning = (name_collision_warning or "") + "\n開催チャンネルへの投稿権限がありません。"
+            channel_warning = "開催チャンネルへの投稿権限がありません。"
+        except discord.HTTPException:
+            channel_warning = "開催チャンネルへの初期案内投稿に失敗しました。"
 
-        message = (
-            f"句会「**{kukai_title}**」を作成しました。\n"
-            f"チャンネル: {channel.mention}\n"
-            f"句会ID: `{kukai_id}`"
+        warnings = [warning for warning in [name_collision_warning, channel_warning] if warning]
+        await interaction.edit_original_response(
+            embed=build_created_kukai_success_embed(
+                title=kukai_title,
+                channel_mention=channel.mention,
+                kukai_id=kukai_id,
+                warnings=warnings,
+            )
         )
-        if name_collision_warning:
-            message += f"\n\n⚠️ {name_collision_warning.strip()}"
-        await interaction.edit_original_response(embed=success_embed(message))
 
     @kukai.command(name="visibility-sync", description="【句会管理者】参加者限定チャンネル権限を再同期します")
     @app_commands.describe(kukai_id="句会ID（省略可: このチャンネルで1件なら自動特定）")
