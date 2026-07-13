@@ -6,8 +6,8 @@ from discord.ext import commands
 
 from bot.database import get_session
 from bot.services import check_service, kukai_service
-from bot.utils.channel import effective_channel_id
 from bot.services.errors import ServiceError
+from bot.ui.check_view import CheckPagerView
 from bot.utils.embed_builder import error_embed
 
 
@@ -21,19 +21,25 @@ class CheckCog(commands.Cog):
         assert interaction.guild is not None
         try:
             async with get_session() as session:
-                kukai = await kukai_service.resolve_kukai_in_channel(
-                    session,
-                    guild_id=interaction.guild.id,
-                    channel_id=effective_channel_id(interaction),
-                    kukai_id=kukai_id,
-                )
-                embed = await check_service.build_check_embed(session, kukai, interaction.user.id)
+                if kukai_id is None:
+                    kukais = await check_service.list_related_kukais(
+                        session,
+                        interaction.guild.id,
+                        interaction.user.id,
+                    )
+                else:
+                    kukais = [await kukai_service.get_kukai(session, kukai_id, interaction.guild.id)]
+                pages = await check_service.build_check_pages(session, kukais, interaction.user.id)
 
         except ServiceError as e:
             await interaction.response.send_message(embed=error_embed(str(e)), ephemeral=True)
             return
 
-        await interaction.response.send_message(embed=embed, ephemeral=True)
+        await interaction.response.send_message(
+            embed=pages[0],
+            view=CheckPagerView.for_pages(user_id=interaction.user.id, pages=pages),
+            ephemeral=True,
+        )
 
 
 async def setup(bot: commands.Bot) -> None:
