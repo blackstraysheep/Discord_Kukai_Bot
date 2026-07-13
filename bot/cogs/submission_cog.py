@@ -21,7 +21,7 @@ class SubmissionCog(commands.Cog):
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
 
-    @app_commands.command(name="submit", description="投句します（追加・編集・削除）")
+    @app_commands.command(name="submit", description="投句を編集します")
     @app_commands.describe(kukai_id="句会ID（省略可: このチャンネルで1件なら自動特定）")
     async def submit(self, interaction: discord.Interaction, kukai_id: int | None = None) -> None:
         assert interaction.guild is not None

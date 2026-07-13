@@ -1,4 +1,4 @@
-"""Submission UI: /submit view with Add, Edit, Delete buttons."""
+"""Submission UI: /submit view with a unified edit modal."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from bot.database import get_session
 from bot.services import kukai_service, submission_service
 from bot.services.errors import ServiceError
 from bot.utils.embed_builder import COLOR_INFO, COLOR_WARNING, error_embed
-from bot.utils.submission_markup import discord_safe_submission_text, render_submission_for_discord
+from bot.utils.submission_markup import discord_safe_submission_text
 
 if TYPE_CHECKING:
     from bot.models.submission import Submission
@@ -87,9 +87,16 @@ def build_bulk_submission_embed(kukai, result: BulkSubmissionResult) -> discord.
     return embed
 
 
-def parse_bulk_submission_lines(text: str, *, remaining_limit: int | None) -> list[str]:
+def parse_bulk_submission_lines(
+    text: str,
+    *,
+    remaining_limit: int | None,
+    allow_empty: bool = False,
+) -> list[str]:
     poems = [line.strip() for line in text.splitlines() if line.strip()]
     if not poems:
+        if allow_empty:
+            return []
         raise ValueError("少なくとも1句は入力してください。")
     for index, poem in enumerate(poems, start=1):
         if len(poem) > SUBMISSION_TEXT_MAX_LENGTH:
@@ -98,6 +105,12 @@ def parse_bulk_submission_lines(text: str, *, remaining_limit: int | None) -> li
         excess = len(poems) - remaining_limit
         raise ValueError(f"投句上限を超えています（残り{remaining_limit}句、{excess}句超過）。")
     return poems
+
+
+def validate_submission_total(poems: list[str], *, submission_max: int | None) -> None:
+    if submission_max is not None and len(poems) > submission_max:
+        excess = len(poems) - submission_max
+        raise ValueError(f"投句上限を超えています（上限{submission_max}句、{excess}句超過）。")
 
 
 def _submission_snapshot(subs: list[Submission]) -> str:
@@ -125,18 +138,49 @@ async def _send_submission_status_message(
     )
 
 
-class SubmitBulkModal(discord.ui.Modal):
+# ── Unified edit modal ───────────────────────────────────────────────────
+
+async def sync_submission_lines(
+    session,
+    kukai,
+    user_id: int,
+    current_subs: list[Submission],
+    poems: list[str],
+    *,
+    haigo: str | None = None,
+) -> list[Submission]:
+    keep_count = min(len(current_subs), len(poems))
+
+    for index in range(keep_count):
+        sub = current_subs[index]
+        poem = poems[index]
+        if sub.text != poem:
+            await submission_service.edit(session, kukai, user_id, sub.id, poem)
+
+    for sub in current_subs[keep_count:]:
+        await submission_service.delete_submission(session, kukai, user_id, sub.id)
+
+    await session.flush()
+
+    for poem in poems[keep_count:]:
+        await submission_service.submit(session, kukai, user_id, poem, haigo=haigo)
+
+    return await submission_service.list_user_submissions(session, kukai.id, user_id)
+
+
+class SubmissionEditAllModal(discord.ui.Modal):
     def __init__(
         self,
         kukai_id: int,
-        slots: int | None,
+        current_subs: list[Submission],
+        kukai,
         *,
         collect_haigo: bool = False,
         current_haigo: str | None = None,
     ) -> None:
-        super().__init__(title="投句（追加）")
+        super().__init__(title="投句（編集）")
         self.kukai_id = kukai_id
-        self._remaining_limit = None if slots is None else max(0, slots)
+        self._submission_max = kukai.submission_max
         self._haigo_input: discord.ui.TextInput | None = None
         if collect_haigo:
             self._haigo_input = discord.ui.TextInput(
@@ -147,13 +191,15 @@ class SubmitBulkModal(discord.ui.Modal):
                 default=current_haigo,
             )
             self.add_item(self._haigo_input)
-        limit_note = f"・残り{self._remaining_limit}句" if self._remaining_limit is not None else ""
+
+        default_text = "\n".join(sub.text for sub in current_subs)
         self._poems_input = discord.ui.TextInput(
-            label=f"投句（1行1句{limit_note}）",
+            label="投句（1行1句・空欄で全削除）",
             style=discord.TextStyle.paragraph,
-            placeholder="1行に1句ずつ入力してください",
+            placeholder="1行に1句ずつ入力してください。行を消すとその句を削除します。",
             max_length=DISCORD_TEXT_INPUT_MAX_LENGTH,
-            required=True,
+            required=False,
+            default=default_text or None,
         )
         self.add_item(self._poems_input)
 
@@ -164,8 +210,10 @@ class SubmitBulkModal(discord.ui.Modal):
         try:
             poems = parse_bulk_submission_lines(
                 str(self._poems_input.value),
-                remaining_limit=self._remaining_limit,
+                remaining_limit=None,
+                allow_empty=True,
             )
+            validate_submission_total(poems, submission_max=self._submission_max)
         except ValueError as error:
             await interaction.followup.send(
                 embed=error_embed(str(error)),
@@ -176,134 +224,25 @@ class SubmitBulkModal(discord.ui.Modal):
         try:
             async with get_session() as session:
                 kukai = await kukai_service.get_kukai(session, self.kukai_id, interaction.guild.id)
+                current_subs = await submission_service.list_user_submissions(
+                    session, kukai.id, interaction.user.id
+                )
                 haigo = self._haigo_input.value.strip() if self._haigo_input is not None else None
-                result = await submit_bulk_poems(
+                subs = await sync_submission_lines(
                     session,
                     kukai,
                     interaction.user.id,
+                    current_subs,
                     poems,
                     haigo=haigo,
                 )
-            embed = build_bulk_submission_embed(kukai, result)
-            await interaction.edit_original_response(
-                embed=embed,
-                view=SubmissionView(self.kukai_id, result.submissions, kukai),
-            )
-            await _send_submission_status_message(
-                interaction,
-                title="✅ 投句を登録しました",
-                subs=result.submissions,
-            )
-        except ServiceError as e:
-            await interaction.followup.send(embed=error_embed(str(e)), ephemeral=True)
-
-
-# ── Edit modal ───────────────────────────────────────────────────────────
-
-class SubmitEditModal(discord.ui.Modal, title="投句（編集）"):
-    def __init__(self, kukai_id: int, submission_id: int, current_text: str) -> None:
-        super().__init__()
-        self.kukai_id = kukai_id
-        self.submission_id = submission_id
-        self._text = discord.ui.TextInput(
-            label="俳句",
-            style=discord.TextStyle.paragraph,
-            max_length=500,
-            default=current_text,
-        )
-        self.add_item(self._text)
-
-    async def on_submit(self, interaction: discord.Interaction) -> None:
-        await interaction.response.defer(ephemeral=True)
-        assert interaction.guild is not None
-        try:
-            async with get_session() as session:
-                kukai = await kukai_service.get_kukai(session, self.kukai_id, interaction.guild.id)
-                await submission_service.edit(
-                    session, kukai, interaction.user.id, self.submission_id, self._text.value
-                )
-                subs = await submission_service.list_user_submissions(
-                    session, kukai.id, interaction.user.id
-                )
             await interaction.edit_original_response(
                 embed=_submissions_embed(kukai, subs),
                 view=SubmissionView(self.kukai_id, subs, kukai),
             )
             await _send_submission_status_message(
                 interaction,
-                title="✅ 投句を変更しました",
-                subs=subs,
-            )
-        except ServiceError as e:
-            await interaction.followup.send(embed=error_embed(str(e)), ephemeral=True)
-
-
-# ── Edit select (multi-submission) ───────────────────────────────────────
-
-class SubmissionEditSelect(discord.ui.Select):
-    def __init__(self, kukai_id: int, subs: list[Submission]) -> None:
-        self.kukai_id = kukai_id
-        self._sub_map = {str(s.id): s for s in subs}
-        options = [
-            discord.SelectOption(
-                label=f"{i + 1}. {render_submission_for_discord(s.text)[:80]}",
-                value=str(s.id),
-            )
-            for i, s in enumerate(subs[:25])
-        ]
-        super().__init__(
-            placeholder="編集する句を選んでください…",
-            options=options,
-            min_values=1,
-            max_values=1,
-        )
-
-    async def callback(self, interaction: discord.Interaction) -> None:
-        sub = self._sub_map[self.values[0]]
-        await interaction.response.send_modal(
-            SubmitEditModal(self.kukai_id, sub.id, sub.text)
-        )
-
-
-# ── Delete select (multi-submission) ─────────────────────────────────────
-
-class SubmissionDeleteSelect(discord.ui.Select):
-    def __init__(self, kukai_id: int, subs: list[Submission]) -> None:
-        self.kukai_id = kukai_id
-        options = [
-            discord.SelectOption(
-                label=f"{i + 1}. {render_submission_for_discord(s.text)[:80]}",
-                value=str(s.id),
-            )
-            for i, s in enumerate(subs[:25])
-        ]
-        super().__init__(
-            placeholder="削除する句を選んでください…",
-            options=options,
-            min_values=1,
-            max_values=1,
-        )
-
-    async def callback(self, interaction: discord.Interaction) -> None:
-        sub_id = int(self.values[0])
-        assert interaction.guild is not None
-        await interaction.response.defer(ephemeral=True)
-        try:
-            async with get_session() as session:
-                kukai = await kukai_service.get_kukai(session, self.kukai_id, interaction.guild.id)
-                await submission_service.delete_submission(
-                    session, kukai, interaction.user.id, sub_id
-                )
-                subs = await submission_service.list_user_submissions(
-                    session, kukai.id, interaction.user.id
-                )
-            await interaction.edit_original_response(
-                embed=_submissions_embed(kukai, subs),
-                view=SubmissionView(self.kukai_id, subs, kukai),
-            )
-            await _send_submission_status_message(
-                interaction,
-                title="✅ 投句を削除しました",
+                title="✅ 投句を更新しました",
                 subs=subs,
             )
         except ServiceError as e:
@@ -318,42 +257,19 @@ class SubmissionView(discord.ui.View):
         self.kukai_id = kukai_id
         self._subs = list(subs)
         self._kukai = kukai
-        has_subs = bool(subs)
-        current_count = len(subs)
-        limit = kukai.submission_max if kukai is not None else None
-        remaining = None if limit is None else max(0, limit - current_count)
-        add_slots = None if remaining is None else remaining
-
-        add_btn = discord.ui.Button(
-            label="追加",
-            style=discord.ButtonStyle.success,
-            disabled=(add_slots is not None and add_slots <= 0),
-        )
-        add_btn.callback = self._on_add
-
         edit_btn = discord.ui.Button(
             label="編集",
             style=discord.ButtonStyle.primary,
-            disabled=not has_subs,
         )
         edit_btn.callback = self._on_edit
 
-        del_btn = discord.ui.Button(
-            label="削除",
-            style=discord.ButtonStyle.danger,
-            disabled=not has_subs,
-        )
-        del_btn.callback = self._on_delete
-
-        self.add_item(del_btn)
         self.add_item(edit_btn)
-        self.add_item(add_btn)
-        self._add_slots = add_slots
 
-    async def _on_add(self, interaction: discord.Interaction) -> None:
-        if self._add_slots is not None and self._add_slots <= 0:
+    async def _on_edit(self, interaction: discord.Interaction) -> None:
+        default_text = "\n".join(sub.text for sub in self._subs)
+        if len(default_text) > DISCORD_TEXT_INPUT_MAX_LENGTH:
             await interaction.response.send_message(
-                embed=error_embed("投句上限に達しているため、これ以上追加できません。"),
+                embed=error_embed("現在の投句一覧が長すぎるため、GUIのまとめ編集を開けません。"),
                 ephemeral=True,
             )
             return
@@ -367,70 +283,14 @@ class SubmissionView(discord.ui.View):
                 )
                 current_haigo = profile.haigo if profile is not None else None
         await interaction.response.send_modal(
-            SubmitBulkModal(
+            SubmissionEditAllModal(
                 self.kukai_id,
-                self._add_slots,
+                self._subs,
+                self._kukai,
                 collect_haigo=collect_haigo,
                 current_haigo=current_haigo,
             )
         )
-
-    async def _on_edit(self, interaction: discord.Interaction) -> None:
-        if not self._subs:
-            await interaction.response.send_message(
-                embed=error_embed("投句がありません。"), ephemeral=True
-            )
-            return
-        if len(self._subs) == 1:
-            s = self._subs[0]
-            await interaction.response.send_modal(SubmitEditModal(self.kukai_id, s.id, s.text))
-        else:
-            view = discord.ui.View(timeout=120)
-            view.add_item(SubmissionEditSelect(self.kukai_id, self._subs))
-            await interaction.response.edit_message(
-                embed=discord.Embed(description="編集する句を選んでください。", color=COLOR_INFO),
-                view=view,
-            )
-
-    async def _on_delete(self, interaction: discord.Interaction) -> None:
-        if not self._subs:
-            await interaction.response.send_message(
-                embed=error_embed("投句がありません。"), ephemeral=True
-            )
-            return
-        assert interaction.guild is not None
-        if len(self._subs) == 1:
-            sub = self._subs[0]
-            await interaction.response.defer(ephemeral=True)
-            try:
-                async with get_session() as session:
-                    kukai = await kukai_service.get_kukai(
-                        session, self.kukai_id, interaction.guild.id
-                    )
-                    await submission_service.delete_submission(
-                        session, kukai, interaction.user.id, sub.id
-                    )
-                    subs = await submission_service.list_user_submissions(
-                        session, kukai.id, interaction.user.id
-                    )
-                await interaction.edit_original_response(
-                    embed=_submissions_embed(kukai, subs),
-                    view=SubmissionView(self.kukai_id, subs, kukai),
-                )
-                await _send_submission_status_message(
-                    interaction,
-                    title="✅ 投句を削除しました",
-                    subs=subs,
-                )
-            except ServiceError as e:
-                await interaction.followup.send(embed=error_embed(str(e)), ephemeral=True)
-        else:
-            view = discord.ui.View(timeout=120)
-            view.add_item(SubmissionDeleteSelect(self.kukai_id, self._subs))
-            await interaction.response.edit_message(
-                embed=discord.Embed(description="削除する句を選んでください。", color=COLOR_INFO),
-                view=view,
-            )
 
 
 # ── Rollback confirmation view ────────────────────────────────────────────
