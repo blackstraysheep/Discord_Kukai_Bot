@@ -1,6 +1,6 @@
 """make one select per selector and submission
 
-Revision ID: 0018_select_unique_selector_submission
+Revision ID: 0018_select_unique_sub
 Revises: 0017_widen_visibility
 Create Date: 2026-07-07 00:00:00.000000
 """
@@ -11,7 +11,7 @@ import sqlalchemy as sa
 from alembic import op
 
 
-revision: str = "0018_select_unique_selector_submission"
+revision: str = "0018_select_unique_sub"
 down_revision: Union[str, None] = "0017_widen_visibility"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
