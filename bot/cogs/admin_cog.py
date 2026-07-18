@@ -49,6 +49,7 @@ class AdminCog(commands.Cog):
         create_role="作成権限: everyone/admin/owner/role/specific",
         role_ids="create_role=role のときのロールID(カンマ区切り)",
         user_ids="create_role=specific のときのユーザーID(カンマ区切り)",
+        participation_record_visibility="他人の参加記録公開: private/guild_public",
     )
     async def guild_settings(
         self,
@@ -56,6 +57,7 @@ class AdminCog(commands.Cog):
         create_role: Literal["everyone", "admin", "owner", "role", "specific"] | None = None,
         role_ids: str | None = None,
         user_ids: str | None = None,
+        participation_record_visibility: Literal["private", "guild_public"] | None = None,
     ) -> None:
         assert interaction.guild is not None
         try:
@@ -66,11 +68,16 @@ class AdminCog(commands.Cog):
                     session.add(settings)
                     await session.flush()
 
-                if create_role is None:
+                if create_role is None and participation_record_visibility is None:
                     embed = discord.Embed(title="Guild Settings", color=discord.Color.blue())
                     embed.add_field(name="create_role", value=settings.create_role, inline=False)
                     embed.add_field(name="role_ids", value=settings.create_role_ids, inline=False)
                     embed.add_field(name="user_ids", value=settings.create_user_ids, inline=False)
+                    embed.add_field(
+                        name="participation_record_visibility",
+                        value=settings.participation_record_visibility,
+                        inline=False,
+                    )
                     await interaction.response.send_message(embed=embed, ephemeral=True)
                     return
 
@@ -81,16 +88,19 @@ class AdminCog(commands.Cog):
                     )
                     return
 
-                parsed_role_ids = _parse_id_csv(role_ids)
-                parsed_user_ids = _parse_id_csv(user_ids)
-                if create_role == "role" and not parsed_role_ids:
-                    raise ValidationError("create_role=role の場合は role_ids を指定してください。")
-                if create_role == "specific" and not parsed_user_ids:
-                    raise ValidationError("create_role=specific の場合は user_ids を指定してください。")
+                if create_role is not None:
+                    parsed_role_ids = _parse_id_csv(role_ids)
+                    parsed_user_ids = _parse_id_csv(user_ids)
+                    if create_role == "role" and not parsed_role_ids:
+                        raise ValidationError("create_role=role の場合は role_ids を指定してください。")
+                    if create_role == "specific" and not parsed_user_ids:
+                        raise ValidationError("create_role=specific の場合は user_ids を指定してください。")
 
-                settings.create_role = create_role
-                settings.create_role_ids = json.dumps(parsed_role_ids, ensure_ascii=False)
-                settings.create_user_ids = json.dumps(parsed_user_ids, ensure_ascii=False)
+                    settings.create_role = create_role
+                    settings.create_role_ids = json.dumps(parsed_role_ids, ensure_ascii=False)
+                    settings.create_user_ids = json.dumps(parsed_user_ids, ensure_ascii=False)
+                if participation_record_visibility is not None:
+                    settings.participation_record_visibility = participation_record_visibility
 
             await interaction.response.send_message(
                 embed=success_embed("Guild settings を更新しました。"),

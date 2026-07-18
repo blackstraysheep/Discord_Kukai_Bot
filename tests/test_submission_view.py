@@ -1,6 +1,12 @@
 import pytest
 
-from bot.ui.submission_view import parse_bulk_submission_lines, validate_submission_total
+from bot.services.submission_service import DuplicateSubmissionWarning
+from bot.ui.submission_view import (
+    DuplicateSubmissionNotice,
+    _duplicate_warning_text,
+    parse_bulk_submission_lines,
+    validate_submission_total,
+)
 
 
 def test_parse_bulk_submission_lines_uses_non_empty_lines():
@@ -43,3 +49,30 @@ def test_validate_submission_total_rejects_final_total_overflow():
 
 def test_validate_submission_total_allows_unlimited_total():
     validate_submission_total(["一句", "二句", "三句"], submission_max=None)
+
+
+def test_duplicate_warning_text_uses_current_number_and_guild_name():
+    text = _duplicate_warning_text(
+        [
+            DuplicateSubmissionNotice(
+                current_number=2,
+                warning=DuplicateSubmissionWarning(
+                    submission_id=123,
+                    text="春の海",
+                    kukai_id=10,
+                    title="第一句会",
+                    guild_id=999,
+                    channel_id=None,
+                    result_message_id=None,
+                    published_number=7,
+                    haigo="春風",
+                ),
+            )
+        ],
+        guild_names={999: "俳句サロン"},
+    )
+
+    assert "2番「春の海」" in text
+    assert "サーバ: 俳句サロン" in text
+    assert "サーバID" not in text
+    assert "No.7" not in text

@@ -1,6 +1,6 @@
 # 参加記録・横断履歴・投句重複警告 実装計画
 
-最終更新: 2026-07-05
+最終更新: 2026-07-18
 
 ## 目的
 
@@ -25,7 +25,18 @@
 
 ### 基本形式
 
-参加記録は句会タイトルごとにブロック化する。
+参加記録の主導線は、Discord本文に全件を流す形にしない。
+
+初期実装の既定返却は次の組み合わせにする。
+
+- Discord上のephemeral Embed: 件数サマリ、直近の参加記録、絞り込み条件、添付ファイルの説明を表示する。
+- Markdown添付: 詳細な参加記録を人間が読みやすい形で出力する。
+
+CSV、HTML、PDFなどの別形式は後続改善で追加できるようにする。スマホでの安定閲覧を優先し、初期実装ではHTMLを主形式にしない。
+
+Discord上のEmbedは確認用の要約であり、大量履歴の完全表示には使わない。`scope=all` や長期利用者の履歴では、詳細を添付ファイル側へ逃がす。
+
+Markdown添付の詳細記録は句会タイトルごとにブロック化する。
 
 ```text
 第1回〇〇句会
@@ -54,6 +65,15 @@
 - 選句先の作者名は、作者公開済みの場合のみ表示する。
 - 作者非公開の場合は作者名部分を省略し、句本文だけ表示する。
 - 総評がある場合は、選句欄の後に `総評` として表示する。
+
+Embed要約では、少なくとも次を表示する。
+
+- 対象範囲と表示軸。
+- 参加句会数、投句数、選句数、総評数。
+- 直近の句会を既定5件程度。
+- `limit` や添付ファイルにより省略された件数。
+
+添付ファイル名は、本人記録では `participation-records-{YYYYMMDD}.md` のようにし、他人記録では対象ユーザーを推測しやすいが過度に個人情報を含まない名前にする。
 
 ### 表示軸
 
@@ -100,10 +120,11 @@ Discord Embedのフィールド名はMarkdownリンク表示が安定しない�
 
 ### ページングと制限
 
-- `limit` は句会ブロック数の上限として扱う。
-- Discord Embedの文字数制限を超えそうな場合は複数Embedに分割する。
-- 1つのEmbedには最大25フィールド、合計6000文字制限があるため、本文生成時に安全側で分割する。
-- 長い句本文、選評、総評は省略する。省略長は実装時に定数化する。
+- `limit` はDiscord上の要約に出す句会ブロック数の上限として扱う。
+- 添付Markdownは、コマンドで指定された検索条件に一致する詳細を出力する。初期実装では安全上限を設け、上限超過時はEmbed要約とMarkdown冒頭に省略件数を明記する。
+- Discord Embedの文字数制限を超えそうな場合は、要約内容をさらに短くする。Embed分割は保険として扱い、大量履歴の本命にはしない。
+- 1つのEmbedには最大25フィールド、合計6000文字制限があるため、本文生成時に安全側で分割または省略する。
+- 長い句本文、選評、総評はEmbed要約では省略する。Markdown添付では原則として本文を残すが、極端な長文だけ省略する。省略長は実装時に定数化する。
 
 ## 権限制御
 
@@ -171,6 +192,21 @@ participation_record_visibility VARCHAR(20) NOT NULL DEFAULT 'private'
 - 句会タイトルリンクを生成する。
 
 サービス層でDiscord Embedそのものは作らない。Embed生成はCog側または専用formatterに寄せる。
+
+履歴取得ロジックと返却形式は分離する。サービス層は中立DTOを返し、Discord表示、Markdown添付、CSV、HTMLなどの形式変換は formatter / exporter に分ける。
+
+初期実装で想定するファイル:
+
+- `bot/services/participation_record_service.py`: 履歴取得、権限制御、DTO生成。
+- `bot/formatters/participation_record_embed_formatter.py`: Discord要約Embed生成。
+- `bot/formatters/participation_record_markdown_exporter.py`: Markdown添付生成。
+
+後続改善で追加しやすいファイル:
+
+- `bot/formatters/participation_record_csv_exporter.py`
+- `bot/formatters/participation_record_html_exporter.py`
+
+CogはSQLAlchemyモデルを直接組み合わせて表示文字列を作らない。返却形式を差し替えるときに、DB取得や権限制御を巻き込まない境界を維持する。
 
 想定DTO:
 
@@ -253,14 +289,14 @@ DTOは実装都合で多少変更してよいが、CogがSQLAlchemyモデルを�
 方針:
 
 - 返信はephemeral。
-- `limit` は既定10、最大25程度に制限する。
+- `limit` はDiscord上の要約件数として扱い、既定5、最大25程度に制限する。
 - `scope` の既定は `current`。
 - `group_by` の既定は `kukai`。
 - `haigo` は完全一致の任意フィルタ。未指定なら全俳号を対象にする。
 - `user` にBot自身を指定した場合はエラーにする。
 - サーバ外ユーザーや取得不能ユーザーはDiscord側の `discord.Member` 引数で自然に制限する。
 
-Embed生成は、句会ブロック単位で本文へ積む。文字数制限が近い場合は次Embedに分ける。
+Embed生成は要約専用とし、全件詳細はMarkdown添付で返す。文字数制限が近い場合は次Embedに分けるより、要約件数や表示項目を減らすことを優先する。
 
 ### Guild Settings
 
@@ -286,7 +322,7 @@ Embed生成は、句会ブロック単位で本文へ積む。文字数制限が
 - `scope`: `current` / `all`
 - `group_by`: `kukai` / `server` / `haigo`
 - `haigo`: 俳号の完全一致フィルタ。省略可。
-- `limit`: 表示する句会数。省略時10。
+- `limit`: Discord上の要約に表示する句会数。省略時5。
 
 仕様:
 
@@ -297,6 +333,7 @@ Embed生成は、句会ブロック単位で本文へ積む。文字数制限が
 - `haigo` 指定時は、その俳号で参加した記録だけ表示する。
 - 本人記録なので、進行中句会の自分の投句・選句も表示する。
 - 点数は結果集計可能な句会だけ表示する。
+- Discord上には要約を表示し、詳細はMarkdown添付で返す。
 
 ### `/record user`
 
@@ -307,7 +344,7 @@ Embed生成は、句会ブロック単位で本文へ積む。文字数制限が
 - `user`: 対象ユーザー。
 - `group_by`: `kukai` / `haigo`
 - `haigo`: 俳号の完全一致フィルタ。省略可。
-- `limit`: 表示する句会数。省略時10。
+- `limit`: Discord上の要約に表示する句会数。省略時5。
 
 仕様:
 
@@ -316,6 +353,7 @@ Embed生成は、句会ブロック単位で本文へ積む。文字数制限が
 - 表示対象は `results` / `ended` の句会だけ。
 - `group_by=haigo` は、対象ユーザーが現在サーバ内で使った俳号ごとにまとめる。
 - 作者名はその句会の作者公開設定に従う。
+- Discord上には要約を表示し、詳細はMarkdown添付で返す。
 
 ### `/guild settings`
 
@@ -420,12 +458,14 @@ GUI投句モーダルでも、登録完了Embedまたは追加のephemeralメッ
 
 ### コマンド/表示
 
-- `/record me` のEmbed本文が句会タイトル、投句、選句ラベル、選句先を含む。
+- `/record me` のEmbed要約が対象範囲、件数サマリ、直近句会、添付ファイルの説明を含む。
+- Markdown添付が句会タイトル、投句、選句ラベル、選句先を含む。
 - 句会タイトルリンクが `result_message_id` 優先で生成される。
 - `result_message_id` がない場合はチャンネルリンクになる。
 - URLを作れない場合はリンクなしタイトルになる。
-- limitを超える句会は表示されない。
-- 長文や件数過多でEmbed分割される。
+- `limit` を超える句会はEmbed要約に表示されないが、添付Markdownには含まれる。
+- 長文や件数過多でもDiscord本文に全件を流さず、要約と添付に分かれる。
+- formatter / exporter がサービスDTOから出力を作り、CogがSQLAlchemyモデルを直接整形しない。
 
 ### 重複警告
 
