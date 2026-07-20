@@ -1,8 +1,9 @@
 from types import SimpleNamespace
 
 import discord
+import pytest
 
-from bot.ui.participation_record_view import ParticipationRecordOptionsView
+from bot.ui.participation_record_view import ParticipationRecordOptionsView, parse_record_limit
 
 
 class _Guild:
@@ -28,6 +29,8 @@ def test_private_record_options_fix_target_to_self():
     assert view.is_self is True
     assert not any(isinstance(item, discord.ui.UserSelect) for item in view.children)
     assert [item.row for item in view.children] == [1, 2, 3, 4, 4]
+    assert view.limit is None
+    assert "要約件数: **全件**" in view.build_embed().description
 
 
 def test_public_record_options_include_user_selector_and_self_choices():
@@ -61,3 +64,17 @@ def test_other_target_removes_cross_server_and_server_grouping():
     group = view.children[2]
     assert [option.value for option in scope.options] == ["current"]  # type: ignore[attr-defined]
     assert [option.value for option in group.options] == ["kukai", "haigo"]  # type: ignore[attr-defined]
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [("", None), ("   ", None), ("1", 1), ("25", 25), ("1000", 1000)],
+)
+def test_parse_record_limit_accepts_positive_integer_or_blank(raw, expected):
+    assert parse_record_limit(raw) == expected
+
+
+@pytest.mark.parametrize("raw", ["0", "-1", "1.5", "abc"])
+def test_parse_record_limit_rejects_invalid_values(raw):
+    with pytest.raises(ValueError, match="1以上の整数"):
+        parse_record_limit(raw)

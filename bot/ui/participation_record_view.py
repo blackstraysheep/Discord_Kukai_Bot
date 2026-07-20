@@ -36,6 +36,52 @@ class HaigoFilterModal(discord.ui.Modal, title="俳号フィルター"):
         )
 
 
+def parse_record_limit(value: str) -> int | None:
+    stripped = value.strip()
+    if not stripped:
+        return None
+    try:
+        limit = int(stripped)
+    except ValueError as error:
+        raise ValueError("表示件数は1以上の整数で入力するか、空欄にしてください。") from error
+    if limit < 1:
+        raise ValueError("表示件数は1以上の整数で入力するか、空欄にしてください。")
+    return limit
+
+
+class RecordLimitModal(discord.ui.Modal, title="表示件数"):
+    limit_input = discord.ui.TextInput(
+        label="表示件数（空欄ですべて）",
+        required=False,
+        max_length=19,
+        placeholder="例: 10",
+    )
+
+    def __init__(self, owner: "ParticipationRecordOptionsView") -> None:
+        super().__init__()
+        self.owner = owner
+        self.limit_input.default = "" if owner.limit is None else str(owner.limit)
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        if interaction.user.id != self.owner.user_id:
+            await interaction.response.send_message(
+                embed=error_embed("この画面は開いた本人だけが操作できます。"),
+                ephemeral=True,
+            )
+            return
+        try:
+            limit = parse_record_limit(str(self.limit_input))
+        except ValueError as error:
+            await interaction.response.send_message(embed=error_embed(str(error)), ephemeral=True)
+            return
+        self.owner.limit = limit
+        self.owner._rebuild()
+        await interaction.response.edit_message(
+            embed=self.owner.build_embed(),
+            view=self.owner,
+        )
+
+
 class ParticipationRecordOptionsView(discord.ui.View):
     def __init__(
         self,
@@ -53,7 +99,7 @@ class ParticipationRecordOptionsView(discord.ui.View):
         self.allow_other = allow_other
         self.scope = "current"
         self.group_by = "kukai"
-        self.limit = 5
+        self.limit: int | None = None
         self.haigo: str | None = None
         self._rebuild()
 
@@ -78,7 +124,7 @@ class ParticipationRecordOptionsView(discord.ui.View):
             f"対象: **{target_name}**\n"
             f"範囲: **{scope_label}**\n"
             f"集計: **{group_labels[self.group_by]}**\n"
-            f"要約件数: **{self.limit}件**\n"
+            f"要約件数: **{'全件' if self.limit is None else f'{self.limit}件'}**\n"
             f"俳号: **{self.haigo or '指定なし'}**"
         )
         if not self.allow_other:
@@ -168,24 +214,17 @@ class ParticipationRecordOptionsView(discord.ui.View):
         group_select.callback = group_callback
         self.add_item(group_select)
 
-        limit_select = discord.ui.Select(
-            placeholder="Discord上の要約件数",
-            options=[
-                discord.SelectOption(label=f"{value}件", value=str(value), default=self.limit == value)
-                for value in range(1, 26)
-            ],
-            min_values=1,
-            max_values=1,
+        limit_button = discord.ui.Button(
+            label="表示件数を指定" if self.limit is None else f"表示件数: {self.limit}件",
+            style=discord.ButtonStyle.secondary,
             row=3,
         )
 
         async def limit_callback(interaction: discord.Interaction) -> None:
-            self.limit = int(limit_select.values[0])
-            self._rebuild()
-            await interaction.response.edit_message(embed=self.build_embed(), view=self)
+            await interaction.response.send_modal(RecordLimitModal(self))
 
-        limit_select.callback = limit_callback
-        self.add_item(limit_select)
+        limit_button.callback = limit_callback
+        self.add_item(limit_button)
 
         haigo_button = discord.ui.Button(
             label="俳号を指定" if self.haigo is None else "俳号を変更",

@@ -78,7 +78,8 @@
     - `句会を作成`: 作成権限を確認して既存の句会作成ウィザードを ephemeral で開く。ポータルメッセージ自体は編集しない
     - `句会一覧`: このサーバーの開催中・招集中句会を `/list` と同じEmbed生成処理で ephemeral 表示
     - `自分の状況`: `/check` と同じ参加状況Embedを表示。複数候補がある場合は本人専用セレクトを出す
-    - `参加の記録`: 対象、範囲、表示軸、俳号、要約件数を選び、`/record me` / `/record user` と同じ要約EmbedとMarkdownをephemeral表示する
+    - `参加の記録`: 対象、範囲、表示軸、俳号、表示件数を選び、`/record me` / `/record user` と同じEmbedとMarkdownをephemeral表示する。表示件数は正整数入力で、空欄なら全件を表示対象にする
+      - EmbedにはDiscord上限まで投句・得点・選句ラベル・選んだ句・公開可能な作者を表示し、選評・総評と収まらない詳細は全件Markdownに収録する
       - `participation_record_visibility=private` では本人だけを対象にする
       - `guild_public` では同一サーバーの他参加者を選択できる。他人の記録は結果公開済みの現在サーバー内句会だけを表示する
 - 句会管理パネル:

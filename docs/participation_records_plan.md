@@ -289,14 +289,14 @@ DTOは実装都合で多少変更してよいが、CogがSQLAlchemyモデルを�
 方針:
 
 - 返信はephemeral。
-- `limit` はDiscord上の要約件数として扱い、既定5、最大25程度に制限する。
+- `limit` はDiscord上の表示希望件数として扱い、1以上の整数を受け付ける。省略時は全件を表示対象にする。
 - `scope` の既定は `current`。
 - `group_by` の既定は `kukai`。
 - `haigo` は完全一致の任意フィルタ。未指定なら全俳号を対象にする。
 - `user` にBot自身を指定した場合はエラーにする。
 - サーバ外ユーザーや取得不能ユーザーはDiscord側の `discord.Member` 引数で自然に制限する。
 
-Embed生成は要約専用とし、全件詳細はMarkdown添付で返す。文字数制限が近い場合は次Embedに分けるより、要約件数や表示項目を減らすことを優先する。
+EmbedにはDiscordの文字数・フィールド数制限内で投句と選句の詳細を収録し、選評・総評と収まらない詳細は全件Markdown添付で返す。
 
 ### Guild Settings
 
@@ -322,7 +322,7 @@ Embed生成は要約専用とし、全件詳細はMarkdown添付で返す。文�
 - `scope`: `current` / `all`
 - `group_by`: `kukai` / `server` / `haigo`
 - `haigo`: 俳号の完全一致フィルタ。省略可。
-- `limit`: Discord上の要約に表示する句会数。省略時5。
+- `limit`: Discord上の表示希望句会数。省略時は全件。
 
 仕様:
 
@@ -344,7 +344,7 @@ Embed生成は要約専用とし、全件詳細はMarkdown添付で返す。文�
 - `user`: 対象ユーザー。
 - `group_by`: `kukai` / `haigo`
 - `haigo`: 俳号の完全一致フィルタ。省略可。
-- `limit`: Discord上の要約に表示する句会数。省略時5。
+- `limit`: Discord上の表示希望句会数。省略時は全件。
 
 仕様:
 
@@ -463,7 +463,7 @@ GUI投句モーダルでも、登録完了Embedまたは追加のephemeralメッ
 - 句会タイトルリンクが `result_message_id` 優先で生成される。
 - `result_message_id` がない場合はチャンネルリンクになる。
 - URLを作れない場合はリンクなしタイトルになる。
-- `limit` を超える句会はEmbed要約に表示されないが、添付Markdownには含まれる。
+- `limit` またはDiscordのEmbed上限を超える句会詳細は表示されないが、添付Markdownには含まれる。
 - 長文や件数過多でもDiscord本文に全件を流さず、要約と添付に分かれる。
 - formatter / exporter がサービスDTOから出力を作り、CogがSQLAlchemyモデルを直接整形しない。
 

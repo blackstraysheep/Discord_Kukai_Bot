@@ -37,7 +37,7 @@ class RecordCog(commands.Cog):
         scope="表示範囲",
         group_by="表示軸",
         haigo="俳号の完全一致フィルタ",
-        limit="Discord上の要約件数",
+        limit="Discord上の表示希望件数（省略時は全件）",
     )
     async def record_me(
         self,
@@ -45,7 +45,7 @@ class RecordCog(commands.Cog):
         scope: RecordScopeOption = "current",
         group_by: RecordGroupOption = "kukai",
         haigo: str | None = None,
-        limit: app_commands.Range[int, 1, 25] = 5,
+        limit: app_commands.Range[int, 1] | None = None,
     ) -> None:
         assert interaction.guild is not None
         await interaction.response.defer(ephemeral=True)
@@ -66,7 +66,7 @@ class RecordCog(commands.Cog):
         user="対象ユーザー",
         group_by="表示軸",
         haigo="俳号の完全一致フィルタ",
-        limit="Discord上の要約件数",
+        limit="Discord上の表示希望件数（省略時は全件）",
     )
     async def record_user(
         self,
@@ -74,7 +74,7 @@ class RecordCog(commands.Cog):
         user: discord.Member,
         group_by: OtherRecordGroupOption = "kukai",
         haigo: str | None = None,
-        limit: app_commands.Range[int, 1, 25] = 5,
+        limit: app_commands.Range[int, 1] | None = None,
     ) -> None:
         assert interaction.guild is not None
         await interaction.response.defer(ephemeral=True)
@@ -104,7 +104,7 @@ class RecordCog(commands.Cog):
         scope: RecordScopeOption,
         group_by: RecordGroupOption,
         haigo: str | None,
-        limit: int,
+        limit: int | None,
     ) -> None:
         await send_participation_record(
             interaction,
@@ -148,7 +148,7 @@ async def send_participation_record(
     scope: RecordScopeOption,
     group_by: RecordGroupOption,
     haigo: str | None,
-    limit: int,
+    limit: int | None,
 ) -> None:
     """Send the shared `/record` response to an interaction followup."""
     assert interaction.guild is not None
