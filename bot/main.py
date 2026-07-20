@@ -19,6 +19,7 @@ COGS = [
     "bot.cogs.entry_cog",
     "bot.cogs.submission_cog",
     "bot.cogs.select_cog",
+    "bot.cogs.select_lab_cog",
     "bot.cogs.check_cog",
     "bot.cogs.record_cog",
     "bot.cogs.result_cog",
