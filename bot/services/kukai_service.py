@@ -33,6 +33,13 @@ _SUBMISSION_LOCKED_STATES = {
     KukaiState.CANCELLED,
 }
 
+_SELECTING_MODE_LOCKED_STATES = {
+    KukaiState.SELECTING_CLOSED,
+    KukaiState.RESULTS,
+    KukaiState.ENDED,
+    KukaiState.CANCELLED,
+}
+
 _SELECT_RULE_REPLACE_ALLOWED_STATES = {
     KukaiState.DRAFT,
     KukaiState.ENTRY_OPEN,
@@ -377,12 +384,13 @@ async def edit_kukai(
                 min_participants,
                 submission_overflow,
                 submission_mode,
-                selecting_mode,
             )
         )
     )
     if submission_setting_change and state in _SUBMISSION_LOCKED_STATES:
         raise InvalidStateError("この状態では投句設定を変更できません。")
+    if selecting_mode is not None and state in _SELECTING_MODE_LOCKED_STATES:
+        raise InvalidStateError("選句締切後は選句進行モードを変更できません。")
 
     if title is not None:
         title = title.strip()
