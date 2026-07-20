@@ -105,6 +105,17 @@ def test_show_author_request_error_rejects_true_when_authors_unrevealed():
     assert _show_author_request_error(SimpleNamespace(author_reveal=True), True) is None
 
 
+def test_show_author_request_error_rejects_true_before_results():
+    error = _show_author_request_error(
+        SimpleNamespace(author_reveal=True),
+        True,
+        state=KukaiState.SELECTING_CLOSED,
+    )
+
+    assert error is not None
+    assert "結果公開前" in error
+
+
 def test_submission_pdf_author_visibility_requires_results_and_reveal_flag():
     kukai = SimpleNamespace(author_reveal=True)
     assert _can_show_pdf_author(kukai, True, state=KukaiState.RESULTS) is True
