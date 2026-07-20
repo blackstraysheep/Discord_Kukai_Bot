@@ -34,6 +34,12 @@ def _can_show_pdf_author(kukai, requested: bool, *, state: KukaiState | None = N
     return True
 
 
+def _show_author_request_error(kukai, requested: bool) -> str | None:
+    if requested and not bool(getattr(kukai, "author_reveal", False)):
+        return "この句会は作者非公開に設定されているため、show_author:true は指定できません。"
+    return None
+
+
 def _can_show_result_author(
     kukai,
     requested: bool,
@@ -109,6 +115,14 @@ class PdfCog(commands.Cog):
                 ):
                     await interaction.followup.send(
                         embed=error_embed("チャンネルへの投稿は句会管理者のみ実行できます。"),
+                        ephemeral=True,
+                    )
+                    return
+
+                author_request_error = _show_author_request_error(kukai, show_author)
+                if author_request_error:
+                    await interaction.followup.send(
+                        embed=error_embed(author_request_error),
                         ephemeral=True,
                     )
                     return
@@ -200,6 +214,13 @@ class PdfCog(commands.Cog):
                 ):
                     await interaction.followup.send(
                         embed=error_embed("結果公開前のPDF生成は句会管理者のみ実行できます。"),
+                        ephemeral=True,
+                    )
+                    return
+                author_request_error = _show_author_request_error(kukai, show_author)
+                if author_request_error:
+                    await interaction.followup.send(
+                        embed=error_embed(author_request_error),
                         ephemeral=True,
                     )
                     return

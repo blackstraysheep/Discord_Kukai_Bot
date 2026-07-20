@@ -56,7 +56,7 @@ def _score_embed(
             author_name = _display_name(r.author_user_id, guild, display_names)
             author_line = f"　作者: {discord_safe(author_name)}"
 
-        label_parts = [f"{lv.label}×{lv.count}" for lv in r.label_selects]
+        label_parts = [_label_select_summary(lv, guild, display_names) for lv in r.label_selects]
         label_str = "　".join(label_parts) if label_parts else "（無選）"
 
         header = f"**{r.rank}位 ({r.total_score}点)** — No.{r.number}{author_line}"
@@ -102,7 +102,9 @@ def _number_embed(
     )
     lines = []
     for r in sorted_r:
-        label_str = "　".join(f"{lv.label}×{lv.count}" for lv in r.label_selects) or "（無選）"
+        label_str = "　".join(
+            _label_select_summary(lv, guild, display_names) for lv in r.label_selects
+        ) or "（無選）"
         line = f"`No.{r.number}` {discord_safe_submission_text(r.text)}　— {label_str} ({r.total_score}点)"
         author_comments = [c for lv in r.label_selects if lv.label == "作者コメント" for c in lv.comments[:1]]
         if author_comments:
@@ -222,6 +224,15 @@ def _display_name(user_id: int, guild: discord.Guild, display_names: dict[int, s
         return display_names[user_id]
     member = guild.get_member(user_id)
     return member.display_name if member else f"UID:{user_id}"
+
+
+def _label_select_summary(label_select, guild: discord.Guild, display_names: dict[int, str]) -> str:
+    selector_names = [
+        discord_safe(_display_name(user_id, guild, display_names))
+        for user_id in label_select.selector_user_ids
+    ]
+    selector_suffix = f"（{'・'.join(selector_names)}）" if selector_names else ""
+    return f"{discord_safe(label_select.label)}×{label_select.count}{selector_suffix}"
 
 
 def _comment_signature(user_id: int, guild: discord.Guild, display_names: dict[int, str]) -> str:
