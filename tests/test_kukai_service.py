@@ -275,6 +275,43 @@ async def test_edit_kukai_validates_entry_close_at(db_session):
 
 
 @pytest.mark.asyncio
+async def test_edit_kukai_allows_selecting_mode_change_while_selecting_open(db_session):
+    kukai = await kukai_service.create_kukai(
+        db_session,
+        guild_id=1,
+        created_by=100,
+        channel_id=200,
+        title="選句進行モード変更",
+        entry_close_at=_utc(3),
+        submission_close_at=_utc(7),
+        selecting_close_at=_utc(14),
+    )
+    kukai.state = KukaiState.SELECTING_OPEN
+
+    await kukai_service.edit_kukai(db_session, kukai, selecting_mode="full_auto")
+
+    assert kukai.selecting_mode == "full_auto"
+
+
+@pytest.mark.asyncio
+async def test_edit_kukai_rejects_selecting_mode_change_after_selecting_closed(db_session):
+    kukai = await kukai_service.create_kukai(
+        db_session,
+        guild_id=1,
+        created_by=100,
+        channel_id=200,
+        title="選句締切後の進行モード変更",
+        entry_close_at=_utc(3),
+        submission_close_at=_utc(7),
+        selecting_close_at=_utc(14),
+    )
+    kukai.state = KukaiState.SELECTING_CLOSED
+
+    with pytest.raises(InvalidStateError, match="選句締切後"):
+        await kukai_service.edit_kukai(db_session, kukai, selecting_mode="full_auto")
+
+
+@pytest.mark.asyncio
 async def test_edit_kukai_manual_author_publication_resets_revealed_authors(db_session):
     kukai = await kukai_service.create_kukai(
         db_session,
