@@ -20,6 +20,7 @@ COGS = [
     "bot.cogs.submission_cog",
     "bot.cogs.select_cog",
     "bot.cogs.check_cog",
+    "bot.cogs.record_cog",
     "bot.cogs.result_cog",
     "bot.cogs.admin_cog",
     "bot.cogs.pdf_cog",

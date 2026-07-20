@@ -18,3 +18,7 @@ class GuildSettings(Base, TimestampMixin):
     create_user_ids: Mapped[str] = mapped_column(String, nullable=False, default="[]")
     common_vc_id: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
     portal_channel_id: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
+    # 'private' | 'guild_public'
+    participation_record_visibility: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="private"
+    )

@@ -2,11 +2,16 @@
 
 import random
 from collections import defaultdict
+from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
+from bot.models.entry import Entry
+from bot.models.kukai import Kukai
+from bot.models.participant import KukaiParticipant
 from bot.models.submission import PublishedSubmission, Submission
 from bot.models.select import OverallSelectComment, Select, SelectComment
 from bot.repositories import entry_repo, participant_repo, submission_repo
@@ -30,6 +35,41 @@ ROLLBACK_STATE_ORDER: tuple[KukaiState, ...] = (
 _ROLLBACK_STATE_INDEX = {state: index for index, state in enumerate(ROLLBACK_STATE_ORDER)}
 
 
+@dataclass(frozen=True)
+class DuplicateSubmissionWarning:
+    submission_id: int
+    text: str
+    kukai_id: int
+    title: str
+    guild_id: int
+    channel_id: int | None
+    result_message_id: int | None
+    published_number: int | None
+    haigo: str | None
+
+    @property
+    def title_url(self) -> str | None:
+        if self.channel_id is None:
+            return None
+        if self.result_message_id is not None:
+            return (
+                f"https://discord.com/channels/{self.guild_id}/"
+                f"{self.channel_id}/{self.result_message_id}"
+            )
+        return f"https://discord.com/channels/{self.guild_id}/{self.channel_id}"
+
+
+@dataclass(frozen=True)
+class SubmissionResult:
+    submission: Submission
+    over_limit_warning: bool
+    duplicate_warnings: list[DuplicateSubmissionWarning]
+
+    def __iter__(self):
+        yield self.submission
+        yield self.over_limit_warning
+
+
 async def submit(
     session: AsyncSession,
     kukai,
@@ -37,8 +77,8 @@ async def submit(
     text: str,
     *,
     haigo: str | None = None,
-) -> tuple[Submission, bool]:
-    """Register a haiku. Returns (submission, over_limit_warning)."""
+) -> SubmissionResult:
+    """Register a haiku."""
     if KukaiState.from_value(kukai.state) != _SUBMISSION_OPEN:
         raise InvalidStateError("現在投句を受け付けていません。")
 
@@ -61,10 +101,86 @@ async def submit(
             raise ValidationError(f"投句数の上限（{kukai.submission_max}句）に達しています。")
         over_limit = True
 
+    duplicate_warnings = await find_duplicate_submission_warnings(
+        session,
+        user_id=user_id,
+        normalized_text=text,
+    )
     sub = Submission(kukai_id=kukai.id, user_id=user_id, text=text)
     session.add(sub)
     await session.flush()
-    return sub, over_limit
+    return SubmissionResult(
+        submission=sub,
+        over_limit_warning=over_limit,
+        duplicate_warnings=duplicate_warnings,
+    )
+
+
+async def find_duplicate_submission_warnings(
+    session: AsyncSession,
+    *,
+    user_id: int,
+    normalized_text: str,
+    exclude_submission_id: int | None = None,
+) -> list[DuplicateSubmissionWarning]:
+    stmt = (
+        select(Submission)
+        .where(
+            Submission.user_id == user_id,
+            Submission.text == normalized_text,
+            Submission.is_discarded.is_(False),
+        )
+        .options(selectinload(Submission.kukai), selectinload(Submission.published))
+        .order_by(Submission.created_at.desc(), Submission.id.desc())
+    )
+    if exclude_submission_id is not None:
+        stmt = stmt.where(Submission.id != exclude_submission_id)
+    result = await session.execute(stmt)
+    rows = list(result.scalars().all())
+    if not rows:
+        return []
+
+    kukai_ids = {row.kukai_id for row in rows}
+    entries_result = await session.execute(
+        select(Entry).where(Entry.kukai_id.in_(kukai_ids), Entry.user_id == user_id)
+    )
+    participants_result = await session.execute(
+        select(KukaiParticipant).where(
+            KukaiParticipant.kukai_id.in_(kukai_ids),
+            KukaiParticipant.user_id == user_id,
+        )
+    )
+    entries = {row.kukai_id: row for row in entries_result.scalars().all()}
+    participants = {row.kukai_id: row for row in participants_result.scalars().all()}
+
+    warnings: list[DuplicateSubmissionWarning] = []
+    seen_submission_ids: set[int] = set()
+    for row in rows:
+        if row.id in seen_submission_ids:
+            continue
+        seen_submission_ids.add(row.id)
+        kukai: Kukai = row.kukai
+        entry = entries.get(row.kukai_id)
+        participant = participants.get(row.kukai_id)
+        haigo_value = None
+        if entry is not None and entry.haigo:
+            haigo_value = entry.haigo
+        elif participant is not None and participant.haigo:
+            haigo_value = participant.haigo
+        warnings.append(
+            DuplicateSubmissionWarning(
+                submission_id=row.id,
+                text=row.text,
+                kukai_id=kukai.id,
+                title=kukai.title,
+                guild_id=kukai.guild_id,
+                channel_id=kukai.channel_id,
+                result_message_id=kukai.result_message_id,
+                published_number=row.published.number if row.published is not None else None,
+                haigo=haigo_value,
+            )
+        )
+    return warnings
 
 
 async def get_participant_profile(session: AsyncSession, kukai_id: int, user_id: int):

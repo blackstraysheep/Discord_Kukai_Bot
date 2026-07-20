@@ -12,12 +12,20 @@ from bot.services import kukai_service, submission_service
 from bot.services.errors import ServiceError
 from bot.utils.embed_builder import COLOR_INFO, COLOR_WARNING, error_embed
 from bot.utils.submission_markup import discord_safe_submission_text
+from bot.utils.text import normalize
 
 if TYPE_CHECKING:
     from bot.models.submission import Submission
+    from bot.services.submission_service import DuplicateSubmissionWarning
 
 DISCORD_TEXT_INPUT_MAX_LENGTH = 4000
 SUBMISSION_TEXT_MAX_LENGTH = 500
+
+
+@dataclass(frozen=True)
+class DuplicateSubmissionNotice:
+    current_number: int
+    warning: DuplicateSubmissionWarning
 
 
 @dataclass(frozen=True)
@@ -25,6 +33,7 @@ class BulkSubmissionResult:
     accepted: int
     over_limit_count: int
     submissions: list[Submission]
+    duplicate_warnings: list[DuplicateSubmissionNotice]
 
 
 def _submissions_embed(kukai, subs: list[Submission]) -> discord.Embed:
@@ -63,26 +72,49 @@ async def submit_bulk_poems(
 ) -> BulkSubmissionResult:
     accepted = 0
     over_limit_count = 0
+    pending_duplicate_warnings: list[tuple[int, submission_service.DuplicateSubmissionWarning]] = []
     for poem in poems:
-        _, over_limit = await submission_service.submit(session, kukai, user_id, poem, haigo=haigo)
+        result = await submission_service.submit(session, kukai, user_id, poem, haigo=haigo)
         accepted += 1
-        if over_limit:
+        if result.over_limit_warning:
             over_limit_count += 1
+        pending_duplicate_warnings.extend(
+            (result.submission.id, warning) for warning in result.duplicate_warnings
+        )
 
     subs = await submission_service.list_user_submissions(session, kukai.id, user_id)
+    number_by_submission_id = {submission.id: index for index, submission in enumerate(subs, start=1)}
+    duplicate_warnings = [
+        DuplicateSubmissionNotice(
+            current_number=number_by_submission_id.get(submission_id, 0),
+            warning=warning,
+        )
+        for submission_id, warning in pending_duplicate_warnings
+    ]
     return BulkSubmissionResult(
         accepted=accepted,
         over_limit_count=over_limit_count,
         submissions=subs,
+        duplicate_warnings=duplicate_warnings,
     )
 
 
-def build_bulk_submission_embed(kukai, result: BulkSubmissionResult) -> discord.Embed:
+def build_bulk_submission_embed(
+    kukai,
+    result: BulkSubmissionResult,
+    *,
+    guild_names: dict[int, str] | None = None,
+) -> discord.Embed:
     embed = _submissions_embed(kukai, result.submissions)
     embed.description = f"{result.accepted}句を登録しました。\n\n{embed.description or ''}"
     if result.over_limit_count:
         embed.description += (
             f"\n⚠️ {result.over_limit_count}句は上限（{kukai.submission_max}句）超過扱いです。"
+        )
+    if result.duplicate_warnings:
+        embed.description += "\n\n" + _duplicate_warning_text(
+            result.duplicate_warnings,
+            guild_names=guild_names,
         )
     return embed
 
@@ -127,11 +159,18 @@ async def _send_submission_status_message(
     *,
     title: str,
     subs: list[Submission],
+    duplicate_warnings: list[DuplicateSubmissionNotice] | None = None,
 ) -> None:
+    description = _submission_snapshot(subs)
+    if duplicate_warnings:
+        description += "\n\n" + _duplicate_warning_text(
+            duplicate_warnings,
+            guild_names=_guild_names_from_interaction(interaction, duplicate_warnings),
+        )
     await interaction.followup.send(
         embed=discord.Embed(
             title=title,
-            description=_submission_snapshot(subs),
+            description=description,
             color=COLOR_INFO,
         ),
         ephemeral=True,
@@ -148,12 +187,24 @@ async def sync_submission_lines(
     poems: list[str],
     *,
     haigo: str | None = None,
-) -> list[Submission]:
+) -> tuple[list[Submission], list[DuplicateSubmissionNotice]]:
     keep_count = min(len(current_subs), len(poems))
+    duplicate_warnings: list[DuplicateSubmissionNotice] = []
+    pending_duplicate_warnings: list[tuple[int, submission_service.DuplicateSubmissionWarning]] = []
 
     for index in range(keep_count):
         sub = current_subs[index]
         poem = poems[index]
+        edit_warnings = await submission_service.find_duplicate_submission_warnings(
+            session,
+            user_id=user_id,
+            normalized_text=normalize(poem.strip()),
+            exclude_submission_id=sub.id,
+        )
+        duplicate_warnings.extend(
+            DuplicateSubmissionNotice(current_number=index + 1, warning=warning)
+            for warning in edit_warnings
+        )
         if sub.text != poem:
             await submission_service.edit(session, kukai, user_id, sub.id, poem)
 
@@ -163,9 +214,21 @@ async def sync_submission_lines(
     await session.flush()
 
     for poem in poems[keep_count:]:
-        await submission_service.submit(session, kukai, user_id, poem, haigo=haigo)
+        result = await submission_service.submit(session, kukai, user_id, poem, haigo=haigo)
+        pending_duplicate_warnings.extend(
+            (result.submission.id, warning) for warning in result.duplicate_warnings
+        )
 
-    return await submission_service.list_user_submissions(session, kukai.id, user_id)
+    subs = await submission_service.list_user_submissions(session, kukai.id, user_id)
+    number_by_submission_id = {submission.id: index for index, submission in enumerate(subs, start=1)}
+    duplicate_warnings.extend(
+        DuplicateSubmissionNotice(
+            current_number=number_by_submission_id.get(submission_id, 0),
+            warning=warning,
+        )
+        for submission_id, warning in pending_duplicate_warnings
+    )
+    return subs, duplicate_warnings
 
 
 class SubmissionEditAllModal(discord.ui.Modal):
@@ -228,7 +291,7 @@ class SubmissionEditAllModal(discord.ui.Modal):
                     session, kukai.id, interaction.user.id
                 )
                 haigo = self._haigo_input.value.strip() if self._haigo_input is not None else None
-                subs = await sync_submission_lines(
+                subs, duplicate_warnings = await sync_submission_lines(
                     session,
                     kukai,
                     interaction.user.id,
@@ -244,9 +307,53 @@ class SubmissionEditAllModal(discord.ui.Modal):
                 interaction,
                 title="✅ 投句を更新しました",
                 subs=subs,
+                duplicate_warnings=duplicate_warnings,
             )
         except ServiceError as e:
             await interaction.followup.send(embed=error_embed(str(e)), ephemeral=True)
+
+
+def _duplicate_warning_text(
+    warnings: list[DuplicateSubmissionNotice],
+    *,
+    guild_names: dict[int, str] | None = None,
+) -> str:
+    unique: list[DuplicateSubmissionNotice] = []
+    seen: set[tuple[int, int]] = set()
+    for notice in warnings:
+        key = (notice.current_number, notice.warning.submission_id)
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(notice)
+
+    lines = ["⚠️ 以前の参加記録に同じ投句があります。"]
+    for notice in unique[:5]:
+        warning = notice.warning
+        title = f"[{warning.title}]({warning.title_url})" if warning.title_url else warning.title
+        haigo = warning.haigo or "俳号未設定"
+        text = discord_safe_submission_text(warning.text, limit=80)
+        guild_name = (guild_names or {}).get(warning.guild_id, "サーバ不明")
+        lines.append(
+            f"- {notice.current_number}番「{text}」: {title}（俳号: {haigo} / サーバ: {guild_name}）"
+        )
+    if len(unique) > 5:
+        lines.append(f"...他 {len(unique) - 5} 件")
+    return "\n".join(lines)
+
+
+def _guild_names_from_interaction(
+    interaction: discord.Interaction,
+    notices: list[DuplicateSubmissionNotice],
+) -> dict[int, str]:
+    names: dict[int, str] = {}
+    if interaction.guild is not None:
+        names[interaction.guild.id] = interaction.guild.name
+    for notice in notices:
+        guild = interaction.client.get_guild(notice.warning.guild_id)
+        if guild is not None:
+            names[notice.warning.guild_id] = guild.name
+    return names
 
 
 # ── Main view ─────────────────────────────────────────────────────────────

@@ -75,6 +75,43 @@ async def test_submit_normalizes_text(db_session):
 
 
 @pytest.mark.asyncio
+async def test_submit_warns_duplicate_submission_across_kukais(db_session):
+    first = await _make_kukai(db_session, entry_enabled=False)
+    await _advance_to_submission_open(db_session, first)
+    await submission_service.submit(db_session, first, user_id=1, text="春の海", haigo="春風")
+    await kukai_service.proceed(db_session, first)
+    await kukai_service.proceed(db_session, first)
+    published = await submission_service.publish(db_session, first)
+    published_number_by_text = {row.submission.text: row.number for row in published}
+
+    second = await kukai_service.create_kukai(
+        db_session,
+        guild_id=2,
+        created_by=100,
+        channel_id=201,
+        title="別サーバ句会",
+        submission_close_at=_utc(7),
+        selecting_close_at=_utc(14),
+        entry_enabled=False,
+    )
+    await _advance_to_submission_open(db_session, second)
+
+    result = await submission_service.submit(
+        db_session,
+        second,
+        user_id=1,
+        text=" 春の海 ",
+        haigo="青嵐",
+    )
+
+    assert result.duplicate_warnings
+    assert result.duplicate_warnings[0].title == "テスト句会"
+    assert result.duplicate_warnings[0].haigo == "春風"
+    assert result.duplicate_warnings[0].text == "春の海"
+    assert result.duplicate_warnings[0].published_number == published_number_by_text["春の海"]
+
+
+@pytest.mark.asyncio
 async def test_submit_accepts_natsugumo_ruby_markup(db_session):
     kukai = await _make_kukai(db_session, entry_enabled=False)
     await _advance_to_submission_open(db_session, kukai)

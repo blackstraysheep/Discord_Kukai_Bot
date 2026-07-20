@@ -80,11 +80,23 @@ class SubmissionCog(commands.Cog):
                 )
 
             await interaction.followup.send(
-                embed=build_bulk_submission_embed(kukai, result),
+                embed=build_bulk_submission_embed(
+                    kukai,
+                    result,
+                    guild_names=self._guild_names_from_duplicate_warnings(result.duplicate_warnings),
+                ),
                 ephemeral=True,
             )
         except ServiceError as e:
             await interaction.followup.send(embed=error_embed(str(e)), ephemeral=True)
+
+    def _guild_names_from_duplicate_warnings(self, warnings) -> dict[int, str]:
+        names: dict[int, str] = {}
+        for notice in warnings:
+            guild = self.bot.get_guild(notice.warning.guild_id)
+            if guild is not None:
+                names[notice.warning.guild_id] = guild.name
+        return names
 
 
 async def setup(bot: commands.Bot) -> None:
