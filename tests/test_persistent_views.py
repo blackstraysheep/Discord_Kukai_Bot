@@ -14,6 +14,7 @@ from bot.ui.portal_view import (
     PORTAL_CHECK_CUSTOM_ID,
     PORTAL_CREATE_CUSTOM_ID,
     PORTAL_LIST_CUSTOM_ID,
+    PORTAL_RECORD_CUSTOM_ID,
     PortalView,
 )
 from bot.utils.stage_announcement import build_action_button_message
@@ -65,6 +66,7 @@ def test_portal_view_is_persistent_with_stable_custom_ids():
         PORTAL_CREATE_CUSTOM_ID,
         PORTAL_LIST_CUSTOM_ID,
         PORTAL_CHECK_CUSTOM_ID,
+        PORTAL_RECORD_CUSTOM_ID,
     ]
 
 

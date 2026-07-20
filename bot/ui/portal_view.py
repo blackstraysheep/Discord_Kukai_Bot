@@ -5,21 +5,24 @@ from __future__ import annotations
 import discord
 
 from bot.database import get_session
+from bot.models.guild_settings import GuildSettings
 from bot.services import kukai_list_view
 from bot.services import check_service, kukai_service, permission_service, select_rule_service
 from bot.ui.check_view import CheckPagerView
+from bot.ui.participation_record_view import ParticipationRecordOptionsView
 from bot.utils.embed_builder import COLOR_INFO, error_embed
 
 
 PORTAL_CREATE_CUSTOM_ID = "kukai:portal:create"
 PORTAL_LIST_CUSTOM_ID = "kukai:portal:list"
 PORTAL_CHECK_CUSTOM_ID = "kukai:portal:check"
+PORTAL_RECORD_CUSTOM_ID = "kukai:portal:record"
 
 
 def build_portal_embed() -> discord.Embed:
     embed = discord.Embed(
         title="句会案内",
-        description="句会の作成、一覧確認、自分の参加状況確認はこちらから行えます。",
+        description="句会の作成、一覧確認、参加状況・参加記録の確認はこちらから行えます。",
         color=COLOR_INFO,
     )
     return embed
@@ -90,5 +93,34 @@ class PortalView(discord.ui.View):
         await interaction.response.send_message(
             embed=pages[0],
             view=CheckPagerView.for_pages(user_id=interaction.user.id, pages=pages),
+            ephemeral=True,
+        )
+
+    @discord.ui.button(
+        label="参加の記録",
+        style=discord.ButtonStyle.secondary,
+        custom_id=PORTAL_RECORD_CUSTOM_ID,
+    )
+    async def participation_record(
+        self,
+        interaction: discord.Interaction,
+        _: discord.ui.Button,
+    ) -> None:
+        assert interaction.guild is not None
+        async with get_session() as session:
+            settings = await session.get(GuildSettings, interaction.guild.id)
+            allow_other = bool(
+                settings is not None
+                and settings.participation_record_visibility == "guild_public"
+            )
+        view = ParticipationRecordOptionsView(
+            bot=interaction.client,
+            guild=interaction.guild,
+            user=interaction.user,
+            allow_other=allow_other,
+        )
+        await interaction.response.send_message(
+            embed=view.build_embed(),
+            view=view,
             ephemeral=True,
         )

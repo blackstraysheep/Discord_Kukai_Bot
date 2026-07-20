@@ -7,8 +7,18 @@ from sqlalchemy import select
 
 from bot.database import get_session
 from bot.models.notification import NotificationSchedule
-from bot.services import kukai_service, notification_service, permission_service, proceed_service, result_service
+from bot.services import (
+    author_publication_service,
+    kukai_service,
+    notification_service,
+    pdf_delivery_service,
+    pdf_service,
+    permission_service,
+    proceed_service,
+    result_service,
+)
 from bot.services.errors import ServiceError
+from bot.services.pdf_service import PdfError
 from bot.state_machine.states import KukaiState
 from bot.ui.common import ConfirmView
 from bot.utils.channel import effective_channel_id
@@ -47,9 +57,14 @@ class KukaiAdminPanelEntryView(discord.ui.View):
                         )
                         return
                     embed = await build_admin_panel_embed(session, kukai)
+                    view = await build_admin_panel_view(
+                        session,
+                        kukai,
+                        user_id=interaction.user.id,
+                    )
                 await interaction.response.send_message(
                     embed=embed,
-                    view=KukaiAdminPanelView(kukai_id=self.kukai_id, user_id=interaction.user.id),
+                    view=view,
                     ephemeral=True,
                 )
             except ServiceError as error:
@@ -60,10 +75,73 @@ class KukaiAdminPanelEntryView(discord.ui.View):
 
 
 class KukaiAdminPanelView(discord.ui.View):
-    def __init__(self, *, kukai_id: int, user_id: int) -> None:
+    def __init__(
+        self,
+        *,
+        kukai_id: int,
+        user_id: int,
+        state: KukaiState,
+        author_publication_mode: str,
+        author_reveal: bool,
+        has_published_submissions: bool,
+    ) -> None:
         super().__init__(timeout=900)
         self.kukai_id = kukai_id
         self.user_id = user_id
+        self._add_export_buttons(
+            state=state,
+            author_publication_mode=author_publication_mode,
+            author_reveal=author_reveal,
+            has_published_submissions=has_published_submissions,
+        )
+
+    def _add_export_buttons(
+        self,
+        *,
+        state: KukaiState,
+        author_publication_mode: str,
+        author_reveal: bool,
+        has_published_submissions: bool,
+    ) -> None:
+        submission_button = discord.ui.Button(
+            label="投句一覧PDFを送信",
+            style=discord.ButtonStyle.secondary,
+            row=1,
+            disabled=not has_published_submissions,
+        )
+
+        async def submission_callback(interaction: discord.Interaction) -> None:
+            await self._open_pdf_send(interaction, "submission")
+
+        submission_button.callback = submission_callback
+        self.add_item(submission_button)
+
+        result_button = discord.ui.Button(
+            label="結果PDFを送信",
+            style=discord.ButtonStyle.secondary,
+            row=1,
+            disabled=state not in pdf_delivery_service.PUBLIC_RESULT_STATES,
+        )
+
+        async def result_callback(interaction: discord.Interaction) -> None:
+            await self._open_pdf_send(interaction, "result")
+
+        result_button.callback = result_callback
+        self.add_item(result_button)
+
+        if author_publication_mode == "manual":
+            author_button = discord.ui.Button(
+                label="作者公開済み" if author_reveal else "作者を公開",
+                style=discord.ButtonStyle.success,
+                row=1,
+                disabled=author_reveal or state not in pdf_delivery_service.AUTHOR_VISIBLE_STATES,
+            )
+
+            async def author_callback(interaction: discord.Interaction) -> None:
+                await self._confirm_reveal_authors(interaction)
+
+            author_button.callback = author_callback
+            self.add_item(author_button)
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id == self.user_id:
@@ -209,6 +287,88 @@ class KukaiAdminPanelView(discord.ui.View):
         except ServiceError as error:
             await interaction.edit_original_response(embed=error_embed(str(error)))
 
+    async def _open_pdf_send(
+        self,
+        interaction: discord.Interaction,
+        kind: pdf_delivery_service.PdfKind,
+    ) -> None:
+        assert interaction.guild is not None
+        try:
+            async with get_session() as session:
+                kukai = await self._load_authorized(session, interaction)
+                state = KukaiState.from_value(kukai.state)
+                if kind == "submission":
+                    if not await pdf_delivery_service.has_published_submissions(session, kukai.id):
+                        raise ServiceError("投句一覧がまだ公開されていません。")
+                elif state not in pdf_delivery_service.PUBLIC_RESULT_STATES:
+                    raise ServiceError("結果PDFは結果公開後に開催チャンネルへ送信できます。")
+                if not kukai.channel_id:
+                    raise ServiceError("開催チャンネルが未設定です。")
+                can_named = pdf_delivery_service.can_show_author(kukai, True, state=state)
+                channel_id = kukai.channel_id
+                title = kukai.title
+            view = PdfSendConfirmView(
+                kukai_id=self.kukai_id,
+                user_id=self.user_id,
+                kind=kind,
+                can_named=can_named,
+            )
+            kind_label = "投句一覧PDF" if kind == "submission" else "結果PDF"
+            embed = discord.Embed(
+                title=f"{kind_label}を送信",
+                description=(
+                    f"句会「**{title}**」\n"
+                    f"送信先: <#{channel_id}>\n"
+                    "記名状態を選び、送信を確定してください。"
+                ),
+                color=COLOR_INFO,
+            )
+            await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+        except ServiceError as error:
+            await interaction.response.send_message(embed=error_embed(str(error)), ephemeral=True)
+
+    async def _confirm_reveal_authors(self, interaction: discord.Interaction) -> None:
+        assert interaction.guild is not None
+        panel_message = interaction.message
+        view = ConfirmView(timeout=60)
+        await interaction.response.send_message(
+            embed=discord.Embed(
+                title="作者を公開",
+                description="作者名を公開します。この操作は取り消せません。",
+                color=discord.Color.orange(),
+            ),
+            view=view,
+            ephemeral=True,
+        )
+        await view.wait()
+        if not view.confirmed:
+            await interaction.edit_original_response(
+                embed=discord.Embed(description="作者公開をキャンセルしました。", color=COLOR_INFO),
+                view=None,
+            )
+            return
+        try:
+            async with get_session() as session:
+                kukai = await self._load_authorized(session, interaction)
+                if getattr(kukai, "author_publication_mode", "with_result") != "manual":
+                    raise ServiceError("作者公開設定が手動公開ではありません。")
+                if not author_publication_service.reveal_authors(kukai):
+                    raise ServiceError("作者はすでに公開されています。")
+                title = kukai.title
+            await author_publication_service.announce_authors_revealed(interaction.guild, kukai)
+            async with get_session() as session:
+                kukai = await kukai_service.get_kukai(session, self.kukai_id, interaction.guild.id)
+                panel_embed = await build_admin_panel_embed(session, kukai)
+                panel_view = await build_admin_panel_view(session, kukai, user_id=self.user_id)
+            if panel_message is not None:
+                await panel_message.edit(embed=panel_embed, view=panel_view)
+            await interaction.edit_original_response(
+                embed=success_embed(f"句会「{title}」の作者を公開しました。"),
+                view=None,
+            )
+        except ServiceError as error:
+            await interaction.edit_original_response(embed=error_embed(str(error)), view=None)
+
     async def _change_state(self, interaction: discord.Interaction, action: str) -> None:
         assert interaction.guild is not None
         try:
@@ -235,7 +395,8 @@ class KukaiAdminPanelView(discord.ui.View):
             async with get_session() as session:
                 kukai = await self._load_authorized(session, interaction)
                 embed = await build_admin_panel_embed(session, kukai)
-            await interaction.response.edit_message(embed=embed, view=self)
+                view = await build_admin_panel_view(session, kukai, user_id=self.user_id)
+            await interaction.response.edit_message(embed=embed, view=view)
         except ServiceError as error:
             await interaction.response.send_message(embed=error_embed(str(error)), ephemeral=True)
 
@@ -249,6 +410,134 @@ class KukaiAdminPanelView(discord.ui.View):
         ):
             raise ServiceError("この句会の管理者権限がありません。")
         return kukai
+
+
+class PdfSendConfirmView(discord.ui.View):
+    def __init__(
+        self,
+        *,
+        kukai_id: int,
+        user_id: int,
+        kind: pdf_delivery_service.PdfKind,
+        can_named: bool,
+    ) -> None:
+        super().__init__(timeout=120)
+        self.kukai_id = kukai_id
+        self.user_id = user_id
+        self.kind = kind
+        self.show_author = False
+        options = [
+            discord.SelectOption(label="無記名", value="anonymous", default=True),
+        ]
+        if can_named:
+            options.append(discord.SelectOption(label="記名", value="named"))
+        identity_select = discord.ui.Select(
+            placeholder="記名状態",
+            options=options,
+            min_values=1,
+            max_values=1,
+            row=0,
+        )
+
+        async def identity_callback(interaction: discord.Interaction) -> None:
+            self.show_author = identity_select.values[0] == "named"
+            await interaction.response.defer()
+
+        identity_select.callback = identity_callback
+        self.add_item(identity_select)
+
+        send_button = discord.ui.Button(label="開催チャンネルへ送信", style=discord.ButtonStyle.primary, row=1)
+
+        async def send_callback(interaction: discord.Interaction) -> None:
+            await self._send(interaction)
+
+        send_button.callback = send_callback
+        self.add_item(send_button)
+
+        cancel_button = discord.ui.Button(label="キャンセル", style=discord.ButtonStyle.secondary, row=1)
+
+        async def cancel_callback(interaction: discord.Interaction) -> None:
+            self.stop()
+            await interaction.response.edit_message(
+                embed=discord.Embed(description="PDF送信をキャンセルしました。", color=COLOR_INFO),
+                view=None,
+            )
+
+        cancel_button.callback = cancel_callback
+        self.add_item(cancel_button)
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id == self.user_id:
+            return True
+        await interaction.response.send_message(
+            embed=error_embed("この確認画面は開いた本人だけが操作できます。"),
+            ephemeral=True,
+        )
+        return False
+
+    async def _send(self, interaction: discord.Interaction) -> None:
+        assert interaction.guild is not None
+        if not pdf_service.is_available():
+            await interaction.response.send_message(
+                embed=error_embed("この環境ではPDF生成が有効化されていません（LUALATEX_BIN未設定）。"),
+                ephemeral=True,
+            )
+            return
+        await interaction.response.defer(ephemeral=True)
+        try:
+            async with get_session() as session:
+                kukai = await kukai_service.get_kukai(session, self.kukai_id, interaction.guild.id)
+                if not await permission_service.is_kukai_admin(session, kukai, interaction.user):  # type: ignore[arg-type]
+                    raise ServiceError("この句会の管理者権限がありません。")
+                state = KukaiState.from_value(kukai.state)
+                if self.kind == "result" and state not in pdf_delivery_service.PUBLIC_RESULT_STATES:
+                    raise ServiceError("結果PDFは結果公開後に開催チャンネルへ送信できます。")
+                if not kukai.channel_id:
+                    raise ServiceError("開催チャンネルが未設定です。")
+                pdf_bytes, filename = await pdf_delivery_service.build_pdf(
+                    session,
+                    kukai,
+                    interaction.guild,
+                    kind=self.kind,
+                    show_author=self.show_author,
+                )
+                channel_id = kukai.channel_id
+                title = kukai.title
+            channel = interaction.guild.get_channel(channel_id)
+            if channel is None or not hasattr(channel, "send"):
+                raise ServiceError("開催チャンネルが見つかりません。")
+            await pdf_delivery_service.send_pdf_to_channel(
+                channel,
+                pdf_bytes=pdf_bytes,
+                filename=filename,
+                kukai_id=self.kukai_id,
+            )
+            self.stop()
+            await interaction.edit_original_response(
+                embed=success_embed(f"句会「{title}」のPDFを開催チャンネルへ送信しました。"),
+                view=None,
+            )
+        except (PdfError, ServiceError) as error:
+            await interaction.edit_original_response(embed=error_embed(str(error)), view=None)
+        except discord.HTTPException:
+            await interaction.edit_original_response(
+                embed=error_embed("開催チャンネルへのPDF送信に失敗しました。"),
+                view=None,
+            )
+
+
+async def build_admin_panel_view(session, kukai, *, user_id: int) -> KukaiAdminPanelView:
+    return KukaiAdminPanelView(
+        kukai_id=kukai.id,
+        user_id=user_id,
+        state=KukaiState.from_value(kukai.state),
+        author_publication_mode=getattr(kukai, "author_publication_mode", "with_result"),
+        author_reveal=bool(getattr(kukai, "author_reveal", False)),
+        has_published_submissions=await pdf_delivery_service.has_published_submissions(
+            session,
+            kukai.id,
+        ),
+    )
 
 
 async def build_admin_panel_embed(session, kukai) -> discord.Embed:
