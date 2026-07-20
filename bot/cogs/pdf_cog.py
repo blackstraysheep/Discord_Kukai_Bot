@@ -128,6 +128,7 @@ class PdfCog(commands.Cog):
                     )
                     return
 
+                state = KukaiState.from_value(kukai.state)
                 author_request_error = _show_author_request_error(
                     kukai,
                     show_author,
@@ -230,7 +231,6 @@ class PdfCog(commands.Cog):
                         ephemeral=True,
                     )
                     return
-                state = KukaiState.from_value(kukai.state)
                 author_request_error = _show_author_request_error(
                     kukai,
                     show_author,
