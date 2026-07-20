@@ -34,9 +34,18 @@ def _can_show_pdf_author(kukai, requested: bool, *, state: KukaiState | None = N
     return True
 
 
-def _show_author_request_error(kukai, requested: bool) -> str | None:
-    if requested and not bool(getattr(kukai, "author_reveal", False)):
+def _show_author_request_error(
+    kukai,
+    requested: bool,
+    *,
+    state: KukaiState | None = None,
+) -> str | None:
+    if not requested:
+        return None
+    if not bool(getattr(kukai, "author_reveal", False)):
         return "この句会は作者非公開に設定されているため、show_author:true は指定できません。"
+    if state is not None and state not in _AUTHOR_VISIBLE_STATES:
+        return "結果公開前は作者名を表示できないため、show_author:true は指定できません。"
     return None
 
 
@@ -119,7 +128,12 @@ class PdfCog(commands.Cog):
                     )
                     return
 
-                author_request_error = _show_author_request_error(kukai, show_author)
+                state = KukaiState.from_value(kukai.state)
+                author_request_error = _show_author_request_error(
+                    kukai,
+                    show_author,
+                    state=state,
+                )
                 if author_request_error:
                     await interaction.followup.send(
                         embed=error_embed(author_request_error),
@@ -217,7 +231,11 @@ class PdfCog(commands.Cog):
                         ephemeral=True,
                     )
                     return
-                author_request_error = _show_author_request_error(kukai, show_author)
+                author_request_error = _show_author_request_error(
+                    kukai,
+                    show_author,
+                    state=state,
+                )
                 if author_request_error:
                     await interaction.followup.send(
                         embed=error_embed(author_request_error),
