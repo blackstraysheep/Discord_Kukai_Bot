@@ -37,7 +37,7 @@ class RecordCog(commands.Cog):
         scope="表示範囲",
         group_by="表示軸",
         haigo="俳号の完全一致フィルタ",
-        limit="Discord上の要約件数",
+        limit="Discord上の表示希望件数（省略時は全件）",
     )
     async def record_me(
         self,
@@ -45,7 +45,7 @@ class RecordCog(commands.Cog):
         scope: RecordScopeOption = "current",
         group_by: RecordGroupOption = "kukai",
         haigo: str | None = None,
-        limit: app_commands.Range[int, 1, 25] = 5,
+        limit: app_commands.Range[int, 1] | None = None,
     ) -> None:
         assert interaction.guild is not None
         await interaction.response.defer(ephemeral=True)
@@ -66,7 +66,7 @@ class RecordCog(commands.Cog):
         user="対象ユーザー",
         group_by="表示軸",
         haigo="俳号の完全一致フィルタ",
-        limit="Discord上の要約件数",
+        limit="Discord上の表示希望件数（省略時は全件）",
     )
     async def record_user(
         self,
@@ -74,7 +74,7 @@ class RecordCog(commands.Cog):
         user: discord.Member,
         group_by: OtherRecordGroupOption = "kukai",
         haigo: str | None = None,
-        limit: app_commands.Range[int, 1, 25] = 5,
+        limit: app_commands.Range[int, 1] | None = None,
     ) -> None:
         assert interaction.guild is not None
         await interaction.response.defer(ephemeral=True)
@@ -104,39 +104,16 @@ class RecordCog(commands.Cog):
         scope: RecordScopeOption,
         group_by: RecordGroupOption,
         haigo: str | None,
-        limit: int,
+        limit: int | None,
     ) -> None:
-        assert interaction.guild is not None
-        if group_by == "server" and scope == "current":
-            # This is valid but redundant. Keep it allowed to avoid surprising option errors.
-            pass
-
-        target_display_name = getattr(target, "display_name", target.name)
-        async with get_session() as session:
-            result = await get_participation_records(
-                session,
-                current_guild_id=interaction.guild.id,
-                target_user_id=target.id,
-                target_display_name=target_display_name,
-                viewer_user_id=interaction.user.id,
-                scope=scope,
-                group_by=group_by,
-                haigo=haigo.strip() if haigo and haigo.strip() else None,
-            )
-
-        guild_names = self._guild_names(result.records, current_guild=interaction.guild)
-        filename = _record_filename(target.id)
-        markdown = build_participation_record_markdown(result, guild_names=guild_names)
-        embed = build_participation_record_summary_embed(
-            result,
-            guild_names=guild_names,
+        await send_participation_record(
+            interaction,
+            bot=self.bot,
+            target=target,
+            scope=scope,
+            group_by=group_by,
+            haigo=haigo,
             limit=limit,
-            filename=filename,
-        )
-        await interaction.followup.send(
-            embed=embed,
-            file=_markdown_file(filename, markdown),
-            ephemeral=True,
         )
 
     def _guild_names(
@@ -161,6 +138,51 @@ def _record_filename(user_id: int) -> str:
 def _markdown_file(filename: str, markdown: str) -> discord.File:
     data = BytesIO(markdown.encode("utf-8"))
     return discord.File(data, filename=filename)
+
+
+async def send_participation_record(
+    interaction: discord.Interaction,
+    *,
+    bot: commands.Bot | discord.Client,
+    target: discord.abc.User,
+    scope: RecordScopeOption,
+    group_by: RecordGroupOption,
+    haigo: str | None,
+    limit: int | None,
+) -> None:
+    """Send the shared `/record` response to an interaction followup."""
+    assert interaction.guild is not None
+    target_display_name = getattr(target, "display_name", target.name)
+    async with get_session() as session:
+        result = await get_participation_records(
+            session,
+            current_guild_id=interaction.guild.id,
+            target_user_id=target.id,
+            target_display_name=target_display_name,
+            viewer_user_id=interaction.user.id,
+            scope=scope,
+            group_by=group_by,
+            haigo=haigo.strip() if haigo and haigo.strip() else None,
+        )
+
+    guild_names: dict[int, str] = {interaction.guild.id: interaction.guild.name}
+    for record in result.records:
+        guild = bot.get_guild(record.guild_id)
+        if guild is not None:
+            guild_names[record.guild_id] = guild.name
+    filename = _record_filename(target.id)
+    markdown = build_participation_record_markdown(result, guild_names=guild_names)
+    embed = build_participation_record_summary_embed(
+        result,
+        guild_names=guild_names,
+        limit=limit,
+        filename=filename,
+    )
+    await interaction.followup.send(
+        embed=embed,
+        file=_markdown_file(filename, markdown),
+        ephemeral=True,
+    )
 
 
 async def setup(bot: commands.Bot) -> None:

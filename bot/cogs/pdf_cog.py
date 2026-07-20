@@ -9,29 +9,25 @@ from discord import app_commands
 from discord.ext import commands
 
 from bot.database import get_session
-from bot.services import kukai_service, pdf_service, permission_service
+from bot.services import kukai_service, pdf_delivery_service, pdf_service, permission_service
 from bot.services.errors import ServiceError
 from bot.services.pdf_service import PdfError
 from bot.state_machine.states import KukaiState
 from bot.utils.embed_builder import error_embed
 
-_DISCORD_MAX_BYTES = 25 * 1024 * 1024
+_DISCORD_MAX_BYTES = pdf_delivery_service.DISCORD_MAX_BYTES
 
 # 結果公開後のみ作者名を出せる
-_AUTHOR_VISIBLE_STATES = {KukaiState.RESULTS, KukaiState.ENDED}
-_PUBLIC_RESULT_STATES = {KukaiState.RESULTS, KukaiState.ENDED}
+_AUTHOR_VISIBLE_STATES = pdf_delivery_service.AUTHOR_VISIBLE_STATES
+_PUBLIC_RESULT_STATES = pdf_delivery_service.PUBLIC_RESULT_STATES
 
 
 def _result_pdf_requires_admin(state: KukaiState) -> bool:
-    return state not in _PUBLIC_RESULT_STATES
+    return pdf_delivery_service.result_pdf_requires_admin(state)
 
 
 def _can_show_pdf_author(kukai, requested: bool, *, state: KukaiState | None = None) -> bool:
-    if not requested or not bool(getattr(kukai, "author_reveal", False)):
-        return False
-    if state is not None and state not in _AUTHOR_VISIBLE_STATES:
-        return False
-    return True
+    return pdf_delivery_service.can_show_author(kukai, requested, state=state)
 
 
 def _show_author_request_error(
@@ -40,13 +36,7 @@ def _show_author_request_error(
     *,
     state: KukaiState | None = None,
 ) -> str | None:
-    if not requested:
-        return None
-    if not bool(getattr(kukai, "author_reveal", False)):
-        return "この句会は作者非公開に設定されているため、show_author:true は指定できません。"
-    if state is not None and state not in _AUTHOR_VISIBLE_STATES:
-        return "結果公開前は作者名を表示できないため、show_author:true は指定できません。"
-    return None
+    return pdf_delivery_service.show_author_request_error(kukai, requested, state=state)
 
 
 def _can_show_result_author(
@@ -147,10 +137,11 @@ class PdfCog(commands.Cog):
                     state=KukaiState.from_value(kukai.state),
                 )
 
-                pdf_bytes = await pdf_service.build_submission_pdf(
+                pdf_bytes, filename = await pdf_delivery_service.build_pdf(
                     session,
                     kukai,
                     interaction.guild,
+                    kind="submission",
                     show_author=show_author,
                     theme=theme,
                 )
@@ -163,11 +154,10 @@ class PdfCog(commands.Cog):
             await interaction.followup.send(embed=error_embed(str(e)), ephemeral=True)
             return
 
-        label = "named" if show_author else "anonymous"
         await _send_pdf(
             interaction,
             pdf_bytes,
-            filename=f"submission_{kid}_{label}.pdf",
+            filename=filename,
             kukai_id=kid,
             ephemeral=not public,
         )
@@ -244,10 +234,11 @@ class PdfCog(commands.Cog):
                     return
                 show_author = _can_show_result_author(kukai, show_author, state=state)
 
-                pdf_bytes = await pdf_service.build_result_pdf(
+                pdf_bytes, filename = await pdf_delivery_service.build_pdf(
                     session,
                     kukai,
                     interaction.guild,
+                    kind="result",
                     show_author=show_author,
                     show_reviewer=show_reviewer,
                     theme=theme,
@@ -261,11 +252,10 @@ class PdfCog(commands.Cog):
             await interaction.followup.send(embed=error_embed(str(e)), ephemeral=True)
             return
 
-        label = "named" if show_author else "anonymous"
         await _send_pdf(
             interaction,
             pdf_bytes,
-            filename=f"result_{kid}_{label}.pdf",
+            filename=filename,
             kukai_id=kid,
             ephemeral=not public,
         )

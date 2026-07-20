@@ -12,6 +12,7 @@ from discord.ext import commands
 from bot.database import get_session
 from bot.repositories import participant_repo, select_repo
 from bot.services import (
+    author_publication_service,
     admin_notice_service,
     kukai_list_view,
     kukai_service,
@@ -917,29 +918,14 @@ class KukaiCog(commands.Cog):
                     )
                     return
 
-                state = KukaiState.from_value(kukai.state)
-                if state not in {KukaiState.RESULTS, KukaiState.ENDED}:
-                    await interaction.edit_original_response(
-                        embed=error_embed("作者公開は結果公開後に実行できます。")
-                    )
-                    return
-
-                mode = getattr(kukai, "author_publication_mode", "with_result")
-                if mode == "never":
-                    await interaction.edit_original_response(
-                        embed=error_embed("この句会は「作者公開はしない」に設定されています。")
-                    )
-                    return
-
-                if kukai.author_reveal:
-                    await interaction.edit_original_response(
-                        embed=success_embed("作者はすでに公開されています。")
-                    )
-                    return
-
-                kukai.author_reveal = True
+                revealed = author_publication_service.reveal_authors(kukai)
                 kukai_title = kukai.title
-                await self._announce_authors_revealed(interaction.guild, kukai)
+            if not revealed:
+                await interaction.edit_original_response(
+                    embed=success_embed("作者はすでに公開されています。")
+                )
+                return
+            await author_publication_service.announce_authors_revealed(interaction.guild, kukai)
 
             await interaction.edit_original_response(
                 embed=success_embed(f"句会「{kukai_title}」の作者を公開しました。")
@@ -1059,20 +1045,7 @@ class KukaiCog(commands.Cog):
         await send_stage_announcement(guild, kukai, state)
 
     async def _announce_authors_revealed(self, guild: discord.Guild, kukai) -> None:
-        if not kukai.channel_id:
-            return
-        channel = guild.get_channel(kukai.channel_id)
-        if not isinstance(channel, discord.TextChannel):
-            return
-        embed = discord.Embed(
-            description=f"句会「**{kukai.title}**」の作者を公開しました。",
-            color=COLOR_INFO,
-        )
-        embed.set_footer(text=f"句会ID: {kukai.id}")
-        try:
-            await send_with_retry(lambda: channel.send(embed=embed))
-        except Exception:
-            logger.exception("Failed to announce author reveal")
+        await author_publication_service.announce_authors_revealed(guild, kukai)
 
     async def _announce_settings_updated(
         self,
